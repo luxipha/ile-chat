@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Text, Button, Card, Modal, Input } from '@ui-kitten/components';
 import { StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import crossmintService from '../services/crossmintService';
 
 interface WalletConnectProps {
   onConnect?: (address: string) => void;
@@ -14,52 +15,89 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
   const [walletAddress, setWalletAddress] = useState<string>('');
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [email, setEmail] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [walletData, setWalletData] = useState<any>(null);
+
+  useEffect(() => {
+    checkWalletConnection();
+  }, []);
+
+  const checkWalletConnection = async () => {
+    try {
+      const connected = await crossmintService.isWalletConnected();
+      if (connected) {
+        const data = await crossmintService.getLocalWalletData();
+        if (data) {
+          setIsConnected(true);
+          setWalletData(data);
+          // Get primary chain address for display
+          const primaryChain = data.chains?.find((c: any) => c.isActive) || data.chains?.[0];
+          if (primaryChain) {
+            setWalletAddress(primaryChain.address);
+            onConnect?.(primaryChain.address);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Check wallet connection error:', error);
+    }
+  };
 
   const handleConnect = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Please enter your email');
-      return;
-    }
-
+    setIsLoading(true);
+    
     try {
-      // For now, we'll simulate wallet connection
-      // In a real implementation, this would integrate with Crossmint SDK
-      const mockAddress = `0x${Math.random().toString(16).substr(2, 40)}`;
+      // Connect via CrossMint service (backend handles the actual CrossMint integration)
+      const result = await crossmintService.connectWallet();
       
-      await AsyncStorage.setItem('walletAddress', mockAddress);
-      await AsyncStorage.setItem('userEmail', email);
-      
-      setWalletAddress(mockAddress);
-      setIsConnected(true);
-      setShowConnectModal(false);
-      
-      onConnect?.(mockAddress);
-      
-      Alert.alert('Success', 'Wallet connected successfully!');
+      if (result.success && result.wallet) {
+        setIsConnected(true);
+        setWalletData(result.wallet);
+        setShowConnectModal(false);
+        setEmail('');
+        
+        // Get primary chain address for display
+        const primaryChain = result.wallet.chains?.find((c: any) => c.isActive) || result.wallet.chains?.[0];
+        if (primaryChain) {
+          setWalletAddress(primaryChain.address);
+          onConnect?.(primaryChain.address);
+        }
+        
+        Alert.alert('Success', 'Wallet connected successfully!');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to connect wallet');
+      }
     } catch (error) {
+      console.error('Connection error:', error);
       Alert.alert('Error', 'Failed to connect wallet');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleDisconnect = async () => {
     try {
-      await AsyncStorage.removeItem('walletAddress');
-      await AsyncStorage.removeItem('userEmail');
+      const result = await crossmintService.disconnectWallet();
       
-      setWalletAddress('');
-      setIsConnected(false);
-      
-      onDisconnect?.();
-      
-      Alert.alert('Success', 'Wallet disconnected');
+      if (result.success) {
+        setWalletAddress('');
+        setIsConnected(false);
+        setWalletData(null);
+        
+        onDisconnect?.();
+        
+        Alert.alert('Success', 'Wallet disconnected');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to disconnect wallet');
+      }
     } catch (error) {
+      console.error('Disconnect error:', error);
       Alert.alert('Error', 'Failed to disconnect wallet');
     }
   };
 
   const formatAddress = (address: string) => {
-    if (!address) return '';
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    return crossmintService.formatAddress(address);
   };
 
   if (isConnected) {
@@ -91,55 +129,18 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
         <MaterialIcons name="account-balance-wallet" size={48} color="#8F9BB3" />
         <Text category='h6' style={styles.connectTitle}>Connect Your Wallet</Text>
         <Text category='s1' appearance='hint' style={styles.connectDescription}>
-          Connect your wallet to start investing in real estate
+          Connect your CrossMint wallet to start investing in real estate
         </Text>
         <Button 
           style={styles.connectButton}
           accessoryLeft={() => <MaterialIcons name="link" size={20} color="white" />}
-          onPress={() => setShowConnectModal(true)}
+          onPress={handleConnect}
+          disabled={isLoading}
         >
-          Connect Wallet
+          {isLoading ? 'Connecting...' : 'Connect Wallet'}
         </Button>
       </Card>
 
-      <Modal
-        visible={showConnectModal}
-        backdropStyle={styles.backdrop}
-        onBackdropPress={() => setShowConnectModal(false)}
-      >
-        <Card disabled={true} style={styles.modal}>
-          <Text category='h6' style={styles.modalTitle}>Connect Wallet</Text>
-          <Text category='s1' appearance='hint' style={styles.modalDescription}>
-            Enter your email to create or connect your wallet
-          </Text>
-          
-          <Input
-            placeholder='Enter your email'
-            value={email}
-            onChangeText={setEmail}
-            style={styles.emailInput}
-            keyboardType='email-address'
-            autoCapitalize='none'
-          />
-          
-          <Layout style={styles.modalActions}>
-            <Button 
-              size='small' 
-              appearance='ghost'
-              onPress={() => setShowConnectModal(false)}
-            >
-              Cancel
-            </Button>
-            <Button 
-              size='small'
-              onPress={handleConnect}
-              disabled={!email}
-            >
-              Connect
-            </Button>
-          </Layout>
-        </Card>
-      </Modal>
     </>
   );
 };

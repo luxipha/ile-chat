@@ -7,6 +7,8 @@ import {
   TextInput,
   FlatList,
   Image,
+  Alert,
+  Modal,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
@@ -160,6 +162,26 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     sortBy: 'best_rate',
     onlineOnly: true,
   });
+  const [showEligibilityModal, setShowEligibilityModal] = useState(false);
+
+  // Mock user data - this would come from user context/store in real app
+  const mockUser = {
+    balance: 800, // Less than $1000 to show eligibility gate
+    isMerchant: false,
+  };
+
+  const checkUserEligibility = () => {
+    // Check if user has at least $1000 balance for merchant eligibility
+    return mockUser.balance >= 1000;
+  };
+
+  const handleCreateOffer = () => {
+    if (!checkUserEligibility()) {
+      setShowEligibilityModal(true);
+      return;
+    }
+    onCreateOffer();
+  };
 
   const filteredOffers = useMemo(() => {
     let offers = MOCK_OFFERS.filter(offer => {
@@ -419,7 +441,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
       </Typography>
       <Button
         title="Create Offer"
-        onPress={onCreateOffer}
+        onPress={handleCreateOffer}
         style={styles.createOfferButton}
         variant="outline"
       />
@@ -441,7 +463,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
             {filteredOffers.length} offers available
           </Typography>
         </View>
-        <TouchableOpacity style={styles.createButton} onPress={onCreateOffer}>
+        <TouchableOpacity style={styles.createButton} onPress={handleCreateOffer}>
           <MaterialIcons name="add" size={24} color={Colors.background} />
         </TouchableOpacity>
       </View>
@@ -496,6 +518,79 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Eligibility Modal */}
+      <Modal visible={showEligibilityModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <MaterialIcons name="account-balance-wallet" size={48} color={Colors.primary} />
+              <Typography variant="h5" style={styles.modalTitle}>
+                Merchant Requirements
+              </Typography>
+            </View>
+            
+            <View style={styles.modalBody}>
+              <Typography variant="body1" style={styles.modalText}>
+                To create FX offers, you need to become a merchant. Here are the requirements:
+              </Typography>
+              
+              <View style={styles.requirementsList}>
+                <View style={styles.requirementItem}>
+                  <MaterialIcons 
+                    name={mockUser.balance >= 1000 ? "check-circle" : "cancel"} 
+                    size={20} 
+                    color={mockUser.balance >= 1000 ? Colors.success : Colors.error} 
+                  />
+                  <Typography variant="body2" style={styles.requirementText}>
+                    Minimum wallet balance: $1,000
+                  </Typography>
+                </View>
+                <Typography variant="caption" color="textSecondary" style={styles.balanceInfo}>
+                  Your current balance: ${mockUser.balance.toLocaleString()}
+                </Typography>
+                
+                <View style={styles.requirementItem}>
+                  <MaterialIcons name="verified-user" size={20} color={Colors.info} />
+                  <Typography variant="body2" style={styles.requirementText}>
+                    Complete merchant application
+                  </Typography>
+                </View>
+                
+                <View style={styles.requirementItem}>
+                  <MaterialIcons name="account-balance" size={20} color={Colors.info} />
+                  <Typography variant="body2" style={styles.requirementText}>
+                    Provide bank account details
+                  </Typography>
+                </View>
+              </View>
+              
+              <Typography variant="body2" color="textSecondary" style={styles.modalSubtext}>
+                Once approved, you can create unlimited FX offers and earn from trading fees.
+              </Typography>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <Button
+                title="Add Funds"
+                onPress={() => {
+                  setShowEligibilityModal(false);
+                  // TODO: Navigate to add funds screen
+                  Alert.alert('Add Funds', 'This would navigate to the add funds screen');
+                }}
+                style={styles.modalPrimaryButton}
+                disabled={mockUser.balance >= 1000}
+              />
+              <Button
+                title="Close"
+                onPress={() => setShowEligibilityModal(false)}
+                style={styles.modalSecondaryButton}
+                variant="outline"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -752,5 +847,65 @@ const styles = StyleSheet.create({
   },
   createOfferButton: {
     paddingHorizontal: Spacing.xl,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  modalTitle: {
+    marginTop: Spacing.md,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  modalBody: {
+    marginBottom: Spacing.lg,
+  },
+  modalText: {
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+  },
+  requirementsList: {
+    marginBottom: Spacing.lg,
+  },
+  requirementItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  requirementText: {
+    marginLeft: Spacing.md,
+    flex: 1,
+  },
+  balanceInfo: {
+    marginLeft: Spacing.xl + 8,
+    marginBottom: Spacing.md,
+  },
+  modalSubtext: {
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalButtons: {
+    gap: Spacing.md,
+  },
+  modalPrimaryButton: {
+    width: '100%',
+  },
+  modalSecondaryButton: {
+    width: '100%',
   },
 });

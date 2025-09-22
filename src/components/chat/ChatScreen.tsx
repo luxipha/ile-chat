@@ -8,7 +8,6 @@ import {
   Keyboard,
   TouchableOpacity
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MessageBubble, Message } from './MessageBubble';
 import { ChatHeader } from './ChatHeader';
@@ -382,7 +381,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <KeyboardAvoidingView 
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -449,7 +448,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         recipientName={selectedUser?.name || chatName}
         onSendComplete={handleSendComplete}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 

@@ -208,7 +208,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
       )}
 
       <Button
-        title={`Start Trade (${offer.paymentWindow} min window)`}
+        title="Start Trade (30 min window)"
         onPress={handleStartTrade}
         disabled={!tradeAmount || !isValidAmount()}
         style={styles.startTradeButton}
@@ -263,7 +263,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         <View style={styles.infoGrid}>
           <View style={styles.infoItem}>
             <Typography variant="caption" color="textSecondary">Payment Window</Typography>
-            <Typography variant="body2">{offer.paymentWindow} minutes</Typography>
+            <Typography variant="body2">30 minutes</Typography>
           </View>
           <View style={styles.infoItem}>
             <Typography variant="caption" color="textSecondary">KYC Required</Typography>
@@ -296,13 +296,13 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
           <View style={styles.termItem}>
             <MaterialIcons name="access-time" size={16} color={Colors.textSecondary} />
             <Typography variant="body2" style={styles.termText}>
-              Payment must be completed within {offer.paymentWindow} minutes of trade start
+              Payment must be completed within 30 minutes of trade start
             </Typography>
           </View>
           <View style={styles.termItem}>
-            <MaterialIcons name="security" size={16} color={Colors.textSecondary} />
+            <MaterialIcons name="warning" size={16} color={Colors.warning} />
             <Typography variant="body2" style={styles.termText}>
-              Funds will be held in escrow until payment is confirmed
+              No escrow service - this is a peer-to-peer transaction
             </Typography>
           </View>
           <View style={styles.termItem}>
@@ -364,11 +364,20 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
               }]} />
             </View>
             <View style={styles.traderInfo}>
-              <Typography variant="h5" style={styles.traderName}>
-                {offer.maker.name}
-              </Typography>
-              <View style={styles.badgeContainer}>
-                {renderTrustBadge(offer.maker.trustBadge)}
+              <View style={styles.nameAndBadges}>
+                <Typography variant="h5" style={styles.traderName}>
+                  {offer.maker.name}
+                </Typography>
+                <View style={styles.badgeContainer}>
+                  {renderTrustBadge(offer.maker.trustBadge)}
+                  {/* Show merchant badge if user is a merchant */}
+                  <View style={styles.merchantBadge}>
+                    <MaterialIcons name="store" size={16} color={Colors.primary} />
+                    <Typography variant="caption" style={styles.merchantBadgeText}>
+                      Merchant
+                    </Typography>
+                  </View>
+                </View>
               </View>
               <Typography variant="caption" color="textSecondary">
                 {offer.maker.onlineStatus === 'online' ? 'Online now' : 
@@ -380,27 +389,36 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
       </Card>
 
       <Card style={styles.sectionCard}>
-        <Typography variant="h6" style={styles.sectionTitle}>Trading Statistics</Typography>
+        <Typography variant="h6" style={styles.sectionTitle}>Merchant Information</Typography>
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
             <Typography variant="h4" color="primary">
-              {offer.maker.trustScore}%
-            </Typography>
-            <Typography variant="caption" color="textSecondary">Trust Score</Typography>
-          </View>
-          <View style={styles.statItem}>
-            <Typography variant="h4" color="secondary">
-              {offer.maker.completedTrades}
+              {offer.maker.completedTrades || 0}
             </Typography>
             <Typography variant="caption" color="textSecondary">Completed Trades</Typography>
           </View>
           <View style={styles.statItem}>
-            <Typography variant="h4" color="success">
-              {offer.maker.responseTime}
+            <Typography variant="h4" color="secondary">
+              {offer.maker.responseTime || 'New'}
             </Typography>
             <Typography variant="caption" color="textSecondary">Response Time</Typography>
           </View>
+          <View style={styles.statItem}>
+            <Typography variant="h4" color="success">
+              {offer.maker.joinDate || 'New'}
+            </Typography>
+            <Typography variant="caption" color="textSecondary">Member Since</Typography>
+          </View>
         </View>
+        
+        {(offer.maker.completedTrades === 0 || !offer.maker.completedTrades) && (
+          <View style={styles.newMerchantBanner}>
+            <MaterialIcons name="new-releases" size={20} color={Colors.info} />
+            <Typography variant="body2" style={styles.newMerchantText}>
+              New merchant - Trade with caution and verify payment details carefully
+            </Typography>
+          </View>
+        )}
       </Card>
     </View>
   );
@@ -679,8 +697,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: Spacing.sm,
   },
-  badgeContainer: {
+  nameAndBadges: {
     marginBottom: Spacing.sm,
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   trustBadge: {
     flexDirection: 'row',
@@ -694,11 +717,40 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
     fontWeight: '600',
   },
+  merchantBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.primary + '20',
+    borderRadius: BorderRadius.md,
+    alignSelf: 'flex-start',
+  },
+  merchantBadgeText: {
+    marginLeft: Spacing.xs,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
   statsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   statItem: {
     alignItems: 'center',
+  },
+  newMerchantBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.info + '10',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.md,
+  },
+  newMerchantText: {
+    marginLeft: Spacing.sm,
+    flex: 1,
+    color: Colors.info,
+    fontWeight: '500',
   },
 });

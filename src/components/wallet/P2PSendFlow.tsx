@@ -14,6 +14,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { RecipientPicker } from './RecipientPicker';
+import crossmintService from '../../services/crossmintService';
 
 interface Contact {
   id: string;
@@ -173,13 +174,58 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
     setLoading(true);
     setStep('processing');
     
-    // Simulate transaction processing
-    setTimeout(() => {
+    try {
+      // Get chain based on token
+      const chain = getChainForToken(selectedToken.symbol);
+      
+      // Send payment via CrossMint
+      const result = await crossmintService.sendPayment(
+        selectedRecipient.id, // Use contact ID if available
+        selectedRecipient.address, // Use wallet address if available
+        amount,
+        selectedToken.symbol.toLowerCase(),
+        chain,
+        memo
+      );
+
+      if (result.success) {
+        setLoading(false);
+        onSendComplete(parseFloat(amount), selectedToken, selectedRecipient);
+        handleClose();
+        Alert.alert(
+          'Success', 
+          `Sent ${amount} ${selectedToken.symbol} to ${selectedRecipient.name}`,
+          [{ text: 'OK', onPress: () => {} }]
+        );
+      } else {
+        throw new Error(result.error || 'Transaction failed');
+      }
+    } catch (error) {
+      console.error('Send transaction error:', error);
       setLoading(false);
-      onSendComplete(parseFloat(amount), selectedToken, selectedRecipient);
-      handleClose();
-      Alert.alert('Success', `Sent ${amount} ${selectedToken.symbol} to ${selectedRecipient.name}`);
-    }, 3000);
+      setStep('review'); // Go back to review step
+      Alert.alert(
+        'Transaction Failed', 
+        error instanceof Error ? error.message : 'Failed to send payment. Please try again.',
+        [{ text: 'OK', onPress: () => {} }]
+      );
+    }
+  };
+
+  // Helper function to map token to blockchain
+  const getChainForToken = (tokenSymbol: string): string => {
+    switch (tokenSymbol.toUpperCase()) {
+      case 'BTC':
+        return 'bitcoin';
+      case 'ETH':
+      case 'USDC':
+      case 'USDT':
+        return 'ethereum';
+      case 'SOL':
+        return 'solana';
+      default:
+        return 'ethereum'; // Default to ethereum
+    }
   };
 
   const renderRecipientStep = () => (

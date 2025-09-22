@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Button } from './src/components/ui/Button';
@@ -32,24 +32,78 @@ import { QRCodeScreen } from './src/components/profile/QRCodeScreen';
 import { DepositFlow } from './src/components/wallet/DepositFlow';
 import { CreateGroupModal } from './src/components/chat/CreateGroupModal';
 import { LoginScreen } from './src/components/auth/LoginScreen';
+import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView';
+import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
+import { QRScannerModal } from './src/components/scanner/QRScannerModal';
+import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
+import { LoadingOverlay } from './src/components/ui/LoadingOverlay';
+import { SkeletonContactItem, SkeletonCard } from './src/components/ui/SkeletonLoader';
+import { ErrorBoundary } from './src/components/ui/ErrorBoundary';
+import { ErrorMessage, NetworkError, ValidationError, PaymentError } from './src/components/ui/ErrorMessage';
+import { ErrorScreen, NoInternetScreen, ServerErrorScreen } from './src/components/ui/ErrorScreen';
+import { EmptyState, EmptyContacts, EmptyMoments, EmptyChat, EmptyWallet, EmptyProperties, EmptyTransactions, EmptySearch } from './src/components/ui/EmptyState';
+import { ProfileEditScreen } from './src/components/profile/ProfileEditScreen';
+import { NotificationScreen } from './src/components/notifications/NotificationScreen';
+import { NotificationSettingsScreen } from './src/components/notifications/NotificationSettingsScreen';
+import { InAppNotification } from './src/components/notifications/InAppNotification';
+import { NotificationProvider, useNotifications } from './src/contexts/NotificationContext';
+import authService, { User } from './src/services/authService';
+import { communityService, CommunityPost } from './src/services/communityService';
+import profileService from './src/services/profileService';
+import chatService from './src/services/chatService';
+// import { signInWithCustomFirebaseToken } from './src/services/firebaseConfig';
+import crossmintService from './src/services/crossmintService';
 
 type TabName = 'chat' | 'contact' | 'wallet' | 'moments' | 'me';
-type MeScreen = 'main' | 'profile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'sendFeedback' | 'about' | 'qrCode';
-type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace';
+type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'sendFeedback' | 'about' | 'qrCode';
+type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings';
 type FXScreen = 'marketplace' | 'offer_detail' | 'trade_room';
 
-interface UserData {
-  id: string;
-  email: string;
+interface UserProfile {
   name: string;
-  isNewUser: boolean;
+  email: string;
+  phone: string;
+  bio: string;
+  location: string;
+  dateOfBirth: string;
+  gender: 'Male' | 'Female' | 'Other' | '';
+  avatar?: string;
 }
+
+// Wrapper component to use the notification context
+const AppNotificationWrapper: React.FC = () => {
+  const { currentNotification, hideNotification } = useNotifications();
+  
+  return (
+    <InAppNotification 
+      notification={currentNotification} 
+      onDismiss={hideNotification} 
+    />
+  );
+};
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    name: '',
+    email: '',
+    phone: '',
+    bio: '',
+    location: '',
+    dateOfBirth: '',
+    gender: '',
+  });
+  
+  // CrossMint wallet state
+  const [hasWallet, setHasWallet] = useState(false);
+  const [isCreatingWallet, setIsCreatingWallet] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [walletBalance, setWalletBalance] = useState<{[key: string]: number}>({});
+  const [totalPortfolioValue, setTotalPortfolioValue] = useState(0);
   const [activeTab, setActiveTab] = useState<TabName>('wallet');
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentMeScreen, setCurrentMeScreen] = useState<MeScreen>('main');
   const [currentWalletScreen, setCurrentWalletScreen] = useState<WalletScreen>('main');
   const [showContactProfile, setShowContactProfile] = useState(false);
@@ -64,85 +118,492 @@ export default function App() {
   const [showCreateFXOffer, setShowCreateFXOffer] = useState(false);
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showCreateMoment, setShowCreateMoment] = useState(false);
+  const [moments, setMoments] = useState<any[]>([]);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [contactFilter, setContactFilter] = useState<'all' | 'agents' | 'investors' | 'recent'>('all');
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [isLoadingMoments, setIsLoadingMoments] = useState(false);
+  const [refreshingMoments, setRefreshingMoments] = useState(false);
+  const [isLoadingWallet, setIsLoadingWallet] = useState(false);
+  const [isLoadingGeneral, setIsLoadingGeneral] = useState(false);
+  const [generalLoadingMessage, setGeneralLoadingMessage] = useState('Loading...');
+  const [networkError, setNetworkError] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [momentsError, setMomentsError] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
-  const handleLoginSuccess = (userData: UserData) => {
+  // Check for existing authentication on app start
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  // Authenticate with Firebase and fetch conversations
+  useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      const authenticateAndFetchData = async () => {
+        try {
+          // 1. Get custom token from your backend
+          // const tokenResponse = await authService.getFirebaseToken(); // You need to implement this in authService
+          // if (tokenResponse.success && tokenResponse.token) {
+          //   // 2. Sign in to Firebase
+          //   await signInWithCustomFirebaseToken(tokenResponse.token);
+            
+            // 3. Listen for conversations
+            const unsubscribe = chatService.getConversations(currentUser.id, setConversations);
+            return () => unsubscribe(); // Cleanup listener on unmount
+          // }
+        } catch (error) {
+          console.error("Failed to setup Firebase chat:", error);
+        }
+      };
+      authenticateAndFetchData();
+    }
+  }, [isAuthenticated, currentUser]);
+  // Community posts loading function
+  const loadPosts = async (refresh = false, retryCount = 0) => {
+    console.log('📱 App.loadPosts() called:', { refresh, retryCount, isAuthenticated, currentUserId: currentUser?.id });
+    
+    if (refresh) {
+      console.log('🔄 Setting refresh state...');
+      setRefreshingMoments(true);
+    } else {
+      console.log('🔄 Setting loading state...');
+      setIsLoadingMoments(true);
+    }
+    setMomentsError(null);
+    
+    try {
+      console.log('🔄 Calling communityService.getPosts(1, 20)...');
+      const response = await communityService.getPosts(1, 20);
+      console.log('📥 getPosts response received:', {
+        success: response.success,
+        error: response.error,
+        postsCount: response.data?.posts?.length || 0
+      });
+      
+      if (response.success) {
+        console.log('✅ Posts loaded successfully, formatting for UI...');
+        const formattedPosts = response.data.posts.map(post => 
+          communityService.formatPostForUI(post, currentUser?.id)
+        );
+        console.log('📝 Formatted posts:', {
+          count: formattedPosts.length,
+          firstPostId: formattedPosts[0]?.id || 'none'
+        });
+        setMoments(formattedPosts);
+      } else {
+        console.log('❌ Failed to load posts:', response.error);
+        
+        // Retry once for authentication-related errors
+        if ((response.error?.includes('token') || response.error?.includes('auth') || response.error?.includes('Access token required')) && retryCount === 0) {
+          console.log('🔄 Retrying due to auth error...');
+          setTimeout(() => loadPosts(refresh, retryCount + 1), 1000);
+          return;
+        }
+        
+        setMomentsError(response.error || 'Failed to load posts');
+      }
+    } catch (error: any) {
+      console.error('❌ Exception in loadPosts:', error);
+      console.error('❌ Exception details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Retry once for network errors
+      if (retryCount === 0 && (error.message?.includes('network') || error.message?.includes('fetch') || error.message?.includes('Failed to fetch'))) {
+        console.log('🔄 Retrying due to network error...');
+        setTimeout(() => loadPosts(refresh, retryCount + 1), 1000);
+        return;
+      }
+      
+      setMomentsError('Failed to load posts. Please try again.');
+    } finally {
+      console.log('🏁 loadPosts cleanup - setting loading states to false');
+      setIsLoadingMoments(false);
+      setRefreshingMoments(false);
+    }
+  };
+
+  // Load posts when moments tab is active and user is authenticated
+  useEffect(() => {
+    console.log('🔄 Posts loading effect triggered:', {
+      activeTab,
+      isAuthenticated,
+      isCheckingAuth,
+      shouldLoad: activeTab === 'moments' && isAuthenticated && !isCheckingAuth
+    });
+    
+    if (activeTab === 'moments' && isAuthenticated && !isCheckingAuth) {
+      console.log('📡 Loading posts because conditions are met');
+      loadPosts();
+    } else if (activeTab === 'moments' && !isAuthenticated && !isCheckingAuth) {
+      console.log('❌ Cannot load posts - not authenticated');
+      setMomentsError('Authentication required to view moments');
+    }
+  }, [activeTab, isAuthenticated, isCheckingAuth]);
+
+  // Moments interaction handlers
+  const handleLike = async (momentId: string) => {
+    try {
+      console.log('👍 handleLike called with momentId:', { momentId, type: typeof momentId });
+      
+      if (!momentId) {
+        console.error('❌ momentId is undefined or null');
+        return;
+      }
+      
+      const response = await communityService.likePost(momentId);
+      console.log('📥 Like response:', { success: response?.success, error: response?.error });
+      
+      if (response && response.success) {
+        setMoments(prev => prev.map(post => 
+          post.id === momentId 
+            ? { ...post, likes: response.data.likes, isLikedByUser: response.data.isLiked }
+            : post
+        ));
+      } else {
+        console.error('❌ Like failed:', response?.error);
+      }
+    } catch (error) {
+      console.error('❌ Failed to like post:', error);
+    }
+  };
+
+  const handleShare = async (momentId: string) => {
+    try {
+      const response = await communityService.sharePost(momentId);
+      if (response.success) {
+        setMoments(prev => prev.map(post => 
+          post.id === momentId 
+            ? { ...post, shares: response.data.shares }
+            : post
+        ));
+      }
+    } catch (error) {
+      console.error('Failed to share post:', error);
+    }
+  };
+
+  const handleDeleteMoment = async (momentId: string) => {
+    try {
+      const response = await communityService.deletePost(momentId);
+      if (response.success) {
+        setMoments(prev => prev.filter(post => post.id !== momentId));
+      }
+    } catch (error) {
+      console.error('Failed to delete post:', error);
+    } finally {
+      setShowDeleteMenu(null);
+    }
+  };
+
+  const handleDeleteMenuToggle = (momentId: string) => {
+    setShowDeleteMenu(showDeleteMenu === momentId ? null : momentId);
+  };
+
+  // Check if user has CrossMint wallet and fetch balance
+  const checkWalletStatus = async () => {
+    try {
+      const connected = await crossmintService.isWalletConnected();
+      setHasWallet(connected);
+      
+      if (connected) {
+        await fetchWalletBalance(true);
+      }
+    } catch (error) {
+      console.error('Failed to check wallet status:', error);
+      setHasWallet(false);
+    }
+  };
+
+  // Fetch wallet balance from CrossMint
+  const fetchWalletBalance = async (forceCheck = false) => {
+    // Don't check hasWallet state if forceCheck is true (for initial loading)
+    if (!forceCheck && !hasWallet) return;
+    
+    setIsLoadingWallet(true);
+    try {
+      const result = await crossmintService.getWalletStatus();
+      if (result.success && result.wallet) {
+        const balances = result.wallet.balances || {};
+        setWalletBalance(balances);
+        
+        // Calculate total portfolio value (simplified - you may want to add real-time price conversion)
+        let totalValue = 0;
+        Object.entries(balances).forEach(([token, balance]) => {
+          // You can add token price conversion here
+          // For now, assuming USD values or mock conversion
+          const balanceNum = typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0;
+          totalValue += balanceNum;
+        });
+        setTotalPortfolioValue(totalValue);
+      } else {
+        console.error('Failed to get wallet balance:', result.error);
+        if (result.error?.includes('400')) {
+          setWalletError('Wallet service unavailable. Please try again later.');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to get balance:', error);
+      setWalletError('Failed to load wallet balance');
+    } finally {
+      setIsLoadingWallet(false);
+    }
+  };
+
+  // Create CrossMint wallet
+  const handleCreateWallet = async () => {
+    setIsCreatingWallet(true);
+    try {
+      const result = await crossmintService.connectWallet();
+      if (result.success) {
+        setHasWallet(true);
+        console.log('✅ Wallet created successfully!', result.wallet);
+        // Fetch balance after wallet creation
+        await fetchWalletBalance();
+      } else {
+        console.error('❌ Wallet creation failed:', result.error);
+        setWalletError('Failed to create wallet. Please try again.');
+      }
+    } catch (error) {
+      console.error('Wallet creation error:', error);
+      setWalletError('Wallet creation failed. Please try again.');
+    } finally {
+      setIsCreatingWallet(false);
+    }
+  };
+
+  // Check wallet status when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      checkWalletStatus();
+    }
+  }, [isAuthenticated, currentUser]);
+
+  // Periodic balance refresh when wallet is connected
+  useEffect(() => {
+    if (hasWallet && isAuthenticated) {
+      const interval = setInterval(() => {
+        fetchWalletBalance(true);
+      }, 30000); // Refresh every 30 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [hasWallet, isAuthenticated]);
+
+  const checkAuthStatus = async () => {
+    try {
+      await authService.initialize();
+      const isAuth = await authService.isAuthenticated();
+      
+      if (isAuth) {
+        const sessionResult = await authService.getSession();
+        if (sessionResult.success && sessionResult.user) {
+          setCurrentUser(sessionResult.user);
+          setIsAuthenticated(true);
+          
+          // Update profile data from user
+          setUserProfile(prev => ({
+            ...prev,
+            name: sessionResult.user?.name || '',
+            email: sessionResult.user?.email || '',
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Auth check error:', error);
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  };
+
+  const handleLoginSuccess = (userData: User) => {
     setCurrentUser(userData);
     setIsAuthenticated(true);
+    
+    // Update profile data from user
+    setUserProfile(prev => ({
+      ...prev,
+      name: userData.name || '',
+      email: userData.email || '',
+    }));
+    
     console.log('User logged in:', userData);
   };
 
-  // Sample chat data
-  const conversations: Conversation[] = [
-    {
-      id: '1',
-      name: 'Property Agent Sarah',
-      lastMessage: 'The new downtown property listing is available now!',
-      timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 minutes ago
-      unreadCount: 2,
-      avatar: 'https://randomuser.me/api/portraits/women/1.jpg',
-      isOnline: true,
-      isPinned: true,
-      bricksCount: 1250,
-      trustBadge: 'verified',
-    },
-    {
-      id: '2', 
-      name: 'Investment Group',
-      lastMessage: 'Monthly returns are looking great this quarter',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-      unreadCount: 0,
-      isOnline: false,
-      isGroup: true,
-      isPinned: false,
-      bricksCount: 3400,
-      trustBadge: 'premium',
-    },
-    {
-      id: '3',
-      name: 'John Martinez',
-      lastMessage: 'Thanks for the property recommendation!',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-      unreadCount: 0,
-      avatar: 'https://randomuser.me/api/portraits/men/2.jpg',
-      isOnline: false,
-      isPinned: false,
-      bricksCount: 890,
-      trustBadge: null,
-    },
-    {
-      id: '4',
-      name: 'Real Estate Expert',
-      lastMessage: 'Market analysis report is ready for review',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 6), // 6 hours ago
-      unreadCount: 1,
-      avatar: 'https://randomuser.me/api/portraits/men/3.jpg',
-      isOnline: true,
-      isPinned: true,
-      bricksCount: 5600,
-      trustBadge: 'agent',
-    },
-    {
-      id: '5',
-      name: 'Emma Thompson',
-      lastMessage: 'Looking forward to the property tour tomorrow',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 12), // 12 hours ago
-      unreadCount: 0,
-      isOnline: false,
-      isPinned: false,
-      bricksCount: 425,
-      trustBadge: null,
-    },
-  ];
+  const handleLogout = async () => {
+    try {
+      console.log('🚪 App.handleLogout() called');
+      console.log('🔄 Current authentication state before logout:', {
+        isAuthenticated,
+        hasCurrentUser: !!currentUser,
+        currentUserEmail: currentUser?.email
+      });
+      
+      console.log('🔄 Calling authService.logout()...');
+      await authService.logout();
+      console.log('✅ authService.logout() completed');
+      
+      console.log('🗑️ Clearing profile cache...');
+      profileService.clearCache();
+      
+      console.log('🗑️ Clearing app state...');
+      // Clear user data
+      setCurrentUser(null);
+      setIsAuthenticated(false);
+      setUserProfile({
+        name: '',
+        email: '',
+        phone: '',
+        bio: '',
+        location: '',
+        dateOfBirth: '',
+        gender: '',
+      });
+      
+      // Clear community data
+      setMoments([]);
+      setMomentsError(null);
+      
+      console.log('🔄 Resetting to default tab...');
+      // Reset to default tab
+      setActiveTab('wallet');
+      
+      console.log('✅ Logout completed successfully');
+      console.log('🔄 Final authentication state:', {
+        isAuthenticated: false,
+        hasCurrentUser: false
+      });
+    } catch (error) {
+      console.error('❌ Logout error in App.handleLogout():', error);
+      console.error('❌ Logout error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : null
+      });
+    }
+  };
+
+  // Loading simulation helper
+  const simulateLoading = (
+    setLoading: (loading: boolean) => void,
+    duration: number = 2000,
+    message?: string
+  ) => {
+    if (message) setGeneralLoadingMessage(message);
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+    }, duration);
+  };
+
+  // Error simulation helper
+  const simulateError = (errorType: 'network' | 'wallet' | 'contacts' | 'moments' | 'payment', message?: string) => {
+    // Randomly fail 20% of the time to demonstrate error handling
+    if (Math.random() < 0.2) {
+      switch (errorType) {
+        case 'network':
+          setNetworkError(true);
+          break;
+        case 'wallet':
+          setWalletError(message || 'Failed to load wallet data');
+          break;
+        case 'contacts':
+          setContactsError(message || 'Failed to load contacts');
+          break;
+        case 'moments':
+          setMomentsError(message || 'Failed to load moments');
+          break;
+        case 'payment':
+          setPaymentError(message || 'Payment failed');
+          break;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  // Clear all errors
+  const clearErrors = () => {
+    setNetworkError(false);
+    setWalletError(null);
+    setContactsError(null);
+    setMomentsError(null);
+    setPaymentError(null);
+  };
+
+  // Tab switch with loading and error handling
+  const handleTabSwitch = (tab: TabName) => {
+    if (tab === activeTab) return;
+    
+    setActiveTab(tab);
+    clearErrors(); // Clear previous errors
+    
+    // Reset sub-screen states when switching tabs
+    if (tab !== 'me') setCurrentMeScreen('main');
+    if (tab !== 'wallet') setCurrentWalletScreen('main');
+    
+    // Simulate loading for different tabs
+    switch (tab) {
+      case 'contact':
+        simulateLoading(setIsLoadingContacts, 1500);
+        setTimeout(() => simulateError('contacts'), 1500);
+        break;
+      case 'moments':
+        simulateLoading(setIsLoadingMoments, 1200);
+        setTimeout(() => simulateError('moments'), 1200);
+        break;
+      case 'wallet':
+        simulateLoading(setIsLoadingWallet, 1000);
+        setTimeout(() => simulateError('wallet'), 1000);
+        break;
+    }
+  };
 
   const renderWallet = () => {
     // Handle sub-screens
     switch (currentWalletScreen) {
+      case 'notifications':
+        return (
+          <NotificationScreen
+            onBack={() => setCurrentWalletScreen('main')}
+            onNotificationPress={(notification) => {
+              console.log('Notification pressed:', notification);
+              // Handle notification action
+            }}
+            onMarkAsRead={(notificationId) => {
+              console.log('Mark as read:', notificationId);
+              // Update notification status
+            }}
+            onMarkAllAsRead={() => {
+              console.log('Mark all as read');
+              // Update all notifications
+            }}
+            onClearAll={() => {
+              console.log('Clear all notifications');
+              // Clear all notifications
+            }}
+            onManageSettings={() => setCurrentWalletScreen('notificationSettings')}
+          />
+        );
+      
+      case 'notificationSettings':
+        return (
+          <NotificationSettingsScreen
+            onBack={() => setCurrentWalletScreen('notifications')}
+          />
+        );
+      
       case 'tokens':
         return (
           <ScrollView style={styles.content}>
             <View style={styles.header}>
               <TouchableOpacity onPress={() => setCurrentWalletScreen('main')} style={styles.backButton}>
-                <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+                <MaterialIcons name="arrow-back" size={24} color={Colors.gray700} />
               </TouchableOpacity>
               <Typography variant="h3">My Tokens</Typography>
               <View style={styles.headerSpacer} />
@@ -180,6 +641,16 @@ export default function App() {
                 <Typography variant="body2" color="textSecondary">$0.00</Typography>
               </View>
             </View>
+
+            {/* Empty Transactions State */}
+            <View style={{ marginTop: Spacing.xl }}>
+              <Typography variant="h6" style={{ marginBottom: Spacing.md, paddingHorizontal: Spacing.lg }}>
+                Recent Transactions
+              </Typography>
+              <EmptyTransactions
+                onMakeTransaction={() => setShowP2PSend(true)}
+              />
+            </View>
           </ScrollView>
         );
 
@@ -188,21 +659,19 @@ export default function App() {
           <ScrollView style={styles.content}>
             <View style={styles.header}>
               <TouchableOpacity onPress={() => setCurrentWalletScreen('main')} style={styles.backButton}>
-                <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+                <MaterialIcons name="arrow-back" size={24} color={Colors.gray700} />
               </TouchableOpacity>
               <Typography variant="h3">Property Investments</Typography>
               <View style={styles.headerSpacer} />
             </View>
             
-            <View style={styles.emptyState}>
-              <MaterialIcons name="home" size={48} color={Colors.gray400} />
-              <Typography variant="body1" color="textSecondary" align="center" style={{ marginTop: Spacing.md }}>
-                No properties yet
-              </Typography>
-              <Typography variant="body2" color="textSecondary" align="center" style={{ marginTop: Spacing.xs }}>
-                Start investing in real estate
-              </Typography>
-            </View>
+            <EmptyProperties
+              onBrowse={() => setCurrentWalletScreen('marketplace')}
+              onLearnMore={() => {
+                // TODO: Navigate to learning resources
+                console.log('Learn more about property investment');
+              }}
+            />
           </ScrollView>
         );
 
@@ -336,6 +805,15 @@ export default function App() {
             );
         }
 
+      case 'webview':
+        return (
+          <MarketplaceWebView
+            onBack={() => setCurrentWalletScreen('main')}
+            userToken={currentUser?.id} // Pass user token for authentication
+            userId={currentUser?.id}
+          />
+        );
+
       default:
         // Main wallet screen
         return (
@@ -344,33 +822,119 @@ export default function App() {
             <View style={styles.header}>
               <View>
                 <Typography variant="h3">My Wallet</Typography>
-                <Typography variant="body1" color="textSecondary">Financial hub & services</Typography>
+                {/* <Typography variant="body1" color="textSecondary">Financial hub & services</Typography> */}
               </View>
-              <TouchableOpacity style={styles.avatar}>
-                <MaterialIcons name="account-balance-wallet" size={24} color={Colors.gray600} />
+              <TouchableOpacity 
+                style={styles.notificationButton}
+                onPress={() => {
+                  setCurrentWalletScreen('notifications');
+                }}
+              >
+                <MaterialIcons name="notifications" size={24} color={Colors.gray600} />
+                {/* Small dot for unread notifications */}
+                <View style={styles.notificationDot} />
               </TouchableOpacity>
             </View>
 
             {/* Balance Card */}
-            <Card style={styles.balanceCard}>
-              <Typography variant="caption" color="textSecondary" align="center">Total Portfolio</Typography>
-              <Typography variant="h1" align="center" style={{ marginVertical: Spacing.sm }}>$0.00</Typography>
-              <Typography variant="body2" color="textSecondary" align="center">≈ 0.00 ETH</Typography>
-            </Card>
+            {walletError ? (
+              <Card style={styles.balanceCard}>
+                <ErrorMessage
+                  title="Wallet Error"
+                  message={walletError}
+                  actionLabel="Retry"
+                  onAction={() => {
+                    setWalletError(null);
+                    handleTabSwitch('wallet');
+                  }}
+                  onDismiss={() => setWalletError(null)}
+                />
+              </Card>
+            ) : isLoadingWallet ? (
+              <Card style={styles.balanceCard}>
+                <LoadingSpinner message="Loading balance..." />
+              </Card>
+            ) : (
+              <Card style={styles.balanceCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
+                  <Typography variant="caption" color="textSecondary">Total Portfolio</Typography>
+                  {hasWallet && (
+                    <TouchableOpacity onPress={() => fetchWalletBalance(true)} disabled={isLoadingWallet}>
+                      <MaterialIcons 
+                        name="refresh" 
+                        size={16} 
+                        color={isLoadingWallet ? Colors.gray400 : Colors.primary} 
+                      />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Typography variant="h1" align="center" style={{ marginVertical: Spacing.sm }}>
+                  {profileService.formatBalance(totalPortfolioValue)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" align="center">
+                  {hasWallet && walletBalance.ETH ? `≈ ${parseFloat(walletBalance.ETH.toString()).toFixed(4)} ETH` : '≈ 0.00 ETH'}
+                </Typography>
+                
+                {/* Balance Breakdown */}
+                {hasWallet && Object.keys(walletBalance).length > 0 ? (
+                  <View style={{ marginTop: Spacing.md }}>
+                    {Object.entries(walletBalance).map(([token, balance]) => (
+                      <View key={token} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.xs }}>
+                        <Typography variant="caption" color="textSecondary">{token}:</Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {typeof balance === 'number' ? balance.toFixed(4) : parseFloat(String(balance)).toFixed(4)}
+                        </Typography>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  /* Empty Wallet Helper */
+                  <View style={{ marginTop: Spacing.lg, alignItems: 'center' }}>
+                    <Typography variant="body2" color="textSecondary" align="center" style={{ marginBottom: Spacing.sm }}>
+                      {hasWallet ? 'Your wallet is empty' : 'Create a wallet to get started'}
+                    </Typography>
+                    <Typography variant="caption" color="textSecondary" align="center">
+                      Add funds to start investing in real estate
+                    </Typography>
+                  </View>
+                )}
+              </Card>
+            )}
 
             {/* Quick Actions */}
             <View style={styles.actionButtons}>
               <Button 
-                title="Deposit" 
-                icon="add" 
-                onPress={() => setShowDepositFlow(true)} 
+                title={isCreatingWallet ? "Creating..." : (hasWallet ? "Deposit" : "Create")} 
+                icon={hasWallet ? "add" : "account-balance-wallet"} 
+                onPress={hasWallet ? () => {
+                  if (simulateError('payment', 'Deposit service temporarily unavailable')) {
+                    return;
+                  }
+                  simulateLoading(setIsLoadingGeneral, 1500, 'Opening deposit...');
+                  setTimeout(() => setShowDepositFlow(true), 1500);
+                } : handleCreateWallet}
+                disabled={isCreatingWallet}
                 style={{ flex: 1 }}
               />
               <Button 
                 title="Send" 
                 icon="send" 
                 variant="outline"
-                onPress={() => setShowP2PSend(true)} 
+                onPress={() => {
+                  if (!hasWallet) {
+                    Alert.alert('Wallet Required', 'Please create a wallet first to send payments.');
+                    return;
+                  }
+                  simulateLoading(setIsLoadingGeneral, 1000, 'Loading contacts...');
+                  setTimeout(() => setShowP2PSend(true), 1000);
+                }} 
+                style={{ flex: 1 }}
+              />
+              <Button 
+                title="Scan" 
+                icon="qr-code-scanner" 
+                variant="outline"
+                onPress={() => setShowQRScanner(true)} 
                 style={{ flex: 1 }}
               />
             </View>
@@ -388,7 +952,7 @@ export default function App() {
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.portfolioItem}
-                  onPress={() => setCurrentWalletScreen('properties')}
+                  onPress={() => setCurrentWalletScreen('webview')}
                 >
                   <MaterialIcons name="home" size={24} color={Colors.primary} />
                   <Typography variant="caption" style={styles.portfolioLabel}>Properties</Typography>
@@ -418,9 +982,12 @@ export default function App() {
                   <MaterialIcons name="currency-exchange" size={24} color={Colors.primary} />
                   <Typography variant="caption" style={styles.serviceLabel}>FX Market</Typography>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.serviceItem} disabled>
-                  <MaterialIcons name="credit-card" size={24} color={Colors.gray400} />
-                  <Typography variant="caption" color="textSecondary">Cards</Typography>
+                <TouchableOpacity 
+                  style={styles.serviceItem}
+                  onPress={() => setCurrentWalletScreen('webview')}
+                >
+                  <MaterialIcons name="home-work" size={24} color={Colors.primary} />
+                  <Typography variant="caption" style={styles.serviceLabel}>Properties</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.serviceItem} disabled>
                   <MaterialIcons name="savings" size={24} color={Colors.gray400} />
@@ -483,393 +1050,575 @@ export default function App() {
     }
   };
 
-  const renderContact = () => (
-    <ScrollView style={styles.content}>
-      <View style={styles.header}>
-        <Typography variant="h2">Contacts</Typography>
-      </View>
-      
-      <View style={styles.section}>
-        <Typography variant="h5" style={{ marginBottom: Spacing.md }}>Property Agents</Typography>
+  // Enhanced Contact Data and Functions
+  const allContacts = [
+    {
+      id: 'sarah_anderson',
+      name: 'Sarah Anderson',
+      role: 'Senior Property Agent',
+      category: 'agents',
+      avatar: 'SA',
+      imageUrl: 'https://randomuser.me/api/portraits/women/1.jpg',
+      bricks: 4500,
+      trustBadge: 'verified',
+      isOnline: true,
+      lastSeen: 'Online',
+      conversationId: '1',
+    },
+    {
+      id: 'michael_roberts',
+      name: 'Michael Roberts',
+      role: 'Luxury Property Specialist',
+      category: 'agents',
+      avatar: 'MR',
+      imageUrl: 'https://randomuser.me/api/portraits/men/2.jpg',
+      bricks: 2100,
+      trustBadge: 'premium',
+      isOnline: true,
+      lastSeen: '5 min ago',
+      conversationId: 'michael_roberts',
+    },
+    {
+      id: 'lisa_johnson',
+      name: 'Lisa Johnson',
+      role: 'Commercial Real Estate',
+      category: 'agents',
+      avatar: 'LJ',
+      imageUrl: 'https://randomuser.me/api/portraits/women/3.jpg',
+      bricks: 3200,
+      trustBadge: 'agent',
+      isOnline: false,
+      lastSeen: '2 hours ago',
+      conversationId: 'lisa_johnson',
+    },
+    {
+      id: 'real_estate_investors',
+      name: 'Real Estate Investors',
+      role: '42 members',
+      category: 'investors',
+      avatar: 'REI',
+      bricks: 15600,
+      trustBadge: 'community',
+      isGroup: true,
+      isOnline: true,
+      lastSeen: 'Active',
+    },
+    {
+      id: 'lagos_property_club',
+      name: 'Lagos Property Club',
+      role: '128 members',
+      category: 'investors',
+      avatar: 'LPC',
+      bricks: 28400,
+      trustBadge: 'premium',
+      isGroup: true,
+      isOnline: true,
+      lastSeen: 'Active',
+      conversationId: '2',
+    },
+    {
+      id: 'alex_davis',
+      name: 'Alex Davis',
+      role: 'Property Investor',
+      category: 'recent',
+      avatar: 'AD',
+      bricks: 890,
+      trustBadge: 'member',
+      isOnline: false,
+      lastSeen: '1 day ago',
+    },
+    {
+      id: 'nina_kumar',
+      name: 'Nina Kumar',
+      role: 'Real Estate Analyst',
+      category: 'recent',
+      avatar: 'NK',
+      bricks: 1250,
+      trustBadge: 'verified',
+      isOnline: true,
+      lastSeen: 'Online',
+    },
+    {
+      id: 'tom_okafor',
+      name: 'Tom Okafor',
+      role: 'Property Developer',
+      category: 'recent',
+      avatar: 'TO',
+      bricks: 5600,
+      trustBadge: 'premium',
+      isOnline: false,
+      lastSeen: '3 hours ago',
+    },
+  ];
+
+  const filteredContacts = allContacts.filter(contact => {
+    const matchesSearch = contact.name.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
+                         contact.role.toLowerCase().includes(contactSearchQuery.toLowerCase());
+    
+    if (contactFilter === 'all') return matchesSearch;
+    return matchesSearch && contact.category === contactFilter;
+  });
+
+  const handleContactPress = (contact: any) => {
+    simulateLoading(setIsLoadingGeneral, 800, 'Loading profile...');
+    setTimeout(() => {
+      setSelectedContact({ name: contact.name, id: contact.id });
+      setShowContactProfile(true);
+    }, 800);
+  };
+
+  const handleMessageContact = (contact: any) => {
+    setActiveTab('chat');
+    
+    if (contact.conversationId) {
+      const existingConversation = conversations.find(c => c.id === contact.conversationId);
+      if (existingConversation) {
+        setSelectedChat(existingConversation);
+        return;
+      }
+    }
+    
+    // Create new conversation
+    const newConversation = {
+      id: contact.id,
+      name: contact.name,
+      lastMessage: contact.isGroup ? 'Welcome to the group!' : 'Hello! How can I help you?',
+      timestamp: new Date(),
+      unreadCount: 0,
+      avatar: contact.imageUrl,
+      isOnline: contact.isOnline,
+      isPinned: false,
+      bricksCount: contact.bricks,
+      trustBadge: contact.trustBadge,
+      isGroup: contact.isGroup,
+    };
+    setSelectedChat(newConversation);
+  };
+
+  const renderContact = () => {
+    const getTrustBadgeIcon = (badge: string) => {
+      switch (badge) {
+        case 'verified': return 'verified';
+        case 'premium': return 'star';
+        case 'agent': return 'business';
+        case 'community': return 'groups';
+        default: return 'person';
+      }
+    };
+
+    const getTrustBadgeColor = (badge: string) => {
+      switch (badge) {
+        case 'verified': return Colors.success;
+        case 'premium': return Colors.warning;
+        case 'agent': return Colors.info;
+        case 'community': return Colors.primary;
+        default: return Colors.gray400;
+      }
+    };
+
+    const renderContactItem = (contact: any) => (
+      <View key={contact.id} style={styles.enhancedContactRow}>
+        <TouchableOpacity 
+          style={styles.enhancedContactAvatar}
+          onPress={() => handleContactPress(contact)}
+        >
+          <Typography variant="h6" style={styles.avatarText}>
+            {contact.avatar}
+          </Typography>
+          {contact.isOnline && <View style={styles.onlineIndicator} />}
+        </TouchableOpacity>
         
-        <View style={styles.contactRow}>
-          <TouchableOpacity 
-            style={styles.contactAvatar}
-            onPress={() => {
-              setSelectedContact({
-                name: 'Sarah Anderson',
-                id: 'sarah_anderson'
-              });
-              setShowContactProfile(true);
-            }}
-          >
-            <Typography variant="h6">SA</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.contactInfo}
-            onPress={() => {
-              setSelectedContact({
-                name: 'Sarah Anderson',
-                id: 'sarah_anderson'
-              });
-              setShowContactProfile(true);
-            }}
-          >
-            <Typography variant="h6">Sarah Anderson</Typography>
-            <Typography variant="body2" color="textSecondary">Senior Property Agent</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            setActiveTab('chat');
-            const sarahConversation = conversations.find(c => c.name === 'Property Agent Sarah');
-            if (sarahConversation) {
-              setSelectedChat(sarahConversation);
-            }
-          }}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">MR</Typography>
+        <TouchableOpacity 
+          style={styles.enhancedContactInfo}
+          onPress={() => handleContactPress(contact)}
+        >
+          <View style={styles.contactNameRow}>
+            <Typography variant="h6" style={styles.contactName}>
+              {contact.name}
+            </Typography>
+            <MaterialIcons 
+              name={getTrustBadgeIcon(contact.trustBadge)} 
+              size={14} 
+              color={getTrustBadgeColor(contact.trustBadge)}
+              style={styles.trustBadge}
+            />
           </View>
-          <TouchableOpacity 
-            style={styles.contactInfo}
-            onPress={() => {
-              setSelectedContact({
-                name: 'Michael Roberts',
-                id: 'michael_roberts'
-              });
-              setShowContactProfile(true);
-            }}
-          >
-            <Typography variant="h6">Michael Roberts</Typography>
-            <Typography variant="body2" color="textSecondary">Luxury Property Specialist</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            setActiveTab('chat');
-            // Create a new conversation for Michael Roberts since he's not in the main conversations
-            const michaelConversation = {
-              id: 'michael_roberts',
-              name: 'Michael Roberts',
-              lastMessage: 'Hello! How can I help you with luxury properties?',
-              timestamp: new Date(),
-              unreadCount: 0,
-              avatar: 'https://randomuser.me/api/portraits/men/2.jpg',
-              isOnline: true,
-              isPinned: false,
-              bricksCount: 2100,
-              trustBadge: 'premium' as const,
-            };
-            setSelectedChat(michaelConversation);
-          }}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">LJ</Typography>
+          <Typography variant="body2" color="textSecondary" style={styles.contactRole}>
+            {contact.role}
+          </Typography>
+          <View style={styles.contactStats}>
+            <Typography variant="caption" color="textSecondary">
+              {contact.bricks} bricks • {contact.lastSeen}
+            </Typography>
           </View>
-          <TouchableOpacity 
-            style={styles.contactInfo}
-            onPress={() => {
-              setSelectedContact({
-                name: 'Lisa Johnson',
-                id: 'lisa_johnson'
-              });
-              setShowContactProfile(true);
-            }}
-          >
-            <Typography variant="h6">Lisa Johnson</Typography>
-            <Typography variant="body2" color="textSecondary">Commercial Real Estate</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            setActiveTab('chat');
-            // Create a new conversation for Lisa Johnson
-            const lisaConversation = {
-              id: 'lisa_johnson',
-              name: 'Lisa Johnson',
-              lastMessage: 'Hi! I specialize in commercial real estate investments.',
-              timestamp: new Date(),
-              unreadCount: 0,
-              avatar: 'https://randomuser.me/api/portraits/women/3.jpg',
-              isOnline: false,
-              isPinned: false,
-              bricksCount: 3200,
-              trustBadge: 'agent' as const,
-            };
-            setSelectedChat(lisaConversation);
-          }}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Typography variant="h5" style={{ marginBottom: Spacing.md }}>Investment Groups</Typography>
+        </TouchableOpacity>
         
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">REI</Typography>
-          </View>
-          <View style={styles.contactInfo}>
-            <Typography variant="h6">Real Estate Investors</Typography>
-            <Typography variant="body2" color="textSecondary">42 members</Typography>
-          </View>
-          <TouchableOpacity>
-            <MaterialIcons name="group" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">LPC</Typography>
-          </View>
-          <View style={styles.contactInfo}>
-            <Typography variant="h6">Lagos Property Club</Typography>
-            <Typography variant="body2" color="textSecondary">128 members</Typography>
-          </View>
-          <TouchableOpacity>
-            <MaterialIcons name="group" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Typography variant="h5" style={{ marginBottom: Spacing.md }}>Recent Connections</Typography>
-        
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">AD</Typography>
-          </View>
-          <View style={styles.contactInfo}>
-            <Typography variant="h6">Alex Davis</Typography>
-            <Typography variant="body2" color="textSecondary">Property Investor</Typography>
-          </View>
-          <TouchableOpacity onPress={() => setActiveTab('chat')}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">NK</Typography>
-          </View>
-          <View style={styles.contactInfo}>
-            <Typography variant="h6">Nina Kumar</Typography>
-            <Typography variant="body2" color="textSecondary">Real Estate Analyst</Typography>
-          </View>
-          <TouchableOpacity onPress={() => setActiveTab('chat')}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.contactRow}>
-          <View style={styles.contactAvatar}>
-            <Typography variant="h6">TO</Typography>
-          </View>
-          <View style={styles.contactInfo}>
-            <Typography variant="h6">Tom Okafor</Typography>
-            <Typography variant="body2" color="textSecondary">Property Developer</Typography>
-          </View>
-          <TouchableOpacity onPress={() => setActiveTab('chat')}>
-            <MaterialIcons name="message" size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </ScrollView>
-  );
-
-
-  const renderMoments = () => {
-    const mockMoments = [
-      {
-        id: '1',
-        userName: 'John Doe',
-        userAvatar: 'https://randomuser.me/api/portraits/men/1.jpg',
-        postTime: '2 hours ago',
-        content: 'Just completed my first investment in Lagos Premium Apartments! Excited about the tokenized real estate opportunity 🏢💰',
-        image: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=400',
-        likes: 24,
-        isLiked: false,
-        isOwn: true,
-      },
-      {
-        id: '2',
-        userName: 'Sarah Anderson',
-        userAvatar: 'https://randomuser.me/api/portraits/women/1.jpg',
-        postTime: '5 hours ago',
-        content: 'New property listing available in Victoria Island! Fractional ownership starting from $100. Great opportunity for investors.',
-        image: 'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=400',
-        likes: 18,
-        isLiked: true,
-        isOwn: false,
-      },
-      {
-        id: '3',
-        userName: 'Michael Roberts',
-        userAvatar: 'https://randomuser.me/api/portraits/men/2.jpg',
-        postTime: '1 day ago',
-        content: 'Market analysis shows 15% growth in tokenized real estate this quarter. Perfect time to diversify your portfolio!',
-        likes: 32,
-        isLiked: false,
-        isOwn: false,
-      },
-      {
-        id: '4',
-        userName: 'Emma Thompson',
-        userAvatar: 'https://randomuser.me/api/portraits/women/2.jpg',
-        postTime: '2 days ago',
-        content: 'Attended the Lagos Real Estate Summit today. Amazing insights on blockchain integration and property tokenization! 🚀',
-        image: 'https://images.unsplash.com/photo-1582407947304-fd86f028f716?w=400',
-        likes: 45,
-        isLiked: true,
-        isOwn: false,
-      },
-      {
-        id: '5',
-        userName: 'David Chen',
-        userAvatar: 'https://randomuser.me/api/portraits/men/3.jpg',
-        postTime: '3 days ago',
-        content: 'Monthly returns from my property token portfolio are in! 8.2% yield this month. Decentralized real estate is the future! 📈',
-        likes: 67,
-        isLiked: false,
-        isOwn: false,
-      },
-      {
-        id: '6',
-        userName: 'Alex Rodriguez',
-        userAvatar: 'https://randomuser.me/api/portraits/men/4.jpg',
-        postTime: '4 days ago',
-        content: 'Successfully liquidated 20% of my VIC tokens. The marketplace is working beautifully - transaction completed in under 2 minutes! ⚡',
-        likes: 29,
-        isLiked: false,
-        isOwn: false,
-      },
-      {
-        id: '7',
-        userName: 'Lisa Parker',
-        userAvatar: 'https://randomuser.me/api/portraits/women/3.jpg',
-        postTime: '5 days ago',
-        content: 'New to ile? Here are my top 3 tips for property investment: 1) Start small 2) Diversify across locations 3) Hold long-term',
-        image: 'https://images.unsplash.com/photo-1565402170291-8491f14678db?w=400',
-        likes: 156,
-        isLiked: true,
-        isOwn: false,
-      },
-      {
-        id: '8',
-        userName: 'Tom Wilson',
-        userAvatar: 'https://randomuser.me/api/portraits/men/5.jpg',
-        postTime: '6 days ago',
-        content: 'Community update: We now have over 10,000 active investors on the platform! Welcome to all new members 🎉',
-        likes: 234,
-        isLiked: false,
-        isOwn: false,
-      },
-    ];
-
-    const handleLike = (momentId: string) => {
-      console.log('Like moment:', momentId);
-    };
-
-    const handleShare = (momentId: string) => {
-      console.log('Share moment:', momentId);
-    };
-
-    const handleDelete = (momentId: string) => {
-      console.log('Delete moment:', momentId);
-      setShowDeleteMenu(null);
-    };
-
-    const handleDeleteMenuToggle = (momentId: string) => {
-      setShowDeleteMenu(showDeleteMenu === momentId ? null : momentId);
-    };
-
-    const renderMoment = (moment: any) => (
-      <View key={moment.id} style={styles.momentCard}>
-        {/* User header */}
-        <View style={styles.momentUserHeader}>
-          <View style={styles.momentUserInfo}>
-            <View style={styles.momentAvatar}>
-              {moment.userAvatar ? (
-                <Image source={{ uri: moment.userAvatar }} style={styles.momentAvatarImage} />
-              ) : (
-                <Typography variant="h6">{moment.userName.split(' ').map((n: string) => n[0]).join('')}</Typography>
-              )}
-            </View>
-            <View style={styles.momentUserDetails}>
-              <Typography variant="h6" style={styles.momentUserName}>{moment.userName}</Typography>
-              <Typography variant="body2" color="textSecondary">{moment.postTime}</Typography>
-            </View>
-          </View>
-          {moment.isOwn && (
-            <View style={styles.momentDeleteContainer}>
-              <TouchableOpacity onPress={() => handleDeleteMenuToggle(moment.id)} style={styles.momentDeleteButton}>
-                <MaterialIcons name="more-vert" size={20} color={Colors.gray600} />
-              </TouchableOpacity>
-              {showDeleteMenu === moment.id && (
-                <View style={styles.deleteDropdown}>
-                  <TouchableOpacity onPress={() => handleDelete(moment.id)} style={styles.deleteOption}>
-                    <MaterialIcons name="delete" size={16} color={Colors.error} />
-                    <Typography variant="body2" style={[styles.deleteOptionText, { color: Colors.error }]}>
-                      Delete
-                    </Typography>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Post content */}
-        <Typography variant="body1" style={styles.momentPostContent}>
-          {moment.content}
-        </Typography>
-
-        {/* Post image */}
-        {moment.image && (
-          <Image source={{ uri: moment.image }} style={styles.momentPostImage} />
-        )}
-
-        {/* Actions */}
-        <View style={styles.momentActions}>
+        <View style={styles.contactActions}>
           <TouchableOpacity 
-            onPress={() => handleLike(moment.id)}
-            style={styles.momentActionButton}
+            onPress={() => handleMessageContact(contact)}
+            style={styles.actionButton}
           >
             <MaterialIcons 
-              name={moment.isLiked ? 'favorite' : 'favorite-border'} 
+              name={contact.isGroup ? "group" : "message"} 
               size={20} 
-              color={moment.isLiked ? Colors.error : Colors.gray600} 
+              color={Colors.primary} 
             />
-            <Typography variant="body2" style={styles.momentActionText}>
-              {moment.likes}
-            </Typography>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            onPress={() => handleShare(moment.id)}
-            style={styles.momentActionButton}
-          >
-            <MaterialIcons name="share" size={20} color={Colors.gray600} />
-            <Typography variant="body2" style={styles.momentActionText}>
-              Share
-            </Typography>
           </TouchableOpacity>
         </View>
       </View>
     );
 
     return (
-      <ScrollView style={styles.content}>
-        <View style={styles.header}>
-          <Typography variant="h2">Moments</Typography>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Header with Add Contact Button */}
+        <View style={styles.enhancedHeader}>
+          <Typography variant="h2">Contacts</Typography>
+          <TouchableOpacity 
+            onPress={() => setShowQRScanner(true)}
+            style={styles.addContactButton}
+          >
+            <MaterialIcons name="person-add" size={24} color={Colors.primary} />
+          </TouchableOpacity>
         </View>
-        
-        {mockMoments.map(renderMoment)}
+
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchInputContainer}>
+            <MaterialIcons name="search" size={20} color={Colors.gray400} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search contacts..."
+              placeholderTextColor={Colors.gray400}
+              value={contactSearchQuery}
+              onChangeText={setContactSearchQuery}
+            />
+            {contactSearchQuery.length > 0 && (
+              <TouchableOpacity 
+                onPress={() => setContactSearchQuery('')}
+                style={styles.clearSearchButton}
+              >
+                <MaterialIcons name="close" size={16} color={Colors.gray400} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Filter Tabs */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterContainer}
+        >
+          {[
+            { key: 'all', label: 'All', count: allContacts.length },
+            { key: 'agents', label: 'Agents', count: allContacts.filter(c => c.category === 'agents').length },
+            { key: 'investors', label: 'Groups', count: allContacts.filter(c => c.category === 'investors').length },
+            { key: 'recent', label: 'Recent', count: allContacts.filter(c => c.category === 'recent').length },
+          ].map((filter) => (
+            <TouchableOpacity
+              key={filter.key}
+              style={[
+                styles.filterTab,
+                contactFilter === filter.key && styles.activeFilterTab
+              ]}
+              onPress={() => setContactFilter(filter.key as any)}
+            >
+              <Typography 
+                variant="body2" 
+                style={[
+                  styles.filterTabText,
+                  contactFilter === filter.key && styles.activeFilterTabText
+                ]}
+              >
+                {filter.label} ({filter.count})
+              </Typography>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Contact List */}
+        {contactsError ? (
+          <ErrorMessage
+            title="Failed to load contacts"
+            message={contactsError}
+            actionLabel="Retry"
+            onAction={() => {
+              setContactsError(null);
+              handleTabSwitch('contact');
+            }}
+            onDismiss={() => setContactsError(null)}
+          />
+        ) : isLoadingContacts ? (
+          <View>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <SkeletonContactItem key={i} />
+            ))}
+          </View>
+        ) : filteredContacts.length > 0 ? (
+          filteredContacts.map(renderContactItem)
+        ) : contactSearchQuery ? (
+          <EmptySearch
+            searchQuery={contactSearchQuery}
+            onClearSearch={() => setContactSearchQuery('')}
+          />
+        ) : (
+          <EmptyContacts
+            onAddContact={() => setShowQRScanner(true)}
+            onInviteFriends={() => {
+              // TODO: Implement invite friends functionality
+              console.log('Invite friends');
+            }}
+          />
+        )}
       </ScrollView>
+    );
+  };
+
+
+  const handleCreateMoment = async (content: string, image?: string) => {
+    try {
+      console.log('📝 App.handleCreateMoment() called:', { content, hasImage: !!image, currentUserId: currentUser?.id });
+      
+      setIsLoadingGeneral(true);
+      setGeneralLoadingMessage('Creating moment...');
+      
+      console.log('🔄 Calling communityService.createPost...');
+      const postData = { content };
+      if (image) {
+        console.log('📷 Including image in post data:', {
+          imageSize: image.length,
+          imageType: image.substring(0, 30) + '...',
+          isBase64: image.startsWith('data:')
+        });
+        // For now, we'll include the image in the post data
+        // In a real implementation, you'd upload to Cloudinary first
+        (postData as any).image = image;
+      } else {
+        console.log('📷 No image provided for post');
+      }
+      const response = await communityService.createPost(postData);
+      console.log('📥 Create post response:', {
+        success: response.success,
+        error: response.error,
+        hasData: !!response.data
+      });
+      
+      if (response.success) {
+        console.log('✅ Post created successfully, formatting for UI...');
+        
+        // Debug the complete response structure
+        console.log('🔍 Complete response structure:', JSON.stringify(response, null, 2));
+        
+        // Backend returns { message, post }, so we need response.data.post
+        const postData = response.data?.post || response.data;
+        console.log('📝 Raw post data from backend:', {
+          hasPost: !!response.data?.post,
+          postData: postData,
+          postKeys: postData ? Object.keys(postData) : null,
+          authorName: postData?.author?.name || postData?.authorName,
+          hasImage: !!postData?.image,
+          imageSize: postData?.image ? postData.image.length : 0
+        });
+        
+        // Format the new post and add it to the beginning of the list
+        const formattedPost = communityService.formatPostForUI(postData, currentUser?.id);
+        console.log('📝 Formatted post for UI:', {
+          id: formattedPost.id,
+          _id: formattedPost._id,
+          hasId: !!formattedPost.id,
+          authorName: formattedPost.authorName,
+          content: formattedPost.content,
+          hasImage: !!formattedPost.image
+        });
+        console.log('📝 Adding new post to moments list');
+        // Ensure the new post has a unique ID before adding to list
+        if (!formattedPost.id && !formattedPost._id) {
+          formattedPost.id = `temp_${Date.now()}_${Math.random()}`;
+        }
+        setMoments(prev => [formattedPost, ...prev]);
+        
+        console.log('✅ handleCreateMoment completed successfully');
+      } else {
+        console.error('❌ Failed to create post:', response.error);
+        setMomentsError(response.error || 'Failed to create moment');
+        throw new Error(response.error || 'Failed to create moment');
+      }
+    } catch (error: any) {
+      console.error('❌ Error creating moment:', error);
+      setMomentsError('Failed to create moment. Please try again.');
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleQRCodeScanned = (data: string) => {
+    console.log('QR Code scanned:', data);
+    
+    // Handle different QR code types
+    if (data.startsWith('wallet:')) {
+      // Navigate to wallet with address
+      setActiveTab('wallet');
+    } else if (data.startsWith('payment:')) {
+      // Parse and initiate payment
+      setShowP2PSend(true);
+    } else if (data.startsWith('contact:')) {
+      // Add contact and switch to contacts tab
+      setActiveTab('contact');
+    } else {
+      // Default action - could be a wallet address
+      setActiveTab('wallet');
+    }
+  };
+
+  const renderMoments = () => {
+
+    const renderMoment = (moment: any) => {
+      const isOwn = moment.authorId === currentUser?.id;
+      const userName = moment.authorName || moment.userName || 'Unknown User';
+      const userAvatar = moment.avatar || moment.userAvatar;
+      const postTime = moment.time || moment.postTime || 'Unknown time';
+      
+      console.log('🔍 Rendering moment:', {
+        momentId: moment.id,
+        momentIdType: typeof moment.id,
+        authorName: moment.authorName,
+        authorId: moment.authorId,
+        hasId: !!moment.id,
+        hasAuthor: !!moment.author,
+        userName
+      });
+      
+      return (
+        <View key={moment.id || moment._id} style={styles.momentItem}>
+          {/* User header */}
+          <View style={styles.momentUserHeader}>
+            <View style={styles.momentUserInfo}>
+              <View style={styles.momentAvatar}>
+                {userAvatar ? (
+                  <Image source={{ uri: userAvatar }} style={styles.momentAvatarImage} />
+                ) : (
+                  <Typography variant="h6">{userName.split(' ').map((n: string) => n[0]).join('')}</Typography>
+                )}
+              </View>
+              <View style={styles.momentUserDetails}>
+                <Typography variant="h6" style={styles.momentUserName}>{userName}</Typography>
+                <Typography variant="body2" color="textSecondary">{postTime}</Typography>
+              </View>
+            </View>
+            {isOwn && (
+              <View style={styles.momentDeleteContainer}>
+                <TouchableOpacity onPress={() => handleDeleteMenuToggle(moment.id || moment._id)} style={styles.momentDeleteButton}>
+                  <MaterialIcons name="more-vert" size={20} color={Colors.gray600} />
+                </TouchableOpacity>
+                {showDeleteMenu === (moment.id || moment._id) && (
+                  <View style={styles.deleteDropdown}>
+                    <TouchableOpacity onPress={() => handleDeleteMoment(moment.id || moment._id)} style={styles.deleteOption}>
+                      <MaterialIcons name="delete" size={16} color={Colors.error} />
+                      <Typography variant="body2" style={[styles.deleteOptionText, { color: Colors.error }]}>
+                        Delete
+                      </Typography>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Post content */}
+          <Typography variant="body1" style={styles.momentPostContent}>
+            {moment.content}
+          </Typography>
+
+          {/* Post image */}
+          {moment.image && (
+            <Image source={{ uri: moment.image }} style={styles.momentPostImage} />
+          )}
+
+          {/* Actions */}
+          <View style={styles.momentActions}>
+            <TouchableOpacity 
+              onPress={() => handleLike(moment.id || moment._id)}
+              style={styles.momentActionButton}
+            >
+              <MaterialIcons 
+                name={moment.isLikedByUser || moment.isLiked ? 'favorite' : 'favorite-border'} 
+                size={20} 
+                color={moment.isLikedByUser || moment.isLiked ? Colors.error : Colors.gray600} 
+              />
+              <Typography variant="body2" style={styles.momentActionText}>
+                {moment.likes || 0}
+              </Typography>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={() => handleShare(moment.id || moment._id)}
+              style={styles.momentActionButton}
+            >
+              <MaterialIcons name="share" size={20} color={Colors.gray600} />
+              <Typography variant="body2" style={styles.momentActionText}>
+                {moment.shares ? `${moment.shares}` : 'Share'}
+              </Typography>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    };
+
+    return (
+      <View style={styles.momentsContainer}>
+        <ScrollView 
+          style={styles.momentsScrollView} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshingMoments}
+              onRefresh={() => loadPosts(true)}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
+        >
+          <View style={styles.header}>
+            <Typography variant="h2">Moments</Typography>
+          </View>
+          
+          {momentsError ? (
+            <ErrorMessage
+              title="Failed to load moments"
+              message={momentsError}
+              actionLabel="Retry"
+              onAction={() => {
+                setMomentsError(null);
+                loadPosts();
+              }}
+              onDismiss={() => setMomentsError(null)}
+            />
+          ) : isLoadingMoments ? (
+            <View>
+              {[1, 2, 3].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </View>
+          ) : moments.length > 0 ? (
+            moments.map((moment) => renderMoment(moment))
+          ) : (
+            <EmptyMoments
+              onCreateMoment={() => setShowCreateMoment(true)}
+            />
+          )}
+          
+          {/* Bottom padding to ensure last moment is visible above FAB */}
+          <View style={{ height: 80 }} />
+        </ScrollView>
+        
+        {/* Floating Action Button */}
+        <TouchableOpacity 
+          onPress={() => setShowCreateMoment(true)}
+          style={styles.fabButton}
+        >
+          <MaterialIcons name="add" size={24} color={Colors.white} />
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -879,9 +1628,38 @@ export default function App() {
         return (
           <ProfileScreen
             onBack={() => setCurrentMeScreen('main')}
-            onEditProfile={() => {
-              // Handle edit profile
-              console.log('Edit profile');
+            onEditProfile={() => setCurrentMeScreen('editProfile')}
+          />
+        );
+      
+      case 'editProfile':
+        return (
+          <ProfileEditScreen
+            onBack={() => setCurrentMeScreen('profile')}
+            onSave={async (updatedProfile) => {
+              try {
+                // Update backend via profile service
+                const result = await profileService.updateProfile({
+                  name: updatedProfile.name,
+                });
+                
+                if (result.success && result.profile) {
+                  setCurrentUser(result.profile);
+                  setUserProfile(updatedProfile);
+                  setCurrentMeScreen('profile');
+                } else {
+                  console.error('Profile update failed:', result.error);
+                  // Handle error - could show a toast/alert
+                }
+              } catch (error) {
+                console.error('Profile update error:', error);
+                // Handle error - could show a toast/alert
+              }
+            }}
+            initialProfile={{
+              ...userProfile,
+              name: currentUser?.name || userProfile.name,
+              email: currentUser?.email || userProfile.email,
             }}
           />
         );
@@ -897,6 +1675,7 @@ export default function App() {
             onPrivacySettings={() => setCurrentMeScreen('privacySettings')}
             onSendFeedback={() => setCurrentMeScreen('sendFeedback')}
             onAbout={() => setCurrentMeScreen('about')}
+            onLogout={handleLogout}
           />
         );
       
@@ -970,11 +1749,11 @@ export default function App() {
             </View>
             
             <ProfileCard
-              name="John Doe"
+              name={currentUser?.name || 'User'}
               role="Investor"
               region="Lagos, Nigeria"
               joinDate="March 2024"
-              bricksCount={7850}
+              bricksCount={currentUser?.bricks || 0}
               trustBadge="verified"
               trustLevel={4}
               showQRIcon={true}
@@ -1049,11 +1828,12 @@ export default function App() {
             // Delete conversation
           }}
           onCreateGroup={() => setShowCreateGroup(true)}
-          userBricksCount={7850}
+          userBricksCount={currentUser?.bricks || 0}
         />
       </View>
     );
   };
+
 
   const renderPlaceholder = (title: string) => (
     <View style={styles.placeholder}>
@@ -1073,6 +1853,7 @@ export default function App() {
           chatName={selectedChat.name}
           chatAvatar={selectedChat.avatar}
           isOnline={selectedChat.isOnline}
+          currentUser={currentUser}
           isGroup={selectedChat.isGroup}
           onBack={() => setSelectedChat(null)}
           onInfo={() => console.log('Show chat info')}
@@ -1124,6 +1905,20 @@ export default function App() {
     }
   };
 
+  // Show loading screen while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+          <LoadingSpinner size="large" />
+          <Typography variant="body1" color="textSecondary" style={{ marginTop: Spacing.md }}>
+            Loading...
+          </Typography>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   // Show login screen if not authenticated
   if (!isAuthenticated) {
     return (
@@ -1134,17 +1929,24 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
-        {/* Content */}
-        {renderContent()}
+    <NotificationProvider>
+      <ErrorBoundary
+        onError={(error, errorInfo) => {
+          console.error('App Error Boundary:', error, errorInfo);
+          // In production, send to error reporting service
+        }}
+      >
+        <SafeAreaProvider>
+        <SafeAreaView style={styles.container}>
+          {/* Content */}
+          {renderContent()}
 
         {/* Tab Bar - Hide when in chat room or on sub-screens */}
         {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentFXScreen === 'marketplace' && (
           <View style={styles.tabBar}>
           <TouchableOpacity 
             style={styles.tabItem}
-            onPress={() => setActiveTab('chat')}
+            onPress={() => handleTabSwitch('chat')}
           >
             <MaterialIcons 
               name="chat" 
@@ -1158,7 +1960,7 @@ export default function App() {
 
           <TouchableOpacity 
             style={styles.tabItem}
-            onPress={() => setActiveTab('contact')}
+            onPress={() => handleTabSwitch('contact')}
           >
             <MaterialIcons 
               name="contacts" 
@@ -1172,7 +1974,7 @@ export default function App() {
 
           <TouchableOpacity 
             style={styles.tabItem}
-            onPress={() => setActiveTab('wallet')}
+            onPress={() => handleTabSwitch('wallet')}
           >
             <MaterialIcons 
               name="account-balance-wallet" 
@@ -1186,7 +1988,7 @@ export default function App() {
 
           <TouchableOpacity 
             style={styles.tabItem}
-            onPress={() => setActiveTab('moments')}
+            onPress={() => handleTabSwitch('moments')}
           >
             <MaterialIcons 
               name="photo-library" 
@@ -1198,9 +2000,10 @@ export default function App() {
             </Typography>
           </TouchableOpacity>
 
+
           <TouchableOpacity 
             style={styles.tabItem}
-            onPress={() => setActiveTab('me')}
+            onPress={() => handleTabSwitch('me')}
           >
             <MaterialIcons 
               name="person" 
@@ -1255,10 +2058,6 @@ export default function App() {
         <DepositFlow
           visible={showDepositFlow}
           onClose={() => setShowDepositFlow(false)}
-          onDepositInitiated={(deposit) => {
-            console.log('Deposit initiated:', deposit);
-            // Could add this to moments or transaction history
-          }}
         />
 
         {/* Create Group Modal */}
@@ -1270,8 +2069,55 @@ export default function App() {
             // Could add group to conversations or moments
           }}
         />
+
+        {/* Create Moment Modal */}
+        <CreateMomentModal
+          isVisible={showCreateMoment}
+          onClose={() => setShowCreateMoment(false)}
+          onCreateMoment={handleCreateMoment}
+          currentUser={currentUser}
+        />
+
+        {/* QR Scanner Modal */}
+        <QRScannerModal
+          isVisible={showQRScanner}
+          onClose={() => setShowQRScanner(false)}
+          onQRCodeScanned={handleQRCodeScanned}
+          title="Scan QR Code"
+          description="Scan any QR code for payments, contacts, or other actions"
+        />
+
+        {/* Global Loading Overlay */}
+        <LoadingOverlay
+          visible={isLoadingGeneral}
+          message={generalLoadingMessage}
+          transparent={true}
+        />
+
+        {/* Payment Error Modal */}
+        {paymentError && (
+          <PaymentError
+            message={paymentError}
+            onRetry={() => setPaymentError(null)}
+            onDismiss={() => setPaymentError(null)}
+          />
+        )}
+
+        {/* Network Error Screen */}
+        {networkError && (
+          <NoInternetScreen
+            onRetry={() => {
+              setNetworkError(false);
+              clearErrors();
+            }}
+          />
+        )}
+        {/* In-App Notifications */}
+        <AppNotificationWrapper />
       </SafeAreaView>
     </SafeAreaProvider>
+    </ErrorBoundary>
+  </NotificationProvider>
   );
 }
 
@@ -1299,6 +2145,24 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gray200,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  notificationButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.error,
   },
   
   // Cards
@@ -1379,6 +2243,149 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
+  // Enhanced Contact Styles
+  contactsContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  enhancedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.background,
+  },
+  addContactButton: {
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary + '10',
+  },
+  searchContainer: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.background,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    fontSize: 16,
+    color: Colors.gray700,
+  },
+  clearSearchButton: {
+    padding: Spacing.xs,
+  },
+  filterContainer: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    backgroundColor: Colors.background,
+  },
+  filterTab: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    marginRight: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+    minWidth: 60,
+    alignItems: 'center',
+    height: 32,
+  },
+  activeFilterTab: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterTabText: {
+    color: Colors.gray600,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  activeFilterTabText: {
+    color: Colors.white,
+    fontWeight: '600',
+  },
+  contactList: {
+    flex: 1,
+  },
+  enhancedContactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray200,
+  },
+  enhancedContactAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+    position: 'relative',
+  },
+  avatarText: {
+    color: Colors.white,
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.success,
+    borderWidth: 2,
+    borderColor: Colors.white,
+  },
+  enhancedContactInfo: {
+    flex: 1,
+    paddingRight: Spacing.sm,
+  },
+  contactNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  contactName: {
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  trustBadge: {
+    marginLeft: Spacing.xs,
+  },
+  contactRole: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  contactStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  contactActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary + '10',
+  },
+  
   // Profile
   profileSection: {
     alignItems: 'center',
@@ -1440,17 +2447,14 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.gray100,
   },
 
-  // Moment card
-  momentCard: {
-    backgroundColor: Colors.surface,
-    marginBottom: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  // Moment item (removed card styling for more space)
+  momentItem: {
+    backgroundColor: Colors.background,
+    marginBottom: 0,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.gray200,
   },
   momentUserHeader: {
     flexDirection: 'row',
@@ -1466,7 +2470,7 @@ const styles = StyleSheet.create({
   momentAvatar: {
     width: 40,
     height: 40,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.md, // Square with rounded corners
     backgroundColor: Colors.gray200,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1475,7 +2479,7 @@ const styles = StyleSheet.create({
   momentAvatarImage: {
     width: 40,
     height: 40,
-    borderRadius: BorderRadius.full,
+    borderRadius: BorderRadius.md, // Square with rounded corners
   },
   momentUserDetails: {
     flex: 1,
@@ -1537,6 +2541,30 @@ const styles = StyleSheet.create({
   momentActionText: {
     marginLeft: Spacing.xs,
     color: Colors.gray600,
+  },
+  fabButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: Colors.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  momentsContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  momentsScrollView: {
+    flex: 1,
+    paddingHorizontal: Spacing.lg,
   },
   
   // Tab Bar

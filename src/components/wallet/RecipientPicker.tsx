@@ -12,6 +12,7 @@ import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import { QRScannerModal } from '../scanner/QRScannerModal';
 
 interface Contact {
   id: string;
@@ -33,6 +34,35 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'contacts' | 'qr' | 'address'>('contacts');
   const [address, setAddress] = useState('');
+  const [showQRScanner, setShowQRScanner] = useState(false);
+
+  const handleQRCodeScanned = (data: string) => {
+    console.log('QR Code scanned:', data);
+    
+    // Parse different QR code types
+    if (data.startsWith('wallet:')) {
+      const address = data.replace('wallet:', '');
+      onRecipientSelect({ id: Date.now().toString(), name: 'Scanned Wallet', address });
+    } else if (data.startsWith('payment:')) {
+      // Parse payment QR codes like payment:amount=100&currency=USD&to=address
+      const params = new URLSearchParams(data.replace('payment:', ''));
+      const address = params.get('to');
+      const name = params.get('name') || 'Payment Request';
+      if (address) {
+        onRecipientSelect({ id: Date.now().toString(), name, address });
+      }
+    } else if (data.startsWith('contact:')) {
+      // Parse contact QR codes
+      const params = new URLSearchParams(data.replace('contact:', ''));
+      const name = params.get('name') || 'Scanned Contact';
+      const email = params.get('email');
+      const address = params.get('address');
+      onRecipientSelect({ id: Date.now().toString(), name, address: address || email });
+    } else {
+      // Treat as wallet address
+      onRecipientSelect({ id: Date.now().toString(), name: 'Scanned Address', address: data });
+    }
+  };
 
   const mockContacts: Contact[] = [
     {
@@ -138,7 +168,7 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
         <Button
           title="Open Camera"
           icon="camera-alt"
-          onPress={() => Alert.alert('Info', 'QR Scanner would open here')}
+          onPress={() => setShowQRScanner(true)}
           style={styles.qrButton}
         />
       </View>
@@ -264,6 +294,15 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
 
       {/* Tab Content */}
       {renderTabContent()}
+      
+      {/* QR Scanner Modal */}
+      <QRScannerModal
+        isVisible={showQRScanner}
+        onClose={() => setShowQRScanner(false)}
+        onQRCodeScanned={handleQRCodeScanned}
+        title="Scan Recipient"
+        description="Scan a QR code to add recipient"
+      />
     </View>
   );
 };

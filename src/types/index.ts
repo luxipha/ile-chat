@@ -39,6 +39,13 @@ export interface Property {
 export interface WalletState {
   isConnected: boolean;
   address?: string;
+  walletId?: string;
+  chains?: Array<{
+    chain: string;
+    address: string;
+    isActive: boolean;
+    createdAt: string;
+  }>;
   balance: {
     [token: string]: string;
   };

@@ -21,6 +21,7 @@ interface SettingsScreenProps {
   onPrivacySettings: () => void;
   onSendFeedback: () => void;
   onAbout: () => void;
+  onLogout: () => void;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
@@ -32,6 +33,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onPrivacySettings,
   onSendFeedback,
   onAbout,
+  onLogout,
 }) => {
   const [notifications, setNotifications] = useState(true);
   const [biometric, setBiometric] = useState(false);
@@ -39,17 +41,31 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [darkMode, setDarkMode] = useState(false);
 
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => {
-          // Handle logout logic
-          console.log('User logged out');
-        }},
-      ]
-    );
+    console.log('🚪 SettingsScreen.handleLogout() called');
+    
+    // Use window.confirm for web environment, Alert for native
+    if (typeof window !== 'undefined') {
+      console.log('🌐 Web environment detected, using window.confirm');
+      if (window.confirm('Are you sure you want to logout?')) {
+        console.log('✅ Logout confirmed, calling onLogout prop');
+        onLogout();
+      } else {
+        console.log('🚫 Logout cancelled');
+      }
+    } else {
+      // Native environment
+      Alert.alert(
+        'Logout',
+        'Are you sure you want to logout?',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => console.log('🚫 Logout cancelled') },
+          { text: 'Logout', style: 'destructive', onPress: () => {
+            console.log('✅ Logout confirmed, calling onLogout prop');
+            onLogout();
+          }},
+        ]
+      );
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -74,7 +90,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     showChevron: boolean = true,
     danger?: boolean
   ) => (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+    <TouchableOpacity 
+      style={styles.menuItem} 
+      onPress={() => {
+        console.log(`🔘 Menu item pressed: ${title}`);
+        onPress();
+      }}
+    >
       <MaterialIcons 
         name={icon as any} 
         size={24} 

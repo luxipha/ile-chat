@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -70,7 +70,7 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
   onClose,
   onOfferCreated,
 }) => {
-  const [step, setStep] = useState<'currencies' | 'amounts' | 'payment' | 'terms' | 'review'>('currencies');
+  const [step, setStep] = useState<'currencies' | 'amounts' | 'payment' | 'bank' | 'terms' | 'review'>('currencies');
   const [sellCurrency, setSellCurrency] = useState<Currency | null>(null);
   const [buyCurrency, setBuyCurrency] = useState<Currency | null>(null);
   const [sellAmount, setSellAmount] = useState('');
@@ -82,6 +82,63 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
   const [terms, setTerms] = useState('');
   const [autoReply, setAutoReply] = useState('');
   const [kycRequired, setKycRequired] = useState(false);
+  
+  // Bank details state
+  const [bankDetails, setBankDetails] = useState({
+    bankName: '',
+    accountNumber: '',
+    accountHolderName: '',
+    routingNumber: '',
+    sortCode: '',
+    swiftCode: '',
+    currency: 'USD'
+  });
+  const [savedBankDetails, setSavedBankDetails] = useState<any[]>([]);
+  const [loadingBankDetails, setLoadingBankDetails] = useState(false);
+
+  // Load saved bank details when component mounts or when visible changes
+  useEffect(() => {
+    if (visible) {
+      loadSavedBankDetails();
+    }
+  }, [visible]);
+
+  const loadSavedBankDetails = async () => {
+    try {
+      setLoadingBankDetails(true);
+      // TODO: Replace with actual API call to get user's merchant profile
+      // const response = await api.get('/api/merchant/status');
+      // if (response.data.success && response.data.bankDetails) {
+      //   setSavedBankDetails([response.data.bankDetails]);
+      //   // Auto-populate if user has saved bank details
+      //   if (response.data.bankDetails.bankName) {
+      //     setBankDetails(response.data.bankDetails);
+      //   }
+      // }
+      
+      // Mock data for now - this will be replaced with actual API call
+      const mockSavedAccounts = [
+        {
+          bankName: 'First National Bank',
+          accountNumber: '1234567890',
+          accountHolderName: 'John Doe',
+          currency: 'USD',
+          routingNumber: '021000021',
+          swiftCode: 'FNBKUS33',
+        }
+      ];
+      setSavedBankDetails(mockSavedAccounts);
+      
+      // Auto-populate first saved account
+      if (mockSavedAccounts.length > 0) {
+        setBankDetails(mockSavedAccounts[0]);
+      }
+    } catch (error) {
+      console.error('Failed to load saved bank details:', error);
+    } finally {
+      setLoadingBankDetails(false);
+    }
+  };
 
   const handleClose = () => {
     setStep('currencies');
@@ -96,6 +153,15 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
     setTerms('');
     setAutoReply('');
     setKycRequired(false);
+    setBankDetails({
+      bankName: '',
+      accountNumber: '',
+      accountHolderName: '',
+      routingNumber: '',
+      sortCode: '',
+      swiftCode: '',
+      currency: 'USD'
+    });
     onClose();
   };
 
@@ -107,6 +173,8 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
         return sellAmount && exchangeRate && parseFloat(sellAmount) > 0 && parseFloat(exchangeRate) > 0;
       case 'payment':
         return selectedPaymentMethods.length > 0;
+      case 'bank':
+        return bankDetails.bankName && bankDetails.accountNumber && bankDetails.accountHolderName && bankDetails.currency;
       case 'terms':
         return minTrade && maxTrade && parseFloat(minTrade) <= parseFloat(maxTrade);
       case 'review':
@@ -119,7 +187,8 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
   const handleNext = () => {
     if (step === 'currencies') setStep('amounts');
     else if (step === 'amounts') setStep('payment');
-    else if (step === 'payment') setStep('terms');
+    else if (step === 'payment') setStep('bank');
+    else if (step === 'bank') setStep('terms');
     else if (step === 'terms') setStep('review');
     else if (step === 'review') handleCreateOffer();
   };
@@ -127,7 +196,8 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
   const handleBack = () => {
     if (step === 'amounts') setStep('currencies');
     else if (step === 'payment') setStep('amounts');
-    else if (step === 'terms') setStep('payment');
+    else if (step === 'bank') setStep('payment');
+    else if (step === 'terms') setStep('bank');
     else if (step === 'review') setStep('terms');
   };
 
@@ -149,6 +219,7 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
       terms,
       autoReply,
       kycRequired,
+      bankDetails,
       status: 'active',
     };
 
@@ -170,6 +241,7 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
         {step === 'currencies' && 'Select Currencies'}
         {step === 'amounts' && 'Set Amounts & Rate'}
         {step === 'payment' && 'Payment Methods'}
+        {step === 'bank' && 'Bank Details'}
         {step === 'terms' && 'Trading Terms'}
         {step === 'review' && 'Review Offer'}
       </Typography>
@@ -338,6 +410,125 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
     </ScrollView>
   );
 
+  const renderBankDetailsStep = () => (
+    <ScrollView style={styles.stepContainer}>
+      <Typography variant="h5" style={styles.stepTitle}>Bank Details</Typography>
+      <Typography variant="body2" color="textSecondary" style={styles.stepSubtitle}>
+        Add your bank account details for receiving payments
+      </Typography>
+
+      {savedBankDetails.length > 0 && (
+        <View style={styles.inputGroup}>
+          <Typography variant="body1" style={styles.inputLabel}>Saved Bank Accounts</Typography>
+          {savedBankDetails.map((account, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.savedAccountCard}
+              onPress={() => setBankDetails(account)}
+            >
+              <View style={styles.savedAccountHeader}>
+                <MaterialIcons name="account-balance" size={20} color={Colors.primary} />
+                <Typography variant="body2" style={styles.savedAccountName}>
+                  {account.bankName} - {account.accountHolderName}
+                </Typography>
+              </View>
+              <Typography variant="caption" color="textSecondary">
+                ****{account.accountNumber.slice(-4)} • {account.currency}
+              </Typography>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Bank Name *</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.bankName}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, bankName: text }))}
+          placeholder="Enter bank name"
+        />
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Account Number *</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.accountNumber}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, accountNumber: text }))}
+          placeholder="Enter account number"
+          keyboardType="numeric"
+        />
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Account Holder Name *</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.accountHolderName}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, accountHolderName: text }))}
+          placeholder="Enter account holder name"
+        />
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Currency *</Typography>
+        <View style={styles.currencyOptions}>
+          {['USD', 'NGN', 'CNY', 'EUR', 'GBP'].map((currency) => (
+            <TouchableOpacity
+              key={currency}
+              style={[
+                styles.currencyOption,
+                bankDetails.currency === currency && styles.selectedCurrency
+              ]}
+              onPress={() => setBankDetails(prev => ({ ...prev, currency }))}
+            >
+              <Typography 
+                variant="body2"
+                style={[
+                  styles.currencyCode,
+                  bankDetails.currency === currency && { color: Colors.primary }
+                ]}
+              >
+                {currency}
+              </Typography>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Routing Number (Optional)</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.routingNumber}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, routingNumber: text }))}
+          placeholder="For US banks"
+        />
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>Sort Code (Optional)</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.sortCode}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, sortCode: text }))}
+          placeholder="For UK banks"
+        />
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Typography variant="body1" style={styles.inputLabel}>SWIFT Code (Optional)</Typography>
+        <TextInput
+          style={styles.textInput}
+          value={bankDetails.swiftCode}
+          onChangeText={(text) => setBankDetails(prev => ({ ...prev, swiftCode: text }))}
+          placeholder="For international transfers"
+        />
+      </View>
+    </ScrollView>
+  );
+
   const renderTermsStep = () => (
     <ScrollView style={styles.stepContainer}>
       <Typography variant="h5" style={styles.stepTitle}>Trading Terms</Typography>
@@ -463,6 +654,34 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
       </Card>
 
       <Card style={styles.reviewCard}>
+        <Typography variant="h6" style={styles.reviewSectionTitle}>Bank Details</Typography>
+        <View style={styles.reviewRow}>
+          <Typography variant="body2" color="textSecondary">Bank Name:</Typography>
+          <Typography variant="body2" style={styles.reviewValue}>
+            {bankDetails.bankName}
+          </Typography>
+        </View>
+        <View style={styles.reviewRow}>
+          <Typography variant="body2" color="textSecondary">Account Number:</Typography>
+          <Typography variant="body2" style={styles.reviewValue}>
+            ****{bankDetails.accountNumber.slice(-4)}
+          </Typography>
+        </View>
+        <View style={styles.reviewRow}>
+          <Typography variant="body2" color="textSecondary">Account Holder:</Typography>
+          <Typography variant="body2" style={styles.reviewValue}>
+            {bankDetails.accountHolderName}
+          </Typography>
+        </View>
+        <View style={styles.reviewRow}>
+          <Typography variant="body2" color="textSecondary">Currency:</Typography>
+          <Typography variant="body2" style={styles.reviewValue}>
+            {bankDetails.currency}
+          </Typography>
+        </View>
+      </Card>
+
+      <Card style={styles.reviewCard}>
         <Typography variant="h6" style={styles.reviewSectionTitle}>Payment & Terms</Typography>
         <View style={styles.reviewRow}>
           <Typography variant="body2" color="textSecondary">Payment Methods:</Typography>
@@ -497,6 +716,7 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
       case 'currencies': return renderCurrenciesStep();
       case 'amounts': return renderAmountsStep();
       case 'payment': return renderPaymentStep();
+      case 'bank': return renderBankDetailsStep();
       case 'terms': return renderTermsStep();
       case 'review': return renderReviewStep();
       default: return renderCurrenciesStep();
@@ -729,5 +949,30 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     width: '100%',
+  },
+  // Bank details styles
+  savedAccountCard: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+    backgroundColor: Colors.gray50,
+    marginBottom: Spacing.sm,
+  },
+  savedAccountHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  savedAccountName: {
+    marginLeft: Spacing.sm,
+    fontWeight: '500',
+    flex: 1,
+  },
+  currencyOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
   },
 });

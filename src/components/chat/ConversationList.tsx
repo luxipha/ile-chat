@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -14,6 +14,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
+import { EmptyState, EmptyChat, EmptySearch } from '../ui/EmptyState';
 
 export interface Conversation {
   id: string;
@@ -38,6 +39,150 @@ interface ConversationListProps {
   onCreateGroup?: () => void;
   userBricksCount?: number;
 }
+
+// Helper functions moved outside the main component to prevent re-creation on each render.
+const formatTimestamp = (date: Date) => {
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const hours = diff / (1000 * 60 * 60);
+  
+  if (hours < 1) {
+    const minutes = Math.floor(diff / (1000 * 60));
+    return minutes < 1 ? 'now' : `${minutes}m`;
+  } else if (hours < 24) {
+    return `${Math.floor(hours)}h`;
+  } else {
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
+  }
+};
+
+const getTrustBadgeIcon = (badge: string | null) => {
+  switch (badge) {
+    case 'verified': return 'verified';
+    case 'premium': return 'diamond';
+    case 'agent': return 'business';
+    default: return null;
+  }
+};
+
+const getTrustBadgeColor = (badge: string | null) => {
+  switch (badge) {
+    case 'verified': return ChatTheme.success;
+    case 'premium': return ChatTheme.accent;
+    case 'agent': return ChatTheme.sendBubbleBackground;
+    default: return ChatTheme.textSecondary;
+  }
+};
+
+interface ConversationRowProps {
+  item: Conversation;
+  onPress: (item: Conversation) => void;
+  onPin: (id: string) => void;
+  onHide: (id: string) => void;
+  onDelete: (id: string) => void;
+  isSwiped: boolean;
+  onSwipe: (id: string | null) => void;
+}
+
+const ConversationRow: React.FC<ConversationRowProps> = ({
+  item,
+  onPress,
+  onPin,
+  onHide,
+  onDelete,
+  isSwiped,
+  onSwipe,
+}) => {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const { width } = Dimensions.get('window');
+  const swipeThreshold = width * 0.25;
+  const swipeActionsWidth = 240; // 3 actions * 80px
+
+  useEffect(() => {
+    Animated.spring(translateX, {
+      toValue: isSwiped ? -swipeActionsWidth : 0,
+      useNativeDriver: true,
+    }).start();
+  }, [isSwiped, translateX]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only activate for horizontal swipes
+        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 10;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        // Restrict swipe to left direction
+        const newX = Math.min(0, gestureState.dx);
+        if (newX > -swipeActionsWidth - 20) { // Add a small buffer
+          translateX.setValue(newX);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -swipeThreshold) {
+          onSwipe(item.id);
+        } else {
+          onSwipe(null);
+        }
+      },
+    })
+  ).current;
+
+  const handlePress = () => {
+    if (isSwiped) {
+      onSwipe(null); // Close swipe actions if the row is pressed while swiped
+    } else {
+      onPress(item);
+    }
+  };
+
+  const renderSwipeActions = () => (
+    <View style={styles.swipeActions}>
+      <TouchableOpacity style={[styles.swipeAction, styles.pinAction]} onPress={() => onPin(item.id)}>
+        <MaterialIcons name={item.isPinned ? "push-pin" : "push-pin"} size={20} color="white" />
+        <Text style={styles.swipeActionText}>{item.isPinned ? 'Unpin' : 'Pin'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.swipeAction, styles.hideAction]} onPress={() => onHide(item.id)}>
+        <MaterialIcons name="visibility-off" size={20} color="white" />
+        <Text style={styles.swipeActionText}>Hide</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.swipeAction, styles.deleteAction]} onPress={() => onDelete(item.id)}>
+        <MaterialIcons name="delete" size={20} color="white" />
+        <Text style={styles.swipeActionText}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  return (
+    <View style={styles.conversationWrapper}>
+      {renderSwipeActions()}
+      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
+        <TouchableOpacity
+          style={[styles.conversationItem, item.isPinned && styles.pinnedConversation]}
+          onPress={handlePress}
+          activeOpacity={0.7}
+        >
+          {item.isPinned && <View style={styles.pinIndicator}><MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} /></View>}
+          <Avatar name={item.name} imageUrl={item.avatar} online={item.isOnline} size="medium" />
+          <View style={styles.contentContainer}>
+            <View style={styles.headerRow}>
+              <View style={styles.nameContainer}>
+                <Typography variant="h6" style={[styles.name, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{item.name}</Typography>
+                {item.trustBadge && <MaterialIcons name={getTrustBadgeIcon(item.trustBadge) as any} size={16} color={getTrustBadgeColor(item.trustBadge)} style={styles.trustBadge} />}
+              </View>
+              <Text style={styles.timestamp}>{formatTimestamp(item.timestamp)}</Text>
+            </View>
+            <View style={styles.messageRow}>
+              <Typography variant="body2" color="textSecondary" style={[styles.lastMessage, item.unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>{item.lastMessage}</Typography>
+              {item.unreadCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text></View>}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+};
 
 export const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
@@ -66,220 +211,17 @@ export const ConversationList: React.FC<ConversationListProps> = ({
     });
   }, [conversations, searchQuery]);
 
-  const formatTimestamp = (date: Date) => {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const hours = diff / (1000 * 60 * 60);
-    
-    if (hours < 1) {
-      const minutes = Math.floor(diff / (1000 * 60));
-      return minutes < 1 ? 'now' : `${minutes}m`;
-    } else if (hours < 24) {
-      return `${Math.floor(hours)}h`;
-    } else {
-      const days = Math.floor(hours / 24);
-      return `${days}d`;
-    }
-  };
-
-  const getTrustBadgeIcon = (badge: string | null) => {
-    switch (badge) {
-      case 'verified': return 'verified';
-      case 'premium': return 'diamond';
-      case 'agent': return 'business';
-      default: return null;
-    }
-  };
-
-  const getTrustBadgeColor = (badge: string | null) => {
-    switch (badge) {
-      case 'verified': return ChatTheme.success;
-      case 'premium': return ChatTheme.accent;
-      case 'agent': return ChatTheme.sendBubbleBackground;
-      default: return ChatTheme.textSecondary;
-    }
-  };
-
-  const renderSwipeActions = (item: Conversation) => (
-    <View style={styles.swipeActions}>
-      <TouchableOpacity 
-        style={[styles.swipeAction, styles.pinAction]}
-        onPress={() => {
-          onPin(item.id);
-          setSwipedItemId(null);
-        }}
-      >
-        <MaterialIcons 
-          name={item.isPinned ? "push-pin" : "push-pin"} 
-          size={20} 
-          color="white" 
-        />
-        <Text style={styles.swipeActionText}>
-          {item.isPinned ? 'Unpin' : 'Pin'}
-        </Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={[styles.swipeAction, styles.hideAction]}
-        onPress={() => {
-          onHide(item.id);
-          setSwipedItemId(null);
-        }}
-      >
-        <MaterialIcons name="visibility-off" size={20} color="white" />
-        <Text style={styles.swipeActionText}>Hide</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={[styles.swipeAction, styles.deleteAction]}
-        onPress={() => {
-          onDelete(item.id);
-          setSwipedItemId(null);
-        }}
-      >
-        <MaterialIcons name="delete" size={20} color="white" />
-        <Text style={styles.swipeActionText}>Delete</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   const renderConversation = ({ item }: { item: Conversation }) => {
-    const translateX = new Animated.Value(0);
-    const { width } = Dimensions.get('window');
-    const swipeThreshold = width * 0.25;
-
-    const panResponder = PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dy) < 50;
-      },
-      onPanResponderGrant: () => {
-        translateX.setOffset(translateX._value);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dx < 0) { // Only allow left swipe
-          translateX.setValue(gestureState.dx);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        translateX.flattenOffset();
-        
-        if (gestureState.dx < -swipeThreshold) {
-          // Show swipe actions
-          setSwipedItemId(item.id);
-          Animated.spring(translateX, {
-            toValue: -240, // Width for 3 action buttons (80px each)
-            useNativeDriver: false,
-          }).start();
-        } else {
-          // Reset position
-          setSwipedItemId(null);
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: false,
-          }).start();
-        }
-      },
-    });
-
     return (
-      <View style={styles.conversationWrapper}>
-        {swipedItemId === item.id && renderSwipeActions(item)}
-        
-        <Animated.View
-          {...panResponder.panHandlers}
-          style={[
-            styles.conversationAnimated,
-            {
-              transform: [{ translateX: translateX }]
-            }
-          ]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.conversationItem,
-              item.isPinned && styles.pinnedConversation
-            ]}
-            onPress={() => {
-              if (swipedItemId === item.id) {
-                // Reset swipe if this item is swiped
-                setSwipedItemId(null);
-                Animated.spring(translateX, {
-                  toValue: 0,
-                  useNativeDriver: false,
-                }).start();
-              } else {
-                onConversationPress(item);
-              }
-            }}
-            activeOpacity={0.7}
-          >
-            {item.isPinned && (
-              <View style={styles.pinIndicator}>
-                <MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} />
-              </View>
-            )}
-            
-            <Avatar 
-              name={item.name}
-              imageUrl={item.avatar}
-              online={item.isOnline}
-              size="medium"
-            />
-            
-            <View style={styles.contentContainer}>
-              <View style={styles.headerRow}>
-                <View style={styles.nameContainer}>
-                  <Typography 
-                    variant="h6" 
-                    style={[
-                      styles.name,
-                      item.unreadCount > 0 && styles.unreadName
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Typography>
-                  {item.trustBadge && (
-                    <MaterialIcons 
-                      name={getTrustBadgeIcon(item.trustBadge) as any}
-                      size={16}
-                      color={getTrustBadgeColor(item.trustBadge)}
-                      style={styles.trustBadge}
-                    />
-                  )}
-                </View>
-                <View style={styles.metaContainer}>
-                  <Text style={styles.timestamp}>
-                    {formatTimestamp(item.timestamp)}
-                  </Text>
-                </View>
-              </View>
-              
-              <View style={styles.messageRow}>
-                <Typography 
-                  variant="body2" 
-                  color="textSecondary"
-                  style={[
-                    styles.lastMessage,
-                    item.unreadCount > 0 && styles.unreadMessage
-                  ]}
-                  numberOfLines={1}
-                >
-                  {item.lastMessage}
-                </Typography>
-                
-                {item.unreadCount > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>
-                      {item.unreadCount > 99 ? '99+' : item.unreadCount}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
+      <ConversationRow
+        item={item}
+        onPress={onConversationPress}
+        onPin={(id) => { onPin(id); setSwipedItemId(null); }}
+        onHide={(id) => { onHide(id); setSwipedItemId(null); }}
+        onDelete={(id) => { onDelete(id); setSwipedItemId(null); }}
+        isSwiped={swipedItemId === item.id}
+        onSwipe={setSwipedItemId}
+      />
     );
   };
 
@@ -328,6 +270,18 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         stickyHeaderIndices={[]}
         onScrollBeginDrag={() => setSwipedItemId(null)}
+        ListEmptyComponent={() => (
+          searchQuery ? (
+            <EmptySearch
+              searchQuery={searchQuery}
+              onClearSearch={() => setSearchQuery('')}
+            />
+          ) : (
+            <EmptyChat
+              onStartChat={onCreateGroup}
+            />
+          )
+        )}
       />
     </View>
   );
@@ -401,9 +355,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   conversationAnimated: {
-    backgroundColor: ChatTheme.background1,
-  },
-  conversationItem: {
     flexDirection: 'row',
     paddingHorizontal: ChatSpacing.lg,
     paddingVertical: ChatSpacing.md,
@@ -411,6 +362,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   pinnedConversation: {
+    backgroundColor: ChatTheme.background2,
+  },
+  conversationItem: {
     backgroundColor: ChatTheme.background2,
   },
   pinIndicator: {
@@ -461,12 +415,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: ChatSpacing.xs / 2,
   },
-  nameContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: ChatSpacing.sm,
-  },
   name: {
     fontWeight: '600',
     marginRight: ChatSpacing.xs,
@@ -478,13 +426,15 @@ const styles = StyleSheet.create({
   trustBadge: {
     marginLeft: ChatSpacing.xs / 2,
   },
-  metaContainer: {
-    alignItems: 'flex-end',
-  },
   timestamp: {
     fontSize: 12,
     color: ChatTheme.textSecondary,
-    marginBottom: ChatSpacing.xs / 2,
+  },
+  nameContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: ChatSpacing.sm,
   },
   bricksContainer: {
     flexDirection: 'row',
