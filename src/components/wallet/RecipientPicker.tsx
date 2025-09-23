@@ -42,14 +42,14 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
     // Parse different QR code types
     if (data.startsWith('wallet:')) {
       const address = data.replace('wallet:', '');
-      onRecipientSelect({ id: Date.now().toString(), name: 'Scanned Wallet', address });
+      onSelectRecipient({ id: Date.now().toString(), name: 'Scanned Wallet', address });
     } else if (data.startsWith('payment:')) {
       // Parse payment QR codes like payment:amount=100&currency=USD&to=address
       const params = new URLSearchParams(data.replace('payment:', ''));
       const address = params.get('to');
       const name = params.get('name') || 'Payment Request';
       if (address) {
-        onRecipientSelect({ id: Date.now().toString(), name, address });
+        onSelectRecipient({ id: Date.now().toString(), name, address });
       }
     } else if (data.startsWith('contact:')) {
       // Parse contact QR codes
@@ -57,10 +57,10 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
       const name = params.get('name') || 'Scanned Contact';
       const email = params.get('email');
       const address = params.get('address');
-      onRecipientSelect({ id: Date.now().toString(), name, address: address || email });
+      onSelectRecipient({ id: Date.now().toString(), name, address: address || email });
     } else {
       // Treat as wallet address
-      onRecipientSelect({ id: Date.now().toString(), name: 'Scanned Address', address: data });
+      onSelectRecipient({ id: Date.now().toString(), name: 'Scanned Address', address: data });
     }
   };
 
@@ -201,7 +201,7 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
             style={styles.addressInput}
             value={address}
             onChangeText={setAddress}
-            placeholder="0x... or address"
+            placeholder="0x... Aptos address"
             placeholderTextColor={Colors.gray500}
             multiline
           />

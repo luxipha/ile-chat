@@ -1,9 +1,16 @@
 import { ApiResponse, User, Transaction, Property } from '../types';
 
 // Detect environment and use appropriate URL
-const API_BASE_URL = typeof window !== 'undefined' 
+// In React Native, window exists but we still want to use the mobile URL
+const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+const API_BASE_URL = isWeb
   ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.100:3000'; // Mobile device
+  : 'http://192.168.31.100:3000'; // Mobile device (React Native)
+
+console.log('🔧 API_BASE_URL configured as:', API_BASE_URL);
+console.log('🔧 Environment check - isWeb:', isWeb);
+console.log('🔧 Environment check - window exists:', typeof window !== 'undefined');
+console.log('🔧 Environment check - document exists:', typeof window !== 'undefined' && typeof window.document !== 'undefined');
 
 class ApiService {
   private async request<T>(
@@ -16,16 +23,26 @@ class ApiService {
         url: fullUrl,
         method: options.method || 'GET',
         hasHeaders: !!options.headers,
-        headers: options.headers
+        headers: options.headers,
+        timestamp: new Date().toISOString()
       });
 
-      const response = await fetch(fullUrl, {
+      // Add a timeout to the request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const requestOptions = {
+        ...options,
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           ...options.headers,
         },
-        ...options,
-      });
+      };
+
+      const response = await fetch(fullUrl, requestOptions);
+      
+      clearTimeout(timeoutId); // Clear timeout if request completes
 
       console.log('📥 HTTP response received:', {
         status: response.status,
@@ -62,11 +79,27 @@ class ApiService {
       console.error('❌ Network error in request:', error);
       console.error('❌ Error details:', {
         message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : null
+        stack: error instanceof Error ? error.stack : null,
+        name: error instanceof Error ? error.name : 'Unknown',
+        endpoint: endpoint,
+        fullUrl: `${API_BASE_URL}${endpoint}`,
+        timestamp: new Date().toISOString()
       });
+      
+      let errorMessage = 'Network error';
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage = 'Request timeout';
+        } else if (error.message.includes('Network request failed')) {
+          errorMessage = 'Cannot reach server. Check your network connection and server status.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Network error',
+        error: errorMessage,
       };
     }
   }
@@ -184,6 +217,12 @@ class ApiService {
       method: 'DELETE',
       headers,
     });
+  }
+
+  // Add health check method for testing connectivity
+  async healthCheck(): Promise<ApiResponse<any>> {
+    console.log('🏥 Testing backend connectivity...');
+    return this.request('/health');
   }
 }
 

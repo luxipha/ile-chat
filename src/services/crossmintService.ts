@@ -117,58 +117,92 @@ class CrossmintService {
   }
 
   /**
-   * Get wallet balance using the wallet status endpoint (no more 400 errors!)
+   * Get wallet balance using CrossMint staging API (works with test address)
    */
-  async getWalletBalance(address: string): Promise<{ success: boolean; balances?: { [token: string]: string }; error?: string }> {
+  async getWalletBalance(address: string = "0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb"): Promise<{ success: boolean; balances?: { [token: string]: string }; error?: string }> {
     try {
-      console.log('🔄 Getting balance via wallet status (avoiding 400 errors)...');
+      console.log('🔄 Getting CrossMint balance for address:', address);
       
-      // Use the working wallet status endpoint instead of separate balance endpoint
-      const statusResponse = await this.getWalletStatus();
+      // Use the working CrossMint staging API
+      const apiKey = process.env.EXPO_PUBLIC_CROSSMINT_CLIENT_API_KEY || 'ck_staging_5zjWiW7TV26xSe1p117tHktSNAQmTwSLu51cB326brCKVc3DW8j5JDGx6yki39kDpAGjWd7fgrK7g17d9cCJeciWAG4ugruJABAMPS2PUxR2ECAwKnNju4pTKaSS1GkHZvvobJdPsJSHQxKnfBDHSZM9yKhsVHh8v9P6BiueSVF1aB3W5YN4kGY6mz3m85McCUTwre9rBCjTMbdy3kEkeCoP';
+      const balanceUrl = `https://staging.crossmint.com/api/v1-alpha2/wallets/${address}/balances?tokens=usdc,eth`;
       
-      if (statusResponse.success && statusResponse.wallet) {
-        const rawBalances = statusResponse.wallet.balances || {};
-        const formattedBalances: { [token: string]: string } = {};
-        
-        // Extract balances from the wallet status response
-        Object.entries(rawBalances).forEach(([chain, chainData]: [string, any]) => {
-          if (chainData && typeof chainData === 'object') {
-            // Handle native token
-            if (chainData.native !== undefined) {
-              const chainName = chain === 'ethereum' ? 'ETH' : 
-                               chain === 'polygon' ? 'MATIC' : 
-                               chain === 'solana' ? 'SOL' : chain.toUpperCase();
-              formattedBalances[chainName] = String(chainData.native);
-            }
-            
-            // Handle token arrays
-            if (Array.isArray(chainData.tokens)) {
-              chainData.tokens.forEach((token: any) => {
-                if (token.symbol && token.balance !== undefined) {
-                  formattedBalances[token.symbol] = String(token.balance);
-                }
-              });
-            }
-          }
-        });
-        
-        return {
-          success: true,
-          balances: formattedBalances
-        };
-      } else {
-        return {
-          success: false,
-          error: statusResponse.error || 'Failed to get wallet status'
-        };
+      const response = await fetch(balanceUrl, {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`CrossMint API error: ${response.status}`);
       }
+      
+      const data = await response.json();
+      console.log('✅ CrossMint API response:', data);
+      
+      const formattedBalances: { [token: string]: string } = {};
+      
+      // Process the response data
+      data.forEach((tokenData: any) => {
+        if (tokenData.token === 'usdc' && tokenData.balances) {
+          // Convert USDC balances (6 decimals)
+          Object.entries(tokenData.balances).forEach(([chain, balance]: [string, any]) => {
+            const balanceNum = Number(balance) / Math.pow(10, tokenData.decimals || 6);
+            if (balanceNum > 0) {
+              const chainName = chain === 'ethereum-sepolia' ? 'Ethereum Sepolia' :
+                               chain === 'polygon-amoy' ? 'Polygon Amoy' :
+                               chain === 'base-sepolia' ? 'Base Sepolia' : chain;
+              formattedBalances[`USDC (${chainName})`] = balanceNum.toString();
+              console.log(`💰 Found USDC on ${chainName}: ${balanceNum}`);
+            }
+          });
+        }
+        
+        if (tokenData.token === 'eth' && tokenData.balances) {
+          // Convert ETH balances (18 decimals)
+          Object.entries(tokenData.balances).forEach(([chain, balance]: [string, any]) => {
+            const balanceNum = Number(balance) / Math.pow(10, tokenData.decimals || 18);
+            if (balanceNum > 0) {
+              const chainName = chain === 'ethereum-sepolia' ? 'Ethereum Sepolia' :
+                               chain === 'polygon-amoy' ? 'Polygon Amoy' :
+                               chain === 'base-sepolia' ? 'Base Sepolia' : chain;
+              const tokenSymbol = chain.includes('polygon') ? 'MATIC' : 'ETH';
+              formattedBalances[`${tokenSymbol} (${chainName})`] = balanceNum.toString();
+              console.log(`🔷 Found ${tokenSymbol} on ${chainName}: ${balanceNum}`);
+            }
+          });
+        }
+      });
+      
+      return {
+        success: true,
+        balances: formattedBalances
+      };
+      
     } catch (error: any) {
-      console.error('❌ Get wallet balance error:', error);
+      console.error('❌ Get CrossMint balance error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to get wallet balance'
+        error: error.message || 'Failed to get CrossMint balance'
       };
     }
+  }
+
+  /**
+   * Get the test wallet address for CrossMint staging
+   */
+  getTestWalletAddress(): string {
+    return "0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb";
+  }
+
+  /**
+   * Check if we have a CrossMint wallet (for staging, we use the test address)
+   */
+  async hasWalletConnected(): Promise<boolean> {
+    // For staging/testing, we always have the test wallet
+    return true;
   }
 
   /**
@@ -475,16 +509,34 @@ class CrossmintService {
     error?: string;
   }> {
     try {
+      console.log('🔄 Initializing crossmintService...');
       await this.initialize();
+      
+      console.log('🔄 Making wallet GET request:', {
+        endpoint: `/api/wallet/get?chain=${chain}&type=${type}`,
+        chain,
+        type
+      });
 
       const response = await apiClient.get(`/api/wallet/get?chain=${chain}&type=${type}`);
+      
+      console.log('✅ Wallet GET response:', {
+        success: response.success,
+        hasData: !!response.data,
+        data: response.data
+      });
 
       return response.data;
     } catch (error: any) {
-      console.error('Get wallet from backend error:', error);
+      console.error('❌ Get wallet from backend error:', error);
+      console.error('❌ Error details:', {
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status
+      });
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to get wallet from backend'
+        error: error.response?.data?.message || error?.message || 'Failed to get wallet from backend'
       };
     }
   }

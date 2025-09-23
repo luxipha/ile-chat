@@ -2,7 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from './authService';
 
 // Detect environment and use appropriate URL
-const API_BASE_URL = typeof window !== 'undefined' 
+const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+const API_BASE_URL = isWeb
   ? 'http://localhost:3000'  // Web browser
   : 'http://192.168.31.100:3000'; // Mobile device
 

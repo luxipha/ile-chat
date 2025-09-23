@@ -107,8 +107,8 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
 
   const handleClose = () => {
     if (content.trim() || selectedImage) {
-      // Use window.confirm for web environment, Alert for native
-      if (typeof window !== 'undefined') {
+      // Check for actual web environment (window.confirm exists)
+      if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
         if (window.confirm('Discard Moment? Your moment will be lost if you go back now.')) {
           setContent('');
           setSelectedImage(null);

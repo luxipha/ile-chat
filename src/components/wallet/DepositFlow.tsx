@@ -15,6 +15,7 @@ import { Card } from '../ui/Card';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import QRCode from 'react-native-qrcode-svg';
 import crossmintService from '../../services/crossmintService';
+import aptosService from '../../services/aptosService';
 
 interface DepositFlowProps {
   visible: boolean;
@@ -49,6 +50,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
   visible,
   onClose,
 }) => {
+  
   const [currentStep, setCurrentStep] = useState<DepositStep>('method');
   const [selectedNetwork, setSelectedNetwork] = useState<CryptoNetwork | null>(null);
   const [walletAddresses, setWalletAddresses] = useState<{[key: string]: string}>({});
@@ -78,30 +80,33 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
       setIsLoadingAddress(true);
       try {
         if (networkData.type === 'crossmint') {
-          // Check if CrossMint wallet exists
-          const walletStatus = await crossmintService.getWalletStatus();
-          
-          if (walletStatus.success && walletStatus.wallet) {
-            // For CrossMint, use the main wallet address for Ethereum
-            const walletAddress = walletStatus.wallet.walletId || 
-                                walletStatus.wallet.chains?.[0]?.address ||
-                                'No address available';
-            
-            console.log(`✅ Using existing CrossMint wallet address: ${walletAddress}`);
-            setWalletAddresses(prev => ({
-              ...prev,
-              [networkData.chain]: walletAddress
-            }));
-          } else {
-            throw new Error('No CrossMint wallet found. Please create a wallet first.');
-          }
+          // Use the test wallet address for staging environment
+          const testAddress = crossmintService.getTestWalletAddress();
+          console.log(`✅ Using CrossMint test wallet address for staging: ${testAddress}`);
+          setWalletAddresses(prev => ({
+            ...prev,
+            [networkData.chain]: testAddress
+          }));
         } else if (networkData.type === 'aptos') {
           // Check if Aptos wallet exists in backend database
+          console.log('🔍 Checking Aptos wallet for chain:', networkData.chain);
+          console.log('🔍 Looking for wallet type: aptos');
           let backendWallet;
           try {
+            console.log('🔍 Calling crossmintService.getWalletFromBackend...');
             backendWallet = await crossmintService.getWalletFromBackend(networkData.chain, 'aptos');
+            console.log('🔍 Backend wallet response:', {
+              success: backendWallet?.success,
+              hasWallet: !!backendWallet?.wallet,
+              walletAddress: backendWallet?.wallet?.address,
+              error: backendWallet?.error
+            });
           } catch (error) {
             console.log('⚠️ Error checking backend wallet:', error);
+            console.log('⚠️ Error details:', {
+              message: error instanceof Error ? error.message : 'Unknown error',
+              stack: error instanceof Error ? error.stack : null
+            });
             backendWallet = { success: false };
           }
           
@@ -126,7 +131,74 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
               console.warn('⚠️ Failed to update AsyncStorage:', storageError);
             }
           } else {
-            throw new Error('No Aptos wallet found. Please create a wallet first.');
+            // Fallback: Check AsyncStorage like the main app does
+            console.log('🔍 Database failed, checking AsyncStorage as fallback...');
+            try {
+              const localAddress = await AsyncStorage.getItem('aptosWalletAddress');
+              if (localAddress) {
+                console.log('✅ Found Aptos wallet in AsyncStorage:', localAddress);
+                setWalletAddresses(prev => ({
+                  ...prev,
+                  [networkData.chain]: localAddress
+                }));
+                
+                // Also try to save to database for next time
+                const localPrivateKey = await AsyncStorage.getItem('aptosWalletPrivateKey');
+                if (localPrivateKey) {
+                  console.log('🔄 Attempting to save AsyncStorage wallet to database...');
+                  try {
+                    await crossmintService.saveWalletToBackend({
+                      address: localAddress,
+                      chain: 'aptos-testnet',
+                      type: 'aptos',
+                      privateKey: localPrivateKey
+                    });
+                    console.log('✅ Successfully saved wallet to database for future use');
+                  } catch (saveError) {
+                    console.warn('⚠️ Failed to save to database, but continuing with AsyncStorage:', saveError);
+                  }
+                }
+              } else {
+                // No wallet found anywhere - create a new one
+                console.log('🆕 No Aptos wallet found, creating new wallet...');
+                const walletResult = await aptosService.generateWallet(200_000_000); // 2 APT pre-funding
+                
+                if (walletResult.success && walletResult.address) {
+                  console.log('✅ Created new Aptos wallet:', walletResult.address);
+                  setWalletAddresses(prev => ({
+                    ...prev,
+                    [networkData.chain]: walletResult.address!
+                  }));
+                  
+                  // Save to database for future use
+                  if (walletResult.privateKey) {
+                    try {
+                      await crossmintService.saveWalletToBackend({
+                        address: walletResult.address,
+                        chain: 'aptos-testnet',
+                        type: 'aptos',
+                        privateKey: walletResult.privateKey
+                      });
+                      console.log('✅ Saved new wallet to database');
+                    } catch (saveError) {
+                      console.warn('⚠️ Failed to save to database, but wallet created:', saveError);
+                    }
+                  }
+                  
+                  // Show success message
+                  Alert.alert(
+                    '🎉 Wallet Created!',
+                    `Your Aptos wallet has been created and pre-funded with 2 APT.\n\nAddress: ${walletResult.address.slice(0, 12)}...${walletResult.address.slice(-12)}`,
+                    [{ text: 'Continue', style: 'default' }]
+                  );
+                } else {
+                  throw new Error(walletResult.error || 'Failed to create Aptos wallet');
+                }
+              }
+            } catch (storageError) {
+              console.error('❌ AsyncStorage fallback failed:', storageError);
+              throw new Error('No Aptos wallet found. Please create a wallet first.');
+            }
           }
         }
       } catch (error: any) {

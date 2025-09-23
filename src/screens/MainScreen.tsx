@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Layout, Text, Button, Card, Avatar } from '@ui-kitten/components';
 import { ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { SendMoneyModal } from '../components/wallet/SendMoneyModal';
 
 export const MainScreen: React.FC = () => {
+  const [showSendModal, setShowSendModal] = useState(false);
+
+  const handleSendComplete = (amount: number, token: any) => {
+    console.log(`Sent ${amount} ${token.symbol}`);
+    // Handle send completion logic here
+  };
+
   return (
     <Layout style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -38,6 +46,7 @@ export const MainScreen: React.FC = () => {
             style={styles.actionButton}
             appearance='outline'
             accessoryLeft={() => <MaterialIcons name="send" size={20} color="#3366FF" />}
+            onPress={() => setShowSendModal(true)}
           >
             Send
           </Button>
@@ -60,6 +69,13 @@ export const MainScreen: React.FC = () => {
           </Card>
         </Layout>
       </ScrollView>
+
+      {/* Send Money Modal */}
+      <SendMoneyModal
+        visible={showSendModal}
+        onClose={() => setShowSendModal(false)}
+        onSendComplete={handleSendComplete}
+      />
     </Layout>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Modal,
@@ -15,6 +15,7 @@ import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { RecipientPicker } from './RecipientPicker';
 import crossmintService from '../../services/crossmintService';
+import aptosService from '../../services/aptosService';
 
 interface Contact {
   id: string;
@@ -32,20 +33,17 @@ interface Token {
   type: 'crypto' | 'property';
 }
 
-interface FundingSource {
-  id: string;
-  name: string;
-  type: 'wallet' | 'bank' | 'card' | 'momo';
-  icon: string;
-  balance?: number;
-  currency?: string;
-}
 
 interface P2PSendFlowProps {
   visible: boolean;
   onClose: () => void;
   onSendComplete: (amount: number, token: Token, recipient: Contact) => void;
   initialRecipient?: Contact;
+  currentUser?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
 }
 
 export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
@@ -53,78 +51,99 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
   onClose,
   onSendComplete,
   initialRecipient,
+  currentUser,
 }) => {
-  const [step, setStep] = useState<'recipient' | 'amount' | 'funding' | 'review' | 'processing'>('recipient');
+  const [step, setStep] = useState<'recipient' | 'amount' | 'review' | 'processing'>('recipient');
   const [selectedRecipient, setSelectedRecipient] = useState<Contact | null>(initialRecipient || null);
   const [selectedToken, setSelectedToken] = useState<Token | null>(null);
-  const [selectedFunding, setSelectedFunding] = useState<FundingSource | null>(null);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [loading, setLoading] = useState(false);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [lockTimer, setLockTimer] = useState(300); // 5 minutes
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
+  const [realBalances, setRealBalances] = useState<{[key: string]: string}>({});
+  const [aptBalance, setAptBalance] = useState<number>(0);
 
-  const tokens: Token[] = [
-    {
-      id: '1',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      balance: 1000,
-      icon: 'attach-money',
-      type: 'crypto',
-    },
-    {
-      id: '2',
-      symbol: 'ETH',
-      name: 'Ethereum',
-      balance: 2.5,
-      icon: 'currency-bitcoin',
-      type: 'crypto',
-    },
-    {
-      id: '3',
-      symbol: 'NGN',
-      name: 'Nigerian Naira',
-      balance: 50000,
-      icon: 'money',
-      type: 'crypto',
-    },
-  ];
+  // Fetch real wallet balances when component mounts or when stepping to amount
+  const fetchWalletBalances = async () => {
+    setIsLoadingBalances(true);
+    try {
+      const walletResult = await aptosService.getWallet();
+      if (walletResult.success && walletResult.address) {
+        const balancesResult = await aptosService.getAllBalances(walletResult.address);
+        if (balancesResult.success && balancesResult.balances) {
+          console.log('💰 Real wallet balances:', balancesResult.balances);
+          setRealBalances(balancesResult.balances);
+          
+          // Also fetch APT balance for gas fee checking
+          const aptRaw = balancesResult.balances['APT'] || '0';
+          const aptBalance = parseFloat(aptRaw) / 100_000_000;
+          setAptBalance(aptBalance);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch wallet balances:', error);
+    } finally {
+      setIsLoadingBalances(false);
+    }
+  };
 
-  const fundingSources: FundingSource[] = [
-    {
-      id: '1',
-      name: 'USDC Wallet',
-      type: 'wallet',
-      icon: 'account-balance-wallet',
-      balance: 1000,
-      currency: 'USDC',
-    },
-    {
-      id: '2',
-      name: 'Bank Transfer',
-      type: 'bank',
-      icon: 'account-balance',
-    },
-    {
-      id: '3',
-      name: 'Debit Card',
-      type: 'card',
-      icon: 'credit-card',
-    },
-    {
-      id: '4',
-      name: 'Mobile Money',
-      type: 'momo',
-      icon: 'phone-android',
-    },
-  ];
+  // Generate tokens list with real balances
+  const getTokensWithRealBalances = (): Token[] => {
+    const aptRaw = realBalances['APT'] || '0';
+    const usdcRaw = realBalances['USDC'] || '0';
+    
+    // Convert APT from octas to human readable (1 APT = 100,000,000 octas)
+    const aptBalance = parseFloat(aptRaw) / 100_000_000;
+    const usdcBalance = parseFloat(usdcRaw);
+    
+    console.log('💰 Token balances:', { aptRaw, usdcRaw, aptBalance, usdcBalance });
+    
+    const allTokens = [
+      {
+        id: '1',
+        symbol: 'APT',
+        name: 'Aptos Token',
+        balance: aptBalance,
+        icon: 'currency-bitcoin',
+        type: 'crypto',
+      },
+      {
+        id: '2',
+        symbol: 'USDC',
+        name: 'USD Coin',
+        balance: usdcBalance,
+        icon: 'attach-money',
+        type: 'crypto',
+      },
+    ];
+    
+    // Show all tokens, even with 0 balance, but mark which have balance
+    return allTokens.filter(token => token.balance >= 0);
+  };
+
+  const tokens = getTokensWithRealBalances();
+
+  // Fetch balances when modal opens
+  useEffect(() => {
+    if (visible) {
+      fetchWalletBalances();
+    }
+  }, [visible]);
+
+  // Fetch balances when stepping to amount page
+  useEffect(() => {
+    if (step === 'amount') {
+      fetchWalletBalances();
+    }
+  }, [step]);
+
 
   const handleReset = () => {
     setStep('recipient');
     setSelectedRecipient(initialRecipient || null);
     setSelectedToken(null);
-    setSelectedFunding(null);
     setAmount('');
     setMemo('');
     setLoading(false);
@@ -151,42 +170,45 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
       return;
     }
     
-    if (parseFloat(amount) > (selectedToken?.balance || 0)) {
-      Alert.alert('Error', 'Insufficient balance');
+    if (selectedToken.balance === 0) {
+      Alert.alert('Error', `You have no ${selectedToken.symbol} balance. Please fund your wallet first.`);
       return;
     }
     
-    setStep('funding');
-  };
-
-  const handleFundingNext = () => {
-    if (!selectedFunding) {
-      Alert.alert('Error', 'Please select a funding source');
+    if (parseFloat(amount) > selectedToken.balance) {
+      Alert.alert('Error', `Insufficient balance. You have ${selectedToken.balance.toFixed(4)} ${selectedToken.symbol}`);
       return;
     }
     
     setStep('review');
   };
 
+
   const handleSend = async () => {
-    if (!selectedRecipient || !selectedToken || !selectedFunding) return;
+    if (!selectedRecipient || !selectedToken) return;
     
     setLoading(true);
     setStep('processing');
     
     try {
-      // Get chain based on token
-      const chain = getChainForToken(selectedToken.symbol);
+      let result;
       
-      // Send payment via CrossMint
-      const result = await crossmintService.sendPayment(
-        selectedRecipient.id, // Use contact ID if available
-        selectedRecipient.address, // Use wallet address if available
-        amount,
-        selectedToken.symbol.toLowerCase(),
-        chain,
-        memo
-      );
+      // Send using Aptos blockchain
+      if (selectedToken.symbol === 'APT') {
+        // Send APT (native Aptos token)
+        if (!selectedRecipient.address) {
+          throw new Error('Recipient address is required for Aptos transactions');
+        }
+        result = await aptosService.sendAPT(selectedRecipient.address, parseFloat(amount));
+      } else if (selectedToken.symbol === 'USDC') {
+        // Send USDC (Fungible Asset)
+        if (!selectedRecipient.address) {
+          throw new Error('Recipient address is required for Aptos transactions');
+        }
+        result = await aptosService.sendUSDC(selectedRecipient.address, parseFloat(amount));
+      } else {
+        throw new Error(`Unsupported token: ${selectedToken.symbol}`);
+      }
 
       if (result.success) {
         setLoading(false);
@@ -194,7 +216,7 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
         handleClose();
         Alert.alert(
           'Success', 
-          `Sent ${amount} ${selectedToken.symbol} to ${selectedRecipient.name}`,
+          `Sent ${amount} ${selectedToken.symbol} to ${selectedRecipient.name}\nTransaction: ${result.hash}`,
           [{ text: 'OK', onPress: () => {} }]
         );
       } else {
@@ -204,11 +226,44 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
       console.error('Send transaction error:', error);
       setLoading(false);
       setStep('review'); // Go back to review step
-      Alert.alert(
-        'Transaction Failed', 
-        error instanceof Error ? error.message : 'Failed to send payment. Please try again.',
-        [{ text: 'OK', onPress: () => {} }]
-      );
+      
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send payment. Please try again.';
+      
+      // Check if this is an APT funding issue
+      if (errorMessage.includes('Insufficient APT') && errorMessage.includes('https://aptos.dev/network/faucet')) {
+        Alert.alert(
+          'Need APT for Gas Fees', 
+          errorMessage,
+          [
+            { text: 'OK', onPress: () => {} },
+            { 
+              text: 'Copy Address', 
+              onPress: async () => {
+                try {
+                  const walletResult = await aptosService.getWalletAddress();
+                  if (walletResult.success && walletResult.address) {
+                    console.log('Wallet address to fund:', walletResult.address);
+                    Alert.alert(
+                      'Wallet Address', 
+                      `Copy this address to fund your account:\n\n${walletResult.address}\n\nNext steps:\n1. Copy the address above\n2. Go to https://aptos.dev/network/faucet\n3. Paste your address\n4. Click "Fund Account"\n5. Return here and try again`,
+                      [{ text: 'Got it!', onPress: () => {} }]
+                    );
+                  }
+                } catch (e) {
+                  console.error('Failed to get wallet address:', e);
+                  Alert.alert('Error', 'Failed to get wallet address. Please try again.');
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Transaction Failed', 
+          errorMessage,
+          [{ text: 'OK', onPress: () => {} }]
+        );
+      }
     }
   };
 
@@ -275,30 +330,44 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
           {/* Token Selection */}
           <View style={styles.section}>
             <Typography variant="h6" style={styles.sectionTitle}>Select Currency</Typography>
-            {tokens.map((token) => (
-              <TouchableOpacity
-                key={token.id}
-                style={[
-                  styles.tokenItem,
-                  selectedToken?.id === token.id && styles.selectedTokenItem
-                ]}
-                onPress={() => setSelectedToken(token)}
-              >
-                <View style={styles.tokenInfo}>
-                  <MaterialIcons name={token.icon as any} size={24} color={Colors.primary} />
-                  <View style={styles.tokenDetails}>
-                    <Typography variant="h6">{token.symbol}</Typography>
-                    <Typography variant="body2" color="textSecondary">{token.name}</Typography>
+            {isLoadingBalances ? (
+              <View style={styles.loadingContainer}>
+                <Typography variant="body2" color="textSecondary">Loading balances...</Typography>
+              </View>
+            ) : tokens.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Typography variant="body2" color="textSecondary">No tokens with balance found</Typography>
+                <Typography variant="body2" color="textSecondary">Please fund your wallet first</Typography>
+              </View>
+            ) : (
+              tokens.map((token) => (
+                <TouchableOpacity
+                  key={token.id}
+                  style={[
+                    styles.tokenItem,
+                    selectedToken?.id === token.id && styles.selectedTokenItem
+                  ]}
+                  onPress={() => setSelectedToken(token)}
+                >
+                  <View style={styles.tokenInfo}>
+                    <MaterialIcons name={token.icon as any} size={24} color={Colors.primary} />
+                    <View style={styles.tokenDetails}>
+                      <Typography variant="h6">{token.symbol}</Typography>
+                      <Typography variant="body2" color="textSecondary">{token.name}</Typography>
+                    </View>
                   </View>
-                </View>
-                <View style={styles.tokenBalance}>
-                  <Typography variant="h6">{token.balance} {token.symbol}</Typography>
-                  {selectedToken?.id === token.id && (
-                    <MaterialIcons name="check-circle" size={20} color={Colors.primary} />
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))}
+                  <View style={styles.tokenBalance}>
+                    <Typography variant="h6">{token.balance.toFixed(4)} {token.symbol}</Typography>
+                    {token.balance === 0 && (
+                      <Typography variant="body2" color="textSecondary">(No balance)</Typography>
+                    )}
+                    {selectedToken?.id === token.id && (
+                      <MaterialIcons name="check-circle" size={20} color={Colors.primary} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
 
           {/* Amount Input */}
@@ -354,64 +423,22 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
             disabled={!amount || !selectedToken}
             style={styles.fullButton}
           />
+          {/* Debug info */}
+          {__DEV__ && (
+            <Typography variant="body2" color="textSecondary" style={{ textAlign: 'center', marginTop: 8 }}>
+              Debug: amount="{amount}" selectedToken={selectedToken ? selectedToken.symbol : 'null'}
+            </Typography>
+          )}
         </View>
       </View>
     );
   };
 
-  const renderFundingStep = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => setStep('amount')} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Typography variant="h3">Funding Source</Typography>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <ScrollView style={styles.content}>
-        <Typography variant="h6" style={styles.sectionTitle}>How would you like to pay?</Typography>
-        
-        {fundingSources.map((source) => (
-          <TouchableOpacity
-            key={source.id}
-            style={[
-              styles.fundingItem,
-              selectedFunding?.id === source.id && styles.selectedFundingItem
-            ]}
-            onPress={() => setSelectedFunding(source)}
-          >
-            <MaterialIcons name={source.icon as any} size={24} color={Colors.primary} />
-            <View style={styles.fundingInfo}>
-              <Typography variant="h6">{source.name}</Typography>
-              {source.balance && (
-                <Typography variant="body2" color="textSecondary">
-                  Balance: {source.balance} {source.currency}
-                </Typography>
-              )}
-            </View>
-            {selectedFunding?.id === source.id && (
-              <MaterialIcons name="check-circle" size={20} color={Colors.primary} />
-            )}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <View style={styles.stepButtons}>
-        <Button
-          title="Next"
-          onPress={handleFundingNext}
-          disabled={!selectedFunding}
-          style={styles.fullButton}
-        />
-      </View>
-    </View>
-  );
 
   const renderReviewStep = () => (
     <View style={styles.stepContainer}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => setStep('funding')} style={styles.backButton}>
+        <TouchableOpacity onPress={() => setStep('amount')} style={styles.backButton}>
           <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Typography variant="h3">Review & Confirm</Typography>
@@ -430,12 +457,22 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
           </View>
           <View style={styles.reviewRow}>
             <Typography variant="body1" color="textSecondary">From:</Typography>
-            <Typography variant="h6">{selectedFunding?.name}</Typography>
+            <Typography variant="h6">{currentUser?.name || 'Your Account'}</Typography>
           </View>
           <View style={styles.reviewRow}>
             <Typography variant="body1" color="textSecondary">Network Fee:</Typography>
-            <Typography variant="h6">0.001 {selectedToken?.symbol}</Typography>
+            <Typography variant="h6">~0.001 APT</Typography>
           </View>
+          {aptBalance < 0.001 && (
+            <View style={[styles.reviewRow, { backgroundColor: Colors.error + '10', padding: Spacing.sm, borderRadius: BorderRadius.sm }]}>
+              <MaterialIcons name="warning" size={20} color={Colors.error} />
+              <View style={{ marginLeft: Spacing.sm, flex: 1 }}>
+                <Typography variant="body2" style={{ color: Colors.error }}>
+                  Low APT balance ({aptBalance.toFixed(6)} APT). You may need to fund your account for gas fees.
+                </Typography>
+              </View>
+            </View>
+          )}
         </Card>
 
         <View style={styles.section}>
@@ -489,7 +526,6 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
     switch (step) {
       case 'recipient': return renderRecipientStep();
       case 'amount': return renderAmountStep();
-      case 'funding': return renderFundingStep();
       case 'review': return renderReviewStep();
       case 'processing': return renderProcessingStep();
       default: return renderRecipientStep();
@@ -689,5 +725,19 @@ const styles = StyleSheet.create({
   },
   processingStepText: {
     marginLeft: Spacing.sm,
+  },
+  loadingContainer: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.gray100,
+  },
+  emptyContainer: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.gray100,
   },
 });

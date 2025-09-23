@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService, { User } from './authService';
 
-const API_BASE_URL = 'http://localhost:3000'; // Backend URL
+const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+const API_BASE_URL = isWeb
+  ? 'http://localhost:3000'  // Web browser
+  : 'http://192.168.31.100:3000'; // Mobile device
 
 export interface ProfileUpdateData {
   name?: string;

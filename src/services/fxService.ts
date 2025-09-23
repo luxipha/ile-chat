@@ -7,7 +7,9 @@
 import { FXOffer, FXTrade, FXFilter, CreateTradeResponse, FXOffersResponse, TradeUpdateResponse, Currency, PaymentMethod } from '../types/fx';
 
 class FXService {
-  private apiBaseUrl = 'http://localhost:3000/api/fx'; // Replace with actual API endpoint
+  private apiBaseUrl = (typeof window !== 'undefined' && typeof window.document !== 'undefined')
+    ? 'http://localhost:3000/api/fx'  // Web browser
+    : 'http://192.168.31.100:3000/api/fx'; // Mobile device
 
   /**
    * Get available FX offers from the marketplace
@@ -268,12 +270,12 @@ class FXService {
    */
   getCurrencies(): Currency[] {
     return [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: '<ú<ø', type: 'fiat' },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '¦', flag: '<ó<ì', type: 'fiat' },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '<è<ó', type: 'fiat' },
-      { code: 'EUR', name: 'Euro', symbol: '¬', flag: '<ê<ú', type: 'fiat' },
-      { code: 'GBP', name: 'British Pound', symbol: '£', flag: '<ì<ç', type: 'fiat' },
-      { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=°', type: 'crypto' },
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: '<ï¿½<ï¿½', type: 'fiat' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: 'ï¿½', flag: '<ï¿½<ï¿½', type: 'fiat' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: 'ï¿½', flag: '<ï¿½<ï¿½', type: 'fiat' },
+      { code: 'EUR', name: 'Euro', symbol: 'ï¿½', flag: '<ï¿½<ï¿½', type: 'fiat' },
+      { code: 'GBP', name: 'British Pound', symbol: 'ï¿½', flag: '<ï¿½<ï¿½', type: 'fiat' },
+      { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=ï¿½', type: 'crypto' },
     ];
   }
 
@@ -336,8 +338,8 @@ class FXService {
           responseTime: '~2 minutes',
           onlineStatus: 'online',
         },
-        sellCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '<è<ó', type: 'fiat' },
-        buyCurrency: { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=°', type: 'crypto' },
+        sellCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: 'ï¿½', flag: '<ï¿½<ï¿½', type: 'fiat' },
+        buyCurrency: { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=ï¿½', type: 'crypto' },
         sellAmount: 10000,
         buyAmount: 1380,
         exchangeRate: 0.138,

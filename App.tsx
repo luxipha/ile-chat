@@ -1,6 +1,9 @@
+// Polyfills must be imported first
+import './polyfills';
+
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl, Alert } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -54,7 +57,13 @@ import profileService from './src/services/profileService';
 import chatService from './src/services/chatService';
 import fxService from './src/services/fxService';
 import aptosService from './src/services/aptosService';
+import { apiService } from './src/services/api';
 // import { signInWithCustomFirebaseToken } from './src/services/firebaseConfig';
+// crossmintService removed - now using frontend SDK
+import { CrossmintProviders } from './src/providers/CrossmintProviders';
+import { useBalance } from './src/hooks/useBalance';
+import { useWallet } from '@crossmint/client-sdk-react-native-ui';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import crossmintService from './src/services/crossmintService';
 
 import { FXOffer, FXTrade } from './src/types/fx';
@@ -87,7 +96,29 @@ const AppNotificationWrapper: React.FC = () => {
   );
 };
 
-export default function App() {
+// Create QueryClient instance for React Query
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30000,
+      retry: 2,
+    },
+  },
+});
+
+// Main App component that uses CrossMint hooks (must be inside providers)
+function AppWithCrossmint() {
+  // CrossMint hooks (now safely inside providers) - temporarily disabled due to SecureStore web compatibility
+  // const { balances: crossmintBalances, displayableBalance, isLoading: isCrossmintLoading, refetch: refetchCrossmint } = useBalance();
+  // const { wallet } = useWallet();
+  
+  // Temporary fallback values while CrossMint is disabled
+  const crossmintBalances = null;
+  const displayableBalance = null;
+  const isCrossmintLoading = false;
+  const refetchCrossmint = () => {};
+  const wallet = null;
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile>({
@@ -141,6 +172,25 @@ export default function App() {
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [momentsError, setMomentsError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  // Test backend connectivity on app start
+  useEffect(() => {
+    const testConnectivity = async () => {
+      console.log('🔗 Testing backend connectivity...');
+      try {
+        const result = await apiService.healthCheck();
+        if (result.success) {
+          console.log('✅ Backend connectivity test successful:', result.data);
+        } else {
+          console.log('❌ Backend connectivity test failed:', result.error);
+        }
+      } catch (error) {
+        console.log('❌ Backend connectivity test error:', error);
+      }
+    };
+    
+    testConnectivity();
+  }, []);
 
   // Check for existing authentication on app start
   useEffect(() => {
@@ -318,27 +368,10 @@ export default function App() {
     try {
       console.log('🔍 Checking wallet status...');
       
-      // First check local storage
-      const localConnected = await crossmintService.isWalletConnected();
-      console.log('📱 Local wallet connected:', localConnected);
-      
-      // Also check with backend to ensure accuracy
-      const walletStatusResponse = await crossmintService.getWalletStatus();
-      console.log('☁️ Backend wallet status:', walletStatusResponse);
-      
-      const hasBackendWallet = walletStatusResponse.success && walletStatusResponse.wallet?.walletId;
-      console.log('🏦 Has backend wallet:', hasBackendWallet);
-      
-      // If backend says we have a wallet but local storage doesn't know, update local storage
-      if (hasBackendWallet && !localConnected) {
-        console.log('✅ Updating local storage - wallet found on backend');
-        await AsyncStorage.setItem('walletConnected', 'true');
-        if (walletStatusResponse.wallet) {
-          await AsyncStorage.setItem('walletData', JSON.stringify(walletStatusResponse.wallet));
-        }
-      }
-      
-      const crossmintConnected = hasBackendWallet || localConnected;
+      // CrossMint wallet status check - using SDK hook
+      console.log('📱 CrossMint wallet hook status:', { hasWallet: !!wallet, hasAddress: !!wallet?.address });
+      const crossmintConnected = !!(wallet && wallet.address);
+      console.log('🔗 CrossMint connected:', crossmintConnected);
       
       // Check Aptos wallet - prioritize database over AsyncStorage
       console.log('🟣 Checking Aptos wallet status...');
@@ -397,9 +430,29 @@ export default function App() {
           const aptosWallet = await aptosService.getWallet();
           if (aptosWallet.success && aptosWallet.address) {
             console.log('⚠️ Found Aptos wallet in AsyncStorage but not in database:', aptosWallet.address);
-            console.log('🔄 This wallet will need to be manually created from the main screen');
-            // Don't set as connected - user needs to create wallet properly
-            aptosConnected = false;
+            console.log('🔄 Saving existing wallet to database...');
+            
+            // Save the existing wallet to database
+            try {
+              const saveResult = await crossmintService.saveWalletToBackend({
+                address: aptosWallet.address,
+                chain: 'aptos-testnet',
+                type: 'aptos',
+                privateKey: aptosWallet.privateKey
+              });
+              
+              if (saveResult.success) {
+                console.log('✅ Successfully saved Aptos wallet to database');
+                setAptosAddress(aptosWallet.address);
+                aptosConnected = true;
+              } else {
+                console.error('❌ Failed to save wallet to database:', saveResult.error);
+                aptosConnected = false;
+              }
+            } catch (saveError) {
+              console.error('❌ Error saving wallet to database:', saveError);
+              aptosConnected = false;
+            }
           }
         } else {
           console.log('ℹ️ No Aptos wallet found. User needs to create one from the main screen.');
@@ -427,13 +480,13 @@ export default function App() {
       if (crossmintConnected || aptosConnected) {
         console.log('✅ Triggering balance fetch...');
         // Pass the detected states directly to avoid async state issues
-        await fetchWalletBalanceWithStates(crossmintConnected, aptosConnected);
+        await fetchCombinedBalances();
       } else {
         console.log('⚠️ No wallets detected, skipping balance fetch');
         // Still try to fetch if we have persistent state
         if (hasWallet || hasAptosWallet) {
           console.log('🔄 Found wallet state, force fetching anyway...');
-          await fetchWalletBalance(true);
+          await fetchCombinedBalances();
         }
       }
     } catch (error) {
@@ -472,39 +525,13 @@ export default function App() {
         balanceFetches.push(aptosPromise);
       }
       
-      // 2. Add EVM balance fetch promise
-      console.log('🔍 Checking EVM wallet for balance fetch:', { hasWallet });
-      if (hasWallet) {
-        const evmPromise = crossmintService.getWalletFromBackend('ethereum', 'crossmint').then(async (evmWalletData) => {
-          console.log('🔷 Fetching EVM wallet balances...');
-          
-          let evmAddress = '0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb'; // fallback
-          if (evmWalletData.success && evmWalletData.wallet?.address) {
-            evmAddress = evmWalletData.wallet.address;
-            console.log('✅ Using EVM address from database:', evmAddress);
-          } else {
-            console.log('⚠️ Using fallback EVM address:', evmAddress);
-          }
-          
-          // Try CrossMint service first
-          const evmBalances = await crossmintService.getWalletBalance(evmAddress);
-          
-          // Check if CrossMint returned any non-zero balances
-          let hasNonZeroBalances = false;
-          if (evmBalances.success && evmBalances.balances) {
-            hasNonZeroBalances = Object.values(evmBalances.balances).some(balance => parseFloat(balance) > 0);
-          }
-          
-          if (evmBalances.success && evmBalances.balances && hasNonZeroBalances) {
-            return { type: 'evm' as const, balances: evmBalances };
-          } else {
-            // Fallback to direct RPC calls
-            const directBalances = await crossmintService.getEVMBalancesDirect(evmAddress);
-            return { type: 'evm' as const, balances: directBalances };
-          }
-        });
-        balanceFetches.push(evmPromise);
-      }
+      // 2. Add CrossMint balance fetch promise for staging test address
+      const crossmintPromise = (async () => {
+        console.log('🔷 Fetching CrossMint balance for test address...');
+        const crossmintBalance = await crossmintService.getWalletBalance();
+        return { type: 'evm' as const, balances: crossmintBalance };
+      })();
+      balanceFetches.push(crossmintPromise);
       
       // 3. Execute all promises in parallel and wait for completion
       if (balanceFetches.length === 0) {
@@ -609,38 +636,13 @@ export default function App() {
         balanceFetches.push(aptosPromise);
       }
       
-      // 2. Add EVM balance fetch promise
-      if (evmConnected) {
-        const evmPromise = crossmintService.getWalletFromBackend('ethereum', 'crossmint').then(async (evmWalletData) => {
-          console.log('🔷 Fetching EVM wallet balances...');
-          
-          let evmAddress = '0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb'; // fallback
-          if (evmWalletData.success && evmWalletData.wallet?.address) {
-            evmAddress = evmWalletData.wallet.address;
-            console.log('✅ Using EVM address from database:', evmAddress);
-          } else {
-            console.log('⚠️ Using fallback EVM address:', evmAddress);
-          }
-          
-          // Try CrossMint service first
-          const evmBalances = await crossmintService.getWalletBalance(evmAddress);
-          
-          // Check if CrossMint returned any non-zero balances
-          let hasNonZeroBalances = false;
-          if (evmBalances.success && evmBalances.balances) {
-            hasNonZeroBalances = Object.values(evmBalances.balances).some(balance => parseFloat(balance) > 0);
-          }
-          
-          if (evmBalances.success && evmBalances.balances && hasNonZeroBalances) {
-            return { type: 'evm' as const, balances: evmBalances };
-          } else {
-            // Fallback to direct RPC calls
-            const directBalances = await crossmintService.getEVMBalancesDirect(evmAddress);
-            return { type: 'evm' as const, balances: directBalances };
-          }
-        });
-        balanceFetches.push(evmPromise);
-      }
+      // 2. Add CrossMint balance fetch promise for staging test address
+      const crossmintPromise = (async () => {
+        console.log('🔷 Fetching CrossMint balance for test address...');
+        const crossmintBalance = await crossmintService.getWalletBalance();
+        return { type: 'evm' as const, balances: crossmintBalance };
+      })();
+      balanceFetches.push(crossmintPromise);
       
       // 3. Execute all promises in parallel and wait for completion
       if (balanceFetches.length === 0) {
@@ -722,6 +724,120 @@ export default function App() {
     }
   };
 
+  // Combined balance fetching using CrossMint + Aptos in parallel
+  const fetchCombinedBalances = async () => {
+    if (isLoadingWallet) {
+      console.log('⚠️ Balance fetch already in progress, skipping...');
+      return;
+    }
+    
+    setIsLoadingWallet(true);
+    try {
+      console.log('🔄 Fetching combined CrossMint + Aptos balances in parallel...');
+      
+      // Create promises for parallel execution
+      const balancePromises: Promise<{type: string, data: any}>[] = [];
+      
+      // 1. CrossMint disabled - focus on Aptos only
+      // const crossmintPromise = crossmintService.getWalletBalance().then(result => ({
+      //   type: 'crossmint',
+      //   data: result
+      // }));
+      // balancePromises.push(crossmintPromise);
+      
+      // 2. Add Aptos promise if wallet exists
+      if (hasAptosWallet) {
+        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
+          if (aptosWallet.success && aptosWallet.address) {
+            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
+            return { type: 'aptos', data: aptosBalances };
+          }
+          return { type: 'aptos', data: { success: false, error: 'No Aptos wallet' } };
+        });
+        balancePromises.push(aptosPromise);
+      }
+      
+      // 3. Wait for all promises to complete
+      console.log(`⏳ Waiting for ${balancePromises.length} balance fetches to complete...`);
+      const results = await Promise.allSettled(balancePromises);
+      
+      // 4. Process all results atomically
+      const combinedBalances: { [key: string]: number } = {};
+      let totalUSDCValue = 0;
+      
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { type, data } = result.value;
+          
+          if (type === 'crossmint' && data.success && data.balances) {
+            console.log('✅ Processing CrossMint balances:', data.balances);
+            
+            Object.entries(data.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance as string) || 0;
+              
+              // Handle USDC from CrossMint - only Ethereum
+              if (token.includes('USDC') && token.includes('Ethereum')) {
+                combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from CrossMint: ${balanceNum}`);
+              }
+              
+              // Handle native tokens (ETH, MATIC)
+              if ((token.includes('ETH') || token.includes('MATIC')) && balanceNum > 0) {
+                const tokenSymbol = token.includes('MATIC') ? 'MATIC' : 'ETH';
+                combinedBalances[tokenSymbol] = balanceNum;
+                console.log(`🔷 Added ${tokenSymbol}: ${balanceNum}`);
+              }
+            });
+          }
+          
+          if (type === 'aptos' && data.success && data.balances) {
+            console.log('✅ Processing Aptos balances:', data.balances);
+            
+            Object.entries(data.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance as string) || 0;
+              
+              // Add USDC from Aptos
+              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
+                combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
+              }
+              
+              // Add APT for display
+              if (token.includes('APT') || token.toUpperCase() === 'APT') {
+                combinedBalances['APT'] = balanceNum;
+                console.log(`🔷 Added APT: ${balanceNum}`);
+              }
+            });
+          }
+        } else {
+          console.error(`❌ Balance fetch ${index} failed:`, result.reason);
+        }
+      });
+      
+      // 5. Single atomic update to UI
+      console.log('💎 Final combined balances:', combinedBalances);
+      console.log('💰 Total USDC portfolio value:', totalUSDCValue);
+      
+      setWalletBalance(combinedBalances);
+      setTotalPortfolioValue(totalUSDCValue);
+      
+    } catch (error: any) {
+      console.error('❌ Failed to fetch combined balances:', error);
+      setWalletError(error.message || 'Failed to load wallet balances');
+    } finally {
+      setIsLoadingWallet(false);
+    }
+  };
+
+  // Auto-refresh combined balances when CrossMint balances change
+  useEffect(() => {
+    if (isAuthenticated && (crossmintBalances || hasAptosWallet)) {
+      fetchCombinedBalances();
+    }
+  }, [crossmintBalances, hasAptosWallet, isAuthenticated]);
+
   // REMOVED: handleCreateWallet function - wallet creation now happens at chain level during deposit
   // This prevents creating multiple wallets and ensures consistency with database wallets
 
@@ -734,14 +850,15 @@ export default function App() {
 
   // Periodic balance refresh when wallet is connected
   useEffect(() => {
-    if (hasWallet && isAuthenticated) {
+    if ((hasWallet || crossmintBalances) && isAuthenticated) {
       const interval = setInterval(() => {
-        fetchWalletBalance(true);
-      }, 30000); // Refresh every 30 seconds
+        refetchCrossmint(); // Refetch CrossMint balances
+        fetchCombinedBalances(); // Refetch combined balances
+      }, 60000); // Refresh every 60 seconds (less frequent since we have real-time updates)
 
       return () => clearInterval(interval);
     }
-  }, [hasWallet, isAuthenticated]);
+  }, [hasWallet, crossmintBalances, isAuthenticated]);
 
   const checkAuthStatus = async () => {
     try {
@@ -1162,8 +1279,11 @@ export default function App() {
               <Card style={styles.balanceCard}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
                   <Typography variant="caption" color="textSecondary">Total Portfolio</Typography>
-                  {hasWallet && (
-                    <TouchableOpacity onPress={() => fetchWalletBalance(true)} disabled={isLoadingWallet}>
+                  {(hasWallet || hasAptosWallet) && (
+                    <TouchableOpacity onPress={() => {
+                      refetchCrossmint(); // Refetch CrossMint balances
+                      fetchCombinedBalances(); // Refetch combined balances
+                    }} disabled={isLoadingWallet || isCrossmintLoading}>
                       <MaterialIcons 
                         name="refresh" 
                         size={16} 
@@ -1179,29 +1299,17 @@ export default function App() {
                   Total USDC Balance
                 </Typography>
                 
-                {/* Balance Breakdown */}
-                {hasWallet && Object.keys(walletBalance).length > 0 ? (
-                  <View style={{ marginTop: Spacing.md }}>
-                    {Object.entries(walletBalance).map(([token, balance]) => (
-                      <View key={token} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.xs }}>
-                        <Typography variant="caption" color="textSecondary">{token}:</Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {typeof balance === 'number' ? balance.toFixed(4) : parseFloat(String(balance)).toFixed(4)}
-                        </Typography>
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  /* Empty Wallet Helper */
+                {/* Show empty state only when no balance */}
+                {!(hasWallet || hasAptosWallet) || Object.keys(walletBalance).length === 0 ? (
                   <View style={{ marginTop: Spacing.lg, alignItems: 'center' }}>
                     <Typography variant="body2" color="textSecondary" align="center" style={{ marginBottom: Spacing.sm }}>
-                      {hasWallet ? 'Your wallet is empty' : 'Create a wallet to get started'}
+                      {(hasWallet || hasAptosWallet) ? 'Your wallet is empty' : 'Create a wallet to get started'}
                     </Typography>
                     <Typography variant="caption" color="textSecondary" align="center">
                       Add funds to start investing in real estate
                     </Typography>
                   </View>
-                )}
+                ) : null}
               </Card>
             )}
 
@@ -1224,10 +1332,6 @@ export default function App() {
                 icon="send" 
                 variant="outline"
                 onPress={() => {
-                  if (!hasWallet) {
-                    Alert.alert('Wallet Required', 'Please create a wallet first to send payments.');
-                    return;
-                  }
                   simulateLoading(setIsLoadingGeneral, 1000, 'Loading contacts...');
                   setTimeout(() => setShowP2PSend(true), 1000);
                 }} 
@@ -2393,13 +2497,16 @@ export default function App() {
   }
 
   return (
-    <NotificationProvider>
-      <ErrorBoundary
-        onError={(error, errorInfo) => {
-          console.error('App Error Boundary:', error, errorInfo);
-          // In production, send to error reporting service
-        }}
-      >
+    <QueryClientProvider client={queryClient}>
+      {/* Temporarily disable CrossmintProviders due to SecureStore web compatibility issues */}
+      {/* <CrossmintProviders> */}
+        <NotificationProvider>
+        <ErrorBoundary
+          onError={(error, errorInfo) => {
+            console.error('App Error Boundary:', error, errorInfo);
+            // In production, send to error reporting service
+          }}
+        >
         <SafeAreaProvider>
         <SafeAreaView style={styles.container}>
           {/* Content */}
@@ -2492,6 +2599,7 @@ export default function App() {
             name: selectedContact.name,
             avatar: selectedContact.avatar,
           } : undefined}
+          currentUser={currentUser}
           onSendComplete={(amount, token, recipient) => {
             console.log('P2P Send completed:', { amount, token, recipient });
             setShowP2PSend(false);
@@ -2582,6 +2690,17 @@ export default function App() {
     </SafeAreaProvider>
     </ErrorBoundary>
   </NotificationProvider>
+  {/* </CrossmintProviders> */}
+  </QueryClientProvider>
+  );
+}
+
+// Main App wrapper with providers
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppWithCrossmint />
+    </QueryClientProvider>
   );
 }
 

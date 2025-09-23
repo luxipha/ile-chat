@@ -43,8 +43,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const handleLogout = () => {
     console.log('🚪 SettingsScreen.handleLogout() called');
     
-    // Use window.confirm for web environment, Alert for native
-    if (typeof window !== 'undefined') {
+    // Check for actual web environment (window.confirm exists)
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
       console.log('🌐 Web environment detected, using window.confirm');
       if (window.confirm('Are you sure you want to logout?')) {
         console.log('✅ Logout confirmed, calling onLogout prop');
