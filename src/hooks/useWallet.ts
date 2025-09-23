@@ -16,6 +16,30 @@ export const useWallet = () => {
 
   const loadWalletState = async () => {
     try {
+      // First try to get wallet status from backend (database as source of truth)
+      console.log('🔄 Loading wallet state - checking database first...');
+      const backendWallet = await crossmintService.getWalletStatus();
+      
+      if (backendWallet.success && backendWallet.wallet) {
+        console.log('✅ Using wallet data from database');
+        const primaryChain = backendWallet.wallet.chains?.find((c: any) => c.isActive) || backendWallet.wallet.chains?.[0];
+        setWallet({
+          isConnected: true,
+          address: primaryChain?.address,
+          balance: backendWallet.wallet.balances || {},
+          walletId: backendWallet.wallet.walletId,
+          chains: backendWallet.wallet.chains
+        });
+        
+        // Update local storage to match database
+        await AsyncStorage.setItem('walletConnected', 'true');
+        await AsyncStorage.setItem('walletData', JSON.stringify(backendWallet.wallet));
+        
+        return;
+      }
+      
+      // Fallback to local storage if database check fails
+      console.log('⚠️ Database wallet check failed, falling back to local storage');
       const isConnected = await crossmintService.isWalletConnected();
       if (isConnected) {
         const walletData = await crossmintService.getLocalWalletData();

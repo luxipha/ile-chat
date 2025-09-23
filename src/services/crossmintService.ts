@@ -76,25 +76,97 @@ class CrossmintService {
   }
 
   /**
-   * Get wallet status and balance information
+   * Get wallet status and balance information (with testnet support)
    */
   async getWalletStatus(): Promise<WalletResponse> {
     try {
       await this.initialize();
 
-      const response = await apiClient.get('/api/wallet/status');
+      // For staging/testnet environment, we need to specify testnets
+      // Try with testnet parameter first
+      console.log('🔄 Fetching wallet status with testnet support...');
       
-      if (response.data.success) {
+      let response;
+      try {
+        // First try with testnet parameter
+        response = await apiClient.get('/api/wallet/status?testnet=true');
+        console.log('✅ Testnet wallet status response:', response);
+      } catch (testnetError) {
+        console.log('⚠️ Testnet parameter failed, trying default...');
+        // Fallback to default endpoint
+        response = await apiClient.get('/api/wallet/status');
+        console.log('📡 Default wallet status response:', response);
+      }
+      
+      if (response.data && response.data.success) {
         // Update local wallet data
         await AsyncStorage.setItem('walletData', JSON.stringify(response.data.wallet));
+        
+        // Log the wallet data to understand the structure
+        console.log('💾 Stored wallet data:', JSON.stringify(response.data.wallet, null, 2));
       }
 
-      return response.data;
+      return response.data || response;
     } catch (error: any) {
-      console.error('Get wallet status error:', error);
+      console.error('❌ Get wallet status error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to get wallet status'
+        error: error.response?.data?.message || error.message || 'Failed to get wallet status'
+      };
+    }
+  }
+
+  /**
+   * Get wallet balance using the wallet status endpoint (no more 400 errors!)
+   */
+  async getWalletBalance(address: string): Promise<{ success: boolean; balances?: { [token: string]: string }; error?: string }> {
+    try {
+      console.log('🔄 Getting balance via wallet status (avoiding 400 errors)...');
+      
+      // Use the working wallet status endpoint instead of separate balance endpoint
+      const statusResponse = await this.getWalletStatus();
+      
+      if (statusResponse.success && statusResponse.wallet) {
+        const rawBalances = statusResponse.wallet.balances || {};
+        const formattedBalances: { [token: string]: string } = {};
+        
+        // Extract balances from the wallet status response
+        Object.entries(rawBalances).forEach(([chain, chainData]: [string, any]) => {
+          if (chainData && typeof chainData === 'object') {
+            // Handle native token
+            if (chainData.native !== undefined) {
+              const chainName = chain === 'ethereum' ? 'ETH' : 
+                               chain === 'polygon' ? 'MATIC' : 
+                               chain === 'solana' ? 'SOL' : chain.toUpperCase();
+              formattedBalances[chainName] = String(chainData.native);
+            }
+            
+            // Handle token arrays
+            if (Array.isArray(chainData.tokens)) {
+              chainData.tokens.forEach((token: any) => {
+                if (token.symbol && token.balance !== undefined) {
+                  formattedBalances[token.symbol] = String(token.balance);
+                }
+              });
+            }
+          }
+        });
+        
+        return {
+          success: true,
+          balances: formattedBalances
+        };
+      } else {
+        return {
+          success: false,
+          error: statusResponse.error || 'Failed to get wallet status'
+        };
+      }
+    } catch (error: any) {
+      console.error('❌ Get wallet balance error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get wallet balance'
       };
     }
   }
@@ -230,10 +302,10 @@ class CrossmintService {
   }
 
   /**
-   * Get supported chains
+   * Get supported chains (testnets for staging)
    */
   getSupportedChains(): string[] {
-    return ['ethereum', 'polygon', 'solana'];
+    return ['sepolia', 'mumbai', 'solana-devnet'];
   }
 
   /**
@@ -242,8 +314,11 @@ class CrossmintService {
   getChainDisplayName(chain: string): string {
     const displayNames: { [key: string]: string } = {
       ethereum: 'Ethereum',
-      polygon: 'Polygon',
+      sepolia: 'Ethereum (Sepolia)',
+      polygon: 'Polygon', 
+      mumbai: 'Polygon (Mumbai)',
       solana: 'Solana',
+      'solana-devnet': 'Solana (Devnet)',
       bitcoin: 'Bitcoin'
     };
     return displayNames[chain] || chain;
@@ -353,6 +428,167 @@ class CrossmintService {
       return {
         success: false,
         error: error.response?.data?.message || 'Failed to get payment history'
+      };
+    }
+  }
+
+  /**
+   * Save wallet (including Aptos) to backend database
+   */
+  async saveWalletToBackend(walletData: {
+    address: string;
+    chain: string;
+    type: 'crossmint' | 'aptos';
+    privateKey?: string;
+  }): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      await this.initialize();
+
+      const response = await apiClient.post('/api/wallet/save', {
+        address: walletData.address,
+        chain: walletData.chain,
+        walletType: walletData.type,
+        privateKey: walletData.privateKey // Backend should encrypt this
+      });
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Save wallet to backend error:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to save wallet to backend'
+      };
+    }
+  }
+
+  /**
+   * Get wallet from backend database (including Aptos)
+   */
+  async getWalletFromBackend(chain: string, type: 'crossmint' | 'aptos'): Promise<{
+    success: boolean;
+    wallet?: {
+      address: string;
+      chain: string;
+      type: string;
+      privateKey?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      await this.initialize();
+
+      const response = await apiClient.get(`/api/wallet/get?chain=${chain}&type=${type}`);
+
+      return response.data;
+    } catch (error: any) {
+      console.error('Get wallet from backend error:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to get wallet from backend'
+      };
+    }
+  }
+
+  /**
+   * Get EVM wallet balances directly via RPC (fallback method)
+   */
+  async getEVMBalancesDirect(address: string): Promise<{ success: boolean; balances?: { [token: string]: string }; error?: string }> {
+    try {
+      console.log('🔍 Getting EVM balances directly via RPC for:', address);
+      
+      const balances: { [token: string]: string } = {};
+      
+      const networks = [
+        {
+          name: "Ethereum Sepolia",
+          rpc: "https://ethereum-sepolia-rpc.publicnode.com",
+          symbol: "ETH",
+          usdcContracts: [
+            { address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", name: "USDC" },
+            { address: "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8", name: "USDC.e" }
+          ]
+        },
+        {
+          name: "Polygon Amoy",
+          rpc: "https://rpc-amoy.polygon.technology", 
+          symbol: "MATIC",
+          usdcContracts: [
+            { address: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", name: "USDC" },
+            { address: "0x9999f7Fea5938fD3b1E26A12c3f2fb024e194f97", name: "USDC.e" }
+          ]
+        }
+      ];
+
+      for (const network of networks) {
+        try {
+          // 1. Check native balance (ETH/MATIC)
+          const response = await fetch(network.rpc, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              method: "eth_getBalance",
+              params: [address, "latest"],
+              id: 1
+            })
+          });
+          
+          const result = await response.json();
+          if (result.result) {
+            const balanceWei = BigInt(result.result);
+            const balanceEth = Number(balanceWei) / 1e18;
+            if (balanceEth > 0) {
+              balances[network.symbol] = balanceEth.toString();
+              console.log(`✅ ${network.name}: ${balanceEth} ${network.symbol}`);
+            }
+          }
+
+          // 2. Check USDC balances
+          if (network.usdcContracts) {
+            for (const usdc of network.usdcContracts) {
+              try {
+                const usdcResponse = await fetch(network.rpc, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    method: "eth_call",
+                    params: [{
+                      to: usdc.address,
+                      data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}`
+                    }, "latest"],
+                    id: 2
+                  })
+                });
+                
+                const usdcResult = await usdcResponse.json();
+                if (usdcResult.result && usdcResult.result !== "0x" && usdcResult.result !== "0x0") {
+                  const usdcBalanceWei = BigInt(usdcResult.result);
+                  const usdcBalance = Number(usdcBalanceWei) / 1e6; // USDC has 6 decimals
+                  if (usdcBalance > 0) {
+                    balances[`USDC_${network.name.replace(' ', '_')}`] = usdcBalance.toString();
+                    console.log(`✅ ${network.name}: ${usdcBalance} ${usdc.name}`);
+                  }
+                }
+              } catch (usdcError) {
+                console.log(`⚠️ ${network.name} ${usdc.name} error:`, usdcError);
+              }
+            }
+          }
+        } catch (networkError) {
+          console.log(`⚠️ ${network.name} error:`, networkError);
+        }
+      }
+      
+      return {
+        success: true,
+        balances
+      };
+    } catch (error: any) {
+      console.error('❌ Direct EVM balance fetch error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch EVM balances directly'
       };
     }
   }

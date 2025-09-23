@@ -87,6 +87,11 @@ class ApiService {
   }
 
   // Wallet methods
+  async getWalletStatus(): Promise<ApiResponse<{ walletId: string; balances: { [token: string]: number } }>> {
+    // This is an authenticated route, so we use the `get` helper which includes the token.
+    return this.get('/api/wallet/status');
+  }
+
   async getWalletBalance(address: string): Promise<ApiResponse<{ [token: string]: string }>> {
     return this.request(`/wallet/balance/${address}`);
   }

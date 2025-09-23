@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Button } from './src/components/ui/Button';
 import { Card } from './src/components/ui/Card';
 import { Typography } from './src/components/ui/Typography';
@@ -51,8 +52,12 @@ import authService, { User } from './src/services/authService';
 import { communityService, CommunityPost } from './src/services/communityService';
 import profileService from './src/services/profileService';
 import chatService from './src/services/chatService';
+import fxService from './src/services/fxService';
+import aptosService from './src/services/aptosService';
 // import { signInWithCustomFirebaseToken } from './src/services/firebaseConfig';
 import crossmintService from './src/services/crossmintService';
+
+import { FXOffer, FXTrade } from './src/types/fx';
 
 type TabName = 'chat' | 'contact' | 'wallet' | 'moments' | 'me';
 type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'sendFeedback' | 'about' | 'qrCode';
@@ -95,9 +100,11 @@ export default function App() {
     gender: '',
   });
   
-  // CrossMint wallet state
+  // Dual wallet state (CrossMint + Aptos)
   const [hasWallet, setHasWallet] = useState(false);
-  const [isCreatingWallet, setIsCreatingWallet] = useState(false);
+  const [hasAptosWallet, setHasAptosWallet] = useState(false);
+  // REMOVED: isCreatingWallet state - no longer needed since wallet creation removed from main screen
+  const [aptosAddress, setAptosAddress] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [walletBalance, setWalletBalance] = useState<{[key: string]: number}>({});
   const [totalPortfolioValue, setTotalPortfolioValue] = useState(0);
@@ -113,8 +120,8 @@ export default function App() {
   const [showLoanRequest, setShowLoanRequest] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<any>(null);
   const [currentFXScreen, setCurrentFXScreen] = useState<FXScreen>('marketplace');
-  const [selectedOffer, setSelectedOffer] = useState<any>(null);
-  const [currentTrade, setCurrentTrade] = useState<any>(null);
+  const [selectedOffer, setSelectedOffer] = useState<FXOffer | null>(null);
+  const [currentTrade, setCurrentTrade] = useState<FXTrade | null>(null);
   const [showCreateFXOffer, setShowCreateFXOffer] = useState(false);
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -309,74 +316,414 @@ export default function App() {
   // Check if user has CrossMint wallet and fetch balance
   const checkWalletStatus = async () => {
     try {
-      const connected = await crossmintService.isWalletConnected();
-      setHasWallet(connected);
+      console.log('🔍 Checking wallet status...');
       
-      if (connected) {
-        await fetchWalletBalance(true);
+      // First check local storage
+      const localConnected = await crossmintService.isWalletConnected();
+      console.log('📱 Local wallet connected:', localConnected);
+      
+      // Also check with backend to ensure accuracy
+      const walletStatusResponse = await crossmintService.getWalletStatus();
+      console.log('☁️ Backend wallet status:', walletStatusResponse);
+      
+      const hasBackendWallet = walletStatusResponse.success && walletStatusResponse.wallet?.walletId;
+      console.log('🏦 Has backend wallet:', hasBackendWallet);
+      
+      // If backend says we have a wallet but local storage doesn't know, update local storage
+      if (hasBackendWallet && !localConnected) {
+        console.log('✅ Updating local storage - wallet found on backend');
+        await AsyncStorage.setItem('walletConnected', 'true');
+        if (walletStatusResponse.wallet) {
+          await AsyncStorage.setItem('walletData', JSON.stringify(walletStatusResponse.wallet));
+        }
       }
-    } catch (error) {
-      console.error('Failed to check wallet status:', error);
-      setHasWallet(false);
-    }
-  };
-
-  // Fetch wallet balance from CrossMint
-  const fetchWalletBalance = async (forceCheck = false) => {
-    // Don't check hasWallet state if forceCheck is true (for initial loading)
-    if (!forceCheck && !hasWallet) return;
-    
-    setIsLoadingWallet(true);
-    try {
-      const result = await crossmintService.getWalletStatus();
-      if (result.success && result.wallet) {
-        const balances = result.wallet.balances || {};
-        setWalletBalance(balances);
+      
+      const crossmintConnected = hasBackendWallet || localConnected;
+      
+      // Check Aptos wallet - prioritize database over AsyncStorage
+      console.log('🟣 Checking Aptos wallet status...');
+      
+      // First check database for existing Aptos wallet
+      let backendAptosWallet;
+      try {
+        backendAptosWallet = await crossmintService.getWalletFromBackend('aptos-testnet', 'aptos');
+        console.log('🏦 Backend Aptos wallet check:', backendAptosWallet);
+      } catch (error) {
+        console.log('⚠️ Error checking backend Aptos wallet:', error);
+        backendAptosWallet = { success: false };
+      }
+      
+      let aptosConnected = false;
+      
+      if (backendAptosWallet && backendAptosWallet.success && backendAptosWallet.wallet) {
+        // Database has the wallet - use it as source of truth
+        console.log('✅ Using Aptos wallet from database:', backendAptosWallet.wallet.address);
+        setAptosAddress(backendAptosWallet.wallet.address);
+        aptosConnected = true;
         
-        // Calculate total portfolio value (simplified - you may want to add real-time price conversion)
-        let totalValue = 0;
-        Object.entries(balances).forEach(([token, balance]) => {
-          // You can add token price conversion here
-          // For now, assuming USD values or mock conversion
-          const balanceNum = typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0;
-          totalValue += balanceNum;
-        });
-        setTotalPortfolioValue(totalValue);
+        // Update AsyncStorage to match database
+        try {
+          await AsyncStorage.setItem('aptosWalletAddress', backendAptosWallet.wallet.address);
+          if (backendAptosWallet.wallet.privateKey) {
+            await AsyncStorage.setItem('aptosWalletPrivateKey', backendAptosWallet.wallet.privateKey);
+          }
+          console.log('✅ Updated AsyncStorage with database Aptos wallet');
+        } catch (storageError) {
+          console.warn('⚠️ Failed to update AsyncStorage:', storageError);
+        }
+        
+        // Run blockchain checks on the database wallet
+        await aptosService.debugAccountState(backendAptosWallet.wallet.address);
+        
+        // Activation Check: Ensure the account is active on-chain
+        try {
+          const balanceCheck = await aptosService.getAllBalances(backendAptosWallet.wallet.address);
+          if (balanceCheck.success) {
+            console.log('✅ Database Aptos account is active on-chain.');
+          } else {
+            console.log('⚠️ Database Aptos account might not be active. Activating with faucet...');
+            await aptosService.fundWithFaucet(backendAptosWallet.wallet.address);
+            console.log('🚰 Database Aptos wallet funded to activate on-chain.');
+          }
+        } catch (activationError) {
+          console.error('⚠️ Activation check failed for database wallet:', activationError);
+        }
       } else {
-        console.error('Failed to get wallet balance:', result.error);
-        if (result.error?.includes('400')) {
-          setWalletError('Wallet service unavailable. Please try again later.');
+        // No database wallet, check AsyncStorage but DON'T auto-create
+        const localAptosConnected = await aptosService.hasWallet();
+        console.log('📱 Local Aptos wallet connected:', localAptosConnected);
+        
+        if (localAptosConnected) {
+          const aptosWallet = await aptosService.getWallet();
+          if (aptosWallet.success && aptosWallet.address) {
+            console.log('⚠️ Found Aptos wallet in AsyncStorage but not in database:', aptosWallet.address);
+            console.log('🔄 This wallet will need to be manually created from the main screen');
+            // Don't set as connected - user needs to create wallet properly
+            aptosConnected = false;
+          }
+        } else {
+          console.log('ℹ️ No Aptos wallet found. User needs to create one from the main screen.');
+          aptosConnected = false;
+        }
+      }
+      
+      console.log('🎯 Final wallet status:', {
+        crossmint: crossmintConnected,
+        aptos: aptosConnected
+      });
+      
+      setHasWallet(crossmintConnected);
+      setHasAptosWallet(aptosConnected);
+      
+      console.log('🔧 State will be updated to:', {
+        hasWallet: crossmintConnected,
+        hasAptosWallet: aptosConnected,
+        aptosAddress: aptosAddress // This might not reflect the latest value due to async state
+      });
+      
+      // Fetch balances for connected wallets - force check to ensure it runs
+      console.log('🔄 Balance fetch conditions:', { crossmintConnected, aptosConnected });
+      
+      if (crossmintConnected || aptosConnected) {
+        console.log('✅ Triggering balance fetch...');
+        // Pass the detected states directly to avoid async state issues
+        await fetchWalletBalanceWithStates(crossmintConnected, aptosConnected);
+      } else {
+        console.log('⚠️ No wallets detected, skipping balance fetch');
+        // Still try to fetch if we have persistent state
+        if (hasWallet || hasAptosWallet) {
+          console.log('🔄 Found wallet state, force fetching anyway...');
+          await fetchWalletBalance(true);
         }
       }
     } catch (error) {
-      console.error('Failed to get balance:', error);
-      setWalletError('Failed to load wallet balance');
+      console.error('❌ Failed to check wallet status:', error);
+      setHasWallet(false);
+      setHasAptosWallet(false);
+    }
+  };
+
+  // Fetch wallet balance from both Aptos and EVM (CrossMint)
+  const fetchWalletBalance = async (forceCheck = false) => {
+    // Skip if no wallets at all
+    if (!forceCheck && !hasAptosWallet && !hasWallet) {
+      console.log('⚠️ fetchWalletBalance skipped - no wallets detected:', { forceCheck, hasAptosWallet, hasWallet });
+      return;
+    }
+    
+    setIsLoadingWallet(true);
+    try {
+      console.log('🔄 Fetching wallet balances from Aptos + EVM...');
+      
+      // Create promises for parallel execution
+      const balanceFetches: Promise<{type: 'aptos' | 'evm', balances: any}>[] = [];
+      
+      // 1. Add Aptos balance fetch promise
+      console.log('🔍 Checking Aptos wallet for balance fetch:', { hasAptosWallet });
+      if (hasAptosWallet) {
+        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
+          if (aptosWallet.success && aptosWallet.address) {
+            console.log('🟣 Fetching Aptos USDC balance for address:', aptosWallet.address);
+            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
+            return { type: 'aptos' as const, balances: aptosBalances };
+          }
+          return { type: 'aptos' as const, balances: { success: false, error: 'No Aptos wallet' } };
+        });
+        balanceFetches.push(aptosPromise);
+      }
+      
+      // 2. Add EVM balance fetch promise
+      console.log('🔍 Checking EVM wallet for balance fetch:', { hasWallet });
+      if (hasWallet) {
+        const evmPromise = crossmintService.getWalletFromBackend('ethereum', 'crossmint').then(async (evmWalletData) => {
+          console.log('🔷 Fetching EVM wallet balances...');
+          
+          let evmAddress = '0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb'; // fallback
+          if (evmWalletData.success && evmWalletData.wallet?.address) {
+            evmAddress = evmWalletData.wallet.address;
+            console.log('✅ Using EVM address from database:', evmAddress);
+          } else {
+            console.log('⚠️ Using fallback EVM address:', evmAddress);
+          }
+          
+          // Try CrossMint service first
+          const evmBalances = await crossmintService.getWalletBalance(evmAddress);
+          
+          // Check if CrossMint returned any non-zero balances
+          let hasNonZeroBalances = false;
+          if (evmBalances.success && evmBalances.balances) {
+            hasNonZeroBalances = Object.values(evmBalances.balances).some(balance => parseFloat(balance) > 0);
+          }
+          
+          if (evmBalances.success && evmBalances.balances && hasNonZeroBalances) {
+            return { type: 'evm' as const, balances: evmBalances };
+          } else {
+            // Fallback to direct RPC calls
+            const directBalances = await crossmintService.getEVMBalancesDirect(evmAddress);
+            return { type: 'evm' as const, balances: directBalances };
+          }
+        });
+        balanceFetches.push(evmPromise);
+      }
+      
+      // 3. Execute all promises in parallel and wait for completion
+      if (balanceFetches.length === 0) {
+        console.log('⚠️ No balance fetches to execute');
+        setWalletBalance({});
+        setTotalPortfolioValue(0);
+        return;
+      }
+      
+      console.log(`⏳ Waiting for ${balanceFetches.length} balance fetches to complete...`);
+      const results = await Promise.allSettled(balanceFetches);
+      
+      // 4. Process all results atomically
+      const flattenedBalances: { [key: string]: number } = {};
+      let totalUSDCValue = 0;
+      
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { type, balances } = result.value;
+          
+          if (type === 'aptos' && balances.success && balances.balances) {
+            console.log('✅ Processing Aptos balances:', balances.balances);
+            Object.entries(balances.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance) || 0;
+              
+              // Only include USDC from Aptos in portfolio calculation
+              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
+                flattenedBalances['USDC (Aptos)'] = balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
+              }
+              
+              // Also include APT for display but not in USDC total
+              if (token.includes('APT') || token.toUpperCase() === 'APT') {
+                flattenedBalances['APT (Aptos)'] = balanceNum;
+                console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
+              }
+            });
+          }
+          
+          if (type === 'evm' && balances.success && balances.balances) {
+            console.log('✅ Processing EVM balances:', balances.balances);
+            Object.entries(balances.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance) || 0;
+              
+              // Handle USDC from testnets or CrossMint
+              if (token.includes('USDC')) {
+                const chainName = token.includes('Ethereum') ? 'Ethereum Sepolia' : 
+                                 token.includes('Polygon') ? 'Polygon Amoy' : 
+                                 token.toUpperCase() === 'USDC' ? 'EVM' : token;
+                flattenedBalances[`USDC (${chainName})`] = balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from ${chainName}: ${balanceNum}`);
+              }
+              
+              // Handle native tokens (only if non-zero)
+              if ((token === 'ETH' || token === 'MATIC' || token === 'SOL') && balanceNum > 0) {
+                flattenedBalances[`${token} (${token === 'ETH' ? 'Ethereum' : token === 'MATIC' ? 'Polygon' : 'Solana'})`] = balanceNum;
+                console.log(`🔷 Added ${token} from EVM: ${balanceNum} (display only)`);
+              }
+            });
+          }
+        } else {
+          console.error(`❌ Balance fetch ${index} failed:`, result.reason);
+        }
+      });
+      
+      // 5. Update UI atomically with all balances at once
+      console.log('📊 Final combined balances:', flattenedBalances);
+      console.log('📈 Total USDC portfolio value:', totalUSDCValue);
+      
+      // Single atomic update to prevent UI flickering
+      setWalletBalance(flattenedBalances);
+      setTotalPortfolioValue(totalUSDCValue);
+    } catch (error: any) {
+      console.error('❌ Failed to get wallet balances:', error);
+      setWalletError(error.message || 'Failed to load wallet balances');
     } finally {
       setIsLoadingWallet(false);
     }
   };
 
-  // Create CrossMint wallet
-  const handleCreateWallet = async () => {
-    setIsCreatingWallet(true);
+  // Fetch wallet balance using provided wallet states (bypasses async React state issues)
+  const fetchWalletBalanceWithStates = async (evmConnected: any, aptosConnected: boolean) => {
+    setIsLoadingWallet(true);
     try {
-      const result = await crossmintService.connectWallet();
-      if (result.success) {
-        setHasWallet(true);
-        console.log('✅ Wallet created successfully!', result.wallet);
-        // Fetch balance after wallet creation
-        await fetchWalletBalance();
-      } else {
-        console.error('❌ Wallet creation failed:', result.error);
-        setWalletError('Failed to create wallet. Please try again.');
+      console.log('🔄 Fetching wallet balances with direct states:', { evmConnected, aptosConnected });
+      
+      // Create promises for parallel execution
+      const balanceFetches: Promise<{type: 'aptos' | 'evm', balances: any}>[] = [];
+      
+      // 1. Add Aptos balance fetch promise
+      if (aptosConnected) {
+        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
+          if (aptosWallet.success && aptosWallet.address) {
+            console.log('🟣 Fetching Aptos USDC balance for address:', aptosWallet.address);
+            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
+            return { type: 'aptos' as const, balances: aptosBalances };
+          }
+          return { type: 'aptos' as const, balances: { success: false, error: 'No Aptos wallet' } };
+        });
+        balanceFetches.push(aptosPromise);
       }
-    } catch (error) {
-      console.error('Wallet creation error:', error);
-      setWalletError('Wallet creation failed. Please try again.');
+      
+      // 2. Add EVM balance fetch promise
+      if (evmConnected) {
+        const evmPromise = crossmintService.getWalletFromBackend('ethereum', 'crossmint').then(async (evmWalletData) => {
+          console.log('🔷 Fetching EVM wallet balances...');
+          
+          let evmAddress = '0x678bCC985D12C5fF769A2F4A5ff323A2029284Bb'; // fallback
+          if (evmWalletData.success && evmWalletData.wallet?.address) {
+            evmAddress = evmWalletData.wallet.address;
+            console.log('✅ Using EVM address from database:', evmAddress);
+          } else {
+            console.log('⚠️ Using fallback EVM address:', evmAddress);
+          }
+          
+          // Try CrossMint service first
+          const evmBalances = await crossmintService.getWalletBalance(evmAddress);
+          
+          // Check if CrossMint returned any non-zero balances
+          let hasNonZeroBalances = false;
+          if (evmBalances.success && evmBalances.balances) {
+            hasNonZeroBalances = Object.values(evmBalances.balances).some(balance => parseFloat(balance) > 0);
+          }
+          
+          if (evmBalances.success && evmBalances.balances && hasNonZeroBalances) {
+            return { type: 'evm' as const, balances: evmBalances };
+          } else {
+            // Fallback to direct RPC calls
+            const directBalances = await crossmintService.getEVMBalancesDirect(evmAddress);
+            return { type: 'evm' as const, balances: directBalances };
+          }
+        });
+        balanceFetches.push(evmPromise);
+      }
+      
+      // 3. Execute all promises in parallel and wait for completion
+      if (balanceFetches.length === 0) {
+        console.log('⚠️ No balance fetches to execute');
+        setWalletBalance({});
+        setTotalPortfolioValue(0);
+        return;
+      }
+      
+      console.log(`⏳ Waiting for ${balanceFetches.length} balance fetches to complete...`);
+      const results = await Promise.allSettled(balanceFetches);
+      
+      // 4. Process all results atomically
+      const flattenedBalances: { [key: string]: number } = {};
+      let totalUSDCValue = 0;
+      
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { type, balances } = result.value;
+          
+          if (type === 'aptos' && balances.success && balances.balances) {
+            console.log('✅ Processing Aptos balances:', balances.balances);
+            Object.entries(balances.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance) || 0;
+              
+              // Only include USDC from Aptos in portfolio calculation
+              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
+                flattenedBalances['USDC (Aptos)'] = balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
+              }
+              
+              // Also include APT for display but not in USDC total
+              if (token.includes('APT') || token.toUpperCase() === 'APT') {
+                flattenedBalances['APT (Aptos)'] = balanceNum;
+                console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
+              }
+            });
+          }
+          
+          if (type === 'evm' && balances.success && balances.balances) {
+            console.log('✅ Processing EVM balances:', balances.balances);
+            Object.entries(balances.balances).forEach(([token, balance]) => {
+              const balanceNum = parseFloat(balance) || 0;
+              
+              // Handle USDC from testnets or CrossMint
+              if (token.includes('USDC')) {
+                const chainName = token.includes('Ethereum') ? 'Ethereum Sepolia' : 
+                                 token.includes('Polygon') ? 'Polygon Amoy' : 
+                                 token.toUpperCase() === 'USDC' ? 'EVM' : token;
+                flattenedBalances[`USDC (${chainName})`] = balanceNum;
+                totalUSDCValue += balanceNum;
+                console.log(`💰 Added USDC from ${chainName}: ${balanceNum}`);
+              }
+              
+              // Handle native tokens (only if non-zero)
+              if ((token === 'ETH' || token === 'MATIC' || token === 'SOL') && balanceNum > 0) {
+                flattenedBalances[`${token} (${token === 'ETH' ? 'Ethereum' : token === 'MATIC' ? 'Polygon' : 'Solana'})`] = balanceNum;
+                console.log(`🔷 Added ${token} from EVM: ${balanceNum} (display only)`);
+              }
+            });
+          }
+        } else {
+          console.error(`❌ Balance fetch failed:`, result.reason);
+        }
+      });
+      
+      console.log('💎 Final aggregated balances:', flattenedBalances);
+      console.log('💰 Total USDC value:', totalUSDCValue);
+      
+      // Update state atomically
+      setWalletBalance(flattenedBalances);
+      setTotalPortfolioValue(totalUSDCValue);
+    } catch (error: any) {
+      console.error('❌ Failed to get wallet balances with states:', error);
+      setWalletError(error.message || 'Failed to load wallet balances');
     } finally {
-      setIsCreatingWallet(false);
+      setIsLoadingWallet(false);
     }
   };
+
+  // REMOVED: handleCreateWallet function - wallet creation now happens at chain level during deposit
+  // This prevents creating multiple wallets and ensures consistency with database wallets
 
   // Check wallet status when user is authenticated
   useEffect(() => {
@@ -716,37 +1063,7 @@ export default function App() {
                     setSelectedOffer(null);
                     setCurrentFXScreen('marketplace');
                   }}
-                  onStartTrade={(amount) => {
-                    // Create mock trade
-                    const mockTrade = {
-                      id: 'trade_' + Math.random().toString(36).substr(2, 9),
-                      offerId: selectedOffer.id,
-                      maker: selectedOffer.maker,
-                      taker: {
-                        id: 'current_user',
-                        name: 'You',
-                        trustScore: 85,
-                      },
-                      sellCurrency: selectedOffer.sellCurrency,
-                      buyCurrency: selectedOffer.buyCurrency,
-                      sellAmount: amount,
-                      buyAmount: Math.round(amount * selectedOffer.exchangeRate),
-                      exchangeRate: selectedOffer.exchangeRate,
-                      paymentMethod: selectedOffer.paymentMethods[0],
-                      escrowAmount: amount * 1.1, // 110% of trade amount
-                      escrowCurrency: 'USDC',
-                      status: 'payment_pending',
-                      createdAt: new Date(),
-                      quoteLockExpiry: new Date(Date.now() + 10 * 60 * 1000), // 10 min
-                      paymentWindow: {
-                        start: new Date(),
-                        end: new Date(Date.now() + selectedOffer.paymentWindow * 60 * 1000),
-                      },
-                      chatRoomId: 'chat_' + Math.random().toString(36).substr(2, 9),
-                    };
-                    setCurrentTrade(mockTrade);
-                    setCurrentFXScreen('trade_room');
-                  }}
+                  onStartTrade={handleStartTrade}
                   onContactTrader={() => {
                     // Find the conversation for this trader
                     const traderConversation = conversations.find(c => c.id === selectedOffer.maker.id);
@@ -769,24 +1086,11 @@ export default function App() {
                     setCurrentTrade(null);
                     setCurrentFXScreen('marketplace');
                   }}
-                  onUploadPaymentProof={(file) => {
-                    console.log('Payment proof uploaded:', file);
-                  }}
-                  onConfirmPayment={() => {
-                    console.log('Payment confirmed');
-                    setCurrentTrade({...currentTrade, status: 'payment_confirmed'});
-                  }}
-                  onSignRelease={() => {
-                    console.log('Funds released');
-                    setCurrentTrade({...currentTrade, status: 'completed'});
-                  }}
-                  onOpenDispute={(reason) => {
-                    console.log('Dispute opened:', reason);
-                    setCurrentTrade({...currentTrade, status: 'disputed'});
-                  }}
-                  onCompleteRating={(rating, review) => {
-                    console.log('Rating completed:', rating, review);
-                  }}
+                  onUploadPaymentProof={handleUploadPaymentProof}
+                  onConfirmPayment={handleConfirmPayment}
+                  onSignRelease={handleSignRelease}
+                  onOpenDispute={handleOpenDispute}
+                  onCompleteRating={handleCompleteRating}
                 />
               );
             }
@@ -872,7 +1176,7 @@ export default function App() {
                   {profileService.formatBalance(totalPortfolioValue)}
                 </Typography>
                 <Typography variant="body2" color="textSecondary" align="center">
-                  {hasWallet && walletBalance.ETH ? `≈ ${parseFloat(walletBalance.ETH.toString()).toFixed(4)} ETH` : '≈ 0.00 ETH'}
+                  Total USDC Balance
                 </Typography>
                 
                 {/* Balance Breakdown */}
@@ -904,16 +1208,15 @@ export default function App() {
             {/* Quick Actions */}
             <View style={styles.actionButtons}>
               <Button 
-                title={isCreatingWallet ? "Creating..." : (hasWallet ? "Deposit" : "Create")} 
-                icon={hasWallet ? "add" : "account-balance-wallet"} 
-                onPress={hasWallet ? () => {
+                title="Deposit" 
+                icon="add" 
+                onPress={() => {
                   if (simulateError('payment', 'Deposit service temporarily unavailable')) {
                     return;
                   }
                   simulateLoading(setIsLoadingGeneral, 1500, 'Opening deposit...');
                   setTimeout(() => setShowDepositFlow(true), 1500);
-                } : handleCreateWallet}
-                disabled={isCreatingWallet}
+                }}
                 style={{ flex: 1 }}
               />
               <Button 
@@ -1843,6 +2146,167 @@ export default function App() {
       </Typography>
     </View>
   );
+
+  // FX Trading Handlers
+  const handleStartTrade = async (amount: number) => {
+    if (!selectedOffer) {
+      console.error('No offer selected for trade');
+      return;
+    }
+
+    try {
+      console.log('🔄 Starting trade with FX service...');
+      setIsLoadingGeneral(true);
+
+      const response = await fxService.createTrade(
+        selectedOffer.id,
+        amount,
+        selectedOffer.paymentMethods[0],
+        currentUser?.id || 'current_user'
+      );
+
+      if (response.success && response.trade) {
+        console.log('✅ Trade created successfully:', response.trade);
+        setCurrentTrade(response.trade);
+        setCurrentFXScreen('trade_room');
+      } else {
+        console.error('❌ Failed to create trade:', response.error);
+        // Show error to user
+      }
+    } catch (error) {
+      console.error('❌ Exception creating trade:', error);
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleUploadPaymentProof = async (file: any) => {
+    if (!currentTrade) return;
+
+    try {
+      console.log('📄 Uploading payment proof...');
+      setIsLoadingGeneral(true);
+
+      const response = await fxService.uploadPaymentProof(currentTrade.id, file);
+      
+      if (response.success) {
+        console.log('✅ Payment proof uploaded successfully');
+        // Update trade status
+        await updateTradeStatus('payment_sent');
+      } else {
+        console.error('❌ Failed to upload payment proof:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception uploading payment proof:', error);
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!currentTrade) return;
+
+    try {
+      console.log('✅ Confirming payment...');
+      setIsLoadingGeneral(true);
+
+      const response = await fxService.confirmPayment(currentTrade.id);
+      
+      if (response.success) {
+        console.log('✅ Payment confirmed successfully');
+        await updateTradeStatus('payment_confirmed');
+      } else {
+        console.error('❌ Failed to confirm payment:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception confirming payment:', error);
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleSignRelease = async () => {
+    if (!currentTrade) return;
+
+    try {
+      console.log('🔐 Signing release...');
+      setIsLoadingGeneral(true);
+
+      const response = await fxService.signRelease(currentTrade.id);
+      
+      if (response.success) {
+        console.log('✅ Release signed successfully');
+        await updateTradeStatus('completed');
+      } else {
+        console.error('❌ Failed to sign release:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception signing release:', error);
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleOpenDispute = async (reason: string) => {
+    if (!currentTrade) return;
+
+    try {
+      console.log('⚠️ Opening dispute...');
+      setIsLoadingGeneral(true);
+
+      const response = await fxService.openDispute(currentTrade.id, reason);
+      
+      if (response.success) {
+        console.log('✅ Dispute opened successfully');
+        await updateTradeStatus('disputed');
+      } else {
+        console.error('❌ Failed to open dispute:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception opening dispute:', error);
+    } finally {
+      setIsLoadingGeneral(false);
+    }
+  };
+
+  const handleCompleteRating = async (rating: number, review?: string) => {
+    if (!currentTrade) return;
+
+    try {
+      console.log('⭐ Submitting rating...');
+      
+      const response = await fxService.submitRating(currentTrade.id, rating, review);
+      
+      if (response.success) {
+        console.log('✅ Rating submitted successfully');
+        // Navigate back to marketplace
+        setCurrentTrade(null);
+        setCurrentFXScreen('marketplace');
+      } else {
+        console.error('❌ Failed to submit rating:', response.error);
+      }
+    } catch (error) {
+      console.error('❌ Exception submitting rating:', error);
+    }
+  };
+
+  const updateTradeStatus = async (status: FXTrade['status']) => {
+    if (!currentTrade) return;
+
+    try {
+      const response = await fxService.updateTradeStatus(currentTrade.id, status);
+      
+      if (response.success) {
+        // Update local trade state
+        setCurrentTrade({
+          ...currentTrade,
+          status: status,
+        });
+      }
+    } catch (error) {
+      console.error('❌ Failed to update trade status:', error);
+    }
+  };
 
   const renderContent = () => {
     // If a chat is selected, render it regardless of active tab
