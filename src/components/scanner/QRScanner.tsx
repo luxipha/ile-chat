@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import { CameraView, Camera } from 'expo-camera';
 import { Typography } from '../ui/Typography';
 import { Colors, Spacing } from '../../theme';
 
@@ -20,8 +21,6 @@ interface QRScannerProps {
   description?: string;
 }
 
-// Mock QR Scanner implementation
-// In a real app, you would use expo-camera and expo-barcode-scanner
 export const QRScanner: React.FC<QRScannerProps> = ({
   onBack,
   onQRCodeScanned,
@@ -33,25 +32,25 @@ export const QRScanner: React.FC<QRScannerProps> = ({
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Mock permission request
     requestCameraPermission();
   }, []);
 
   const requestCameraPermission = async () => {
-    // In real implementation, use expo-camera permissions
-    // For now, simulate permission granted
-    setTimeout(() => {
-      setCameraPermission(true);
-    }, 500);
+    try {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setCameraPermission(status === 'granted');
+    } catch (error) {
+      console.error('Error requesting camera permission:', error);
+      setCameraPermission(false);
+    }
   };
 
-  const handleBarCodeScanned = (data: string) => {
+  const handleBarCodeScanned = ({ type, data }: any) => {
     if (scanned) return;
     
     setScanned(true);
     Vibration.vibrate(); // Provide haptic feedback
     
-    // Simulate successful scan
     setTimeout(() => {
       onQRCodeScanned(data);
     }, 100);
@@ -131,10 +130,13 @@ export const QRScanner: React.FC<QRScannerProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Camera View - Mock Implementation */}
+      {/* Camera View */}
       <View style={styles.cameraContainer}>
-        {/* Mock Camera View */}
-        <View style={styles.mockCamera}>
+        <CameraView
+          style={styles.camera}
+          facing="back"
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        >
           <View style={styles.scannerOverlay}>
             {/* Scanner Frame */}
             <View style={styles.scannerFrame}>
@@ -144,7 +146,7 @@ export const QRScanner: React.FC<QRScannerProps> = ({
               <View style={[styles.corner, styles.bottomRight]} />
               
               {/* Scanning Animation */}
-              <View style={styles.scanLine} />
+              {!scanned && <View style={styles.scanLine} />}
             </View>
             
             {/* Instructions */}
@@ -157,42 +159,7 @@ export const QRScanner: React.FC<QRScannerProps> = ({
               </Typography>
             </View>
           </View>
-        </View>
-
-        {/* Mock QR Code Samples for Testing */}
-        <View style={styles.mockQRContainer}>
-          <Typography variant="body2" style={styles.mockQRTitle}>
-            Test QR Codes (Tap to simulate scan):
-          </Typography>
-          <View style={styles.mockQRButtons}>
-            <TouchableOpacity 
-              onPress={() => handleBarCodeScanned('wallet:ile123456789')}
-              style={styles.mockQRButton}
-            >
-              <Typography variant="body2" style={styles.mockQRButtonText}>
-                Wallet Address
-              </Typography>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              onPress={() => handleBarCodeScanned('payment:amount=100&currency=USD&to=john@ile.com')}
-              style={styles.mockQRButton}
-            >
-              <Typography variant="body2" style={styles.mockQRButtonText}>
-                Payment Request
-              </Typography>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              onPress={() => handleBarCodeScanned('contact:name=Sarah&email=sarah@ile.com&phone=+1234567890')}
-              style={styles.mockQRButton}
-            >
-              <Typography variant="body2" style={styles.mockQRButtonText}>
-                Contact Info
-              </Typography>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </CameraView>
       </View>
 
       {/* Bottom Controls */}
@@ -361,40 +328,6 @@ const styles = StyleSheet.create({
   },
   permissionButtonText: {
     color: Colors.white,
-    fontWeight: '600',
-  },
-  mockQRContainer: {
-    position: 'absolute',
-    bottom: 40,
-    left: Spacing.lg,
-    right: Spacing.lg,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 12,
-    padding: Spacing.md,
-  },
-  mockQRTitle: {
-    color: Colors.white,
-    textAlign: 'center',
-    marginBottom: Spacing.sm,
-    fontSize: 12,
-  },
-  mockQRButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Spacing.sm,
-  },
-  mockQRButton: {
-    flex: 1,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.xs,
-    backgroundColor: Colors.primary,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  mockQRButtonText: {
-    color: Colors.white,
-    fontSize: 10,
-    textAlign: 'center',
     fontWeight: '600',
   },
 });
