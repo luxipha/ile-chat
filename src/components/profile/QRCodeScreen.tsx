@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -7,12 +7,19 @@ import {
   Alert,
   Share,
   Dimensions,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import QRCode from 'react-native-qrcode-svg';
+import ViewShot from 'react-native-view-shot';
+import * as Clipboard from 'expo-clipboard';
+import * as MediaLibrary from 'expo-media-library';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import friendService from '../../services/friendService';
 
 interface QRCodeScreenProps {
   onBack: () => void;
@@ -28,32 +35,71 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
   userName = 'John Doe',
   userId = 'user123',
 }) => {
-  const [qrType, setQrType] = useState<'profile' | 'payment' | 'contact'>('profile');
+  const [qrType, setQrType] = useState<'profile' | 'payment'>('profile');
   const [isLoading, setIsLoading] = useState(false);
+  const viewShotRef = useRef<ViewShot>(null);
 
-  // Mock QR code data
+  // Generate real QR code data based on type
   const getQRData = () => {
+    console.log('🔍 QR Code data generation:', { userId, userName, qrType });
+    
+    // Validate that we have proper data
+    if (!userId || !userName || userId === '' || userName === 'User') {
+      console.error('❌ Missing or invalid userId/userName for QR code generation:', { userId, userName });
+      // Return a basic test QR for debugging
+      return `ilepay://profile/test-user-123:TestUser`;
+    }
+    
     switch (qrType) {
       case 'profile':
-        return `ilepay://profile/${userId}`;
+        return `ilepay://profile/${userId}:${userName}`;
       case 'payment':
-        return `ilepay://pay/${userId}`;
-      case 'contact':
-        return `ilepay://contact/${userId}`;
+        return `ilepay://pay/${userId}:${userName}`;
       default:
-        return `ilepay://profile/${userId}`;
+        return `ilepay://profile/${userId}:${userName}`;
     }
   };
 
   const qrCodeData = getQRData();
+  
+  // Log the final QR data for debugging
+  console.log('📱 Generated QR code data:', qrCodeData);
+
+  const requestPermissions = async () => {
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    }
+    
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    return status === 'granted';
+  };
 
   const handleSaveQR = async () => {
     setIsLoading(true);
     try {
-      // Simulate QR code generation and save
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      Alert.alert('Success', 'QR code has been saved to your photo gallery.');
+      // Request permissions
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) {
+        Alert.alert('Permission needed', 'Please allow access to save the QR code to your gallery.');
+        return;
+      }
+
+      // Capture the QR code as image
+      const uri = await viewShotRef.current?.capture();
+      if (!uri) {
+        throw new Error('Failed to capture QR code');
+      }
+
+      // Save to gallery
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      await MediaLibrary.createAlbumAsync('ilePay', asset, false);
+      
+      Alert.alert('Success', 'QR code saved to your photo gallery!');
     } catch (error) {
+      console.error('Error saving QR code:', error);
       Alert.alert('Error', 'Failed to save QR code. Please try again.');
     } finally {
       setIsLoading(false);
@@ -62,21 +108,30 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
 
   const handleShareQR = async () => {
     try {
+      // Capture QR code as image first
+      const uri = await viewShotRef.current?.capture();
+      
       const shareOptions = {
-        title: 'My ilePay QR Code',
-        message: `Connect with me on ilePay! Scan this QR code or use my profile: ${qrCodeData}`,
-        url: qrCodeData, // In a real app, this would be an image URL
+        title: `My ilePay ${qrType === 'contact' ? 'Contact' : qrType === 'payment' ? 'Payment' : 'Profile'} QR Code`,
+        message: `Connect with ${userName} on ilePay! ${qrType === 'contact' ? 'Scan this QR code to add as contact' : qrType === 'payment' ? 'Scan to send payment' : 'Scan to view profile'}: ${qrCodeData}`,
+        url: uri, // Share the actual QR code image
       };
       
       await Share.share(shareOptions);
     } catch (error) {
+      console.error('Error sharing QR code:', error);
       Alert.alert('Error', 'Failed to share QR code. Please try again.');
     }
   };
 
-  const handleCopyLink = () => {
-    // In a real app, you would copy to clipboard
-    Alert.alert('Copied', 'Profile link has been copied to clipboard.');
+  const handleCopyLink = async () => {
+    try {
+      await Clipboard.setStringAsync(qrCodeData);
+      Alert.alert('Copied!', `${qrType === 'contact' ? 'Contact' : qrType === 'payment' ? 'Payment' : 'Profile'} link copied to clipboard.`);
+    } catch (error) {
+      console.error('Error copying to clipboard:', error);
+      Alert.alert('Error', 'Failed to copy to clipboard.');
+    }
   };
 
   const renderQRTypeSelector = () => (
@@ -89,7 +144,6 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
         {[
           { id: 'profile', title: 'Profile', icon: 'person', description: 'Share your profile' },
           { id: 'payment', title: 'Payment', icon: 'payment', description: 'Receive payments' },
-          { id: 'contact', title: 'Contact', icon: 'contacts', description: 'Add to contacts' },
         ].map((type) => (
           <TouchableOpacity
             key={type.id}
@@ -129,36 +183,38 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
 
   const renderQRCode = () => (
     <Card style={styles.qrCodeCard}>
-      <View style={styles.qrCodeContainer}>
-        <View style={styles.qrCodePlaceholder}>
-          {/* In a real app, this would be an actual QR code component */}
-          <View style={styles.qrCodeGrid}>
-            {Array.from({ length: 25 }).map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.qrCodePixel,
-                  Math.random() > 0.5 && styles.qrCodePixelFilled
-                ]}
-              />
-            ))}
+      <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 1.0 }}>
+        <View style={styles.qrCodeContainer}>
+          <View style={styles.qrCodeWrapper}>
+            <QRCode
+              value={qrCodeData}
+              size={qrCodeSize - 40}
+              color={Colors.text}
+              backgroundColor={Colors.background}
+              logoSize={30}
+              logoBackgroundColor={Colors.background}
+              logoMargin={2}
+              logoBorderRadius={15}
+            />
           </View>
           
-          {/* Center logo */}
-          <View style={styles.qrCodeCenterLogo}>
-            <MaterialIcons name="account-balance" size={24} color={Colors.primary} />
-          </View>
+          <Typography variant="h6" style={styles.qrCodeTitle}>
+            {userName}
+          </Typography>
+          <Typography variant="caption" color="textSecondary" style={styles.qrCodeSubtitle}>
+            {qrType === 'profile' ? 'Scan to view profile' :
+             qrType === 'payment' ? 'Scan to send payment' :
+             'Scan to add as contact'}
+          </Typography>
+          
+          {/* Debug info - remove in production */}
+          {__DEV__ && (
+            <Typography variant="caption" style={styles.debugInfo}>
+              Debug: {qrCodeData}
+            </Typography>
+          )}
         </View>
-        
-        <Typography variant="h6" style={styles.qrCodeTitle}>
-          {userName}
-        </Typography>
-        <Typography variant="caption" color="textSecondary" style={styles.qrCodeSubtitle}>
-          {qrType === 'profile' ? 'Scan to view profile' :
-           qrType === 'payment' ? 'Scan to send payment' :
-           'Scan to add contact'}
-        </Typography>
-      </View>
+      </ViewShot>
     </Card>
   );
 
@@ -225,7 +281,7 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
             <Typography variant="caption" style={styles.stepNumberText}>3</Typography>
           </View>
           <Typography variant="body2" style={styles.stepText}>
-            Connect instantly without sharing personal information
+            {qrType === 'profile' ? 'Connect instantly without sharing personal information' : 'Receive payments securely through QR code'}
           </Typography>
         </View>
       </View>
@@ -244,6 +300,18 @@ export const QRCodeScreen: React.FC<QRCodeScreenProps> = ({
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Warning for missing user data */}
+        {(!userId || !userName || userId === '' || userName === 'User') && (
+          <Card style={styles.warningCard}>
+            <View style={styles.warningContainer}>
+              <MaterialIcons name="warning" size={20} color={Colors.warning} />
+              <Typography variant="body2" style={styles.warningText}>
+                User data not loaded properly. Please try logging out and back in.
+              </Typography>
+            </View>
+          </Card>
+        )}
+        
         {renderQRTypeSelector()}
         {renderQRCode()}
         {renderActions()}
@@ -317,43 +385,15 @@ const styles = StyleSheet.create({
   qrCodeContainer: {
     alignItems: 'center',
   },
-  qrCodePlaceholder: {
-    width: qrCodeSize,
-    height: qrCodeSize,
+  qrCodeWrapper: {
+    padding: Spacing.lg,
     backgroundColor: Colors.background,
     borderRadius: BorderRadius.lg,
     borderWidth: 2,
     borderColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: Spacing.lg,
-    position: 'relative',
-  },
-  qrCodeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    width: qrCodeSize - 40,
-    height: qrCodeSize - 40,
-  },
-  qrCodePixel: {
-    width: (qrCodeSize - 40) / 25,
-    height: (qrCodeSize - 40) / 25,
-    backgroundColor: Colors.background,
-    margin: 0.5,
-  },
-  qrCodePixelFilled: {
-    backgroundColor: Colors.textPrimary,
-  },
-  qrCodeCenterLogo: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.primary,
   },
   qrCodeTitle: {
     fontWeight: '600',
@@ -361,6 +401,30 @@ const styles = StyleSheet.create({
   },
   qrCodeSubtitle: {
     textAlign: 'center',
+  },
+  debugInfo: {
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+    fontSize: 10,
+    color: Colors.gray500,
+    backgroundColor: Colors.gray100,
+    padding: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  warningCard: {
+    backgroundColor: Colors.warning + '20',
+    borderColor: Colors.warning,
+    borderWidth: 1,
+    marginBottom: Spacing.lg,
+  },
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  warningText: {
+    marginLeft: Spacing.sm,
+    color: Colors.warning,
+    flex: 1,
   },
   actionsContainer: {
     marginBottom: Spacing.xl,

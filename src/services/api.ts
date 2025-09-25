@@ -5,7 +5,7 @@ import { ApiResponse, User, Transaction, Property } from '../types';
 const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 const API_BASE_URL = isWeb
   ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.100:3000'; // Mobile device (React Native)
+  : 'http://192.168.31.102:3000'; // Mobile device (React Native)
 
 console.log('🔧 API_BASE_URL configured as:', API_BASE_URL);
 console.log('🔧 Environment check - isWeb:', isWeb);

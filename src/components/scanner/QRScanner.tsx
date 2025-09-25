@@ -51,9 +51,10 @@ export const QRScanner: React.FC<QRScannerProps> = ({
     setScanned(true);
     Vibration.vibrate(); // Provide haptic feedback
     
+    // Add a longer delay to prevent multiple scans
     setTimeout(() => {
       onQRCodeScanned(data);
-    }, 100);
+    }, 300);
   };
 
   const resetScanner = () => {

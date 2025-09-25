@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -13,7 +13,10 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { ContactSelector } from '../ui/ContactSelector';
 import { ProfileCard } from '../ui/ProfileCard';
+import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import friendService, { FriendshipStatus } from '../../services/friendService';
+import { communityService, CommunityPost } from '../../services/communityService';
 
 interface PublicProfileScreenProps {
   onBack: () => void;
@@ -25,6 +28,7 @@ interface PublicProfileScreenProps {
   userAvatar?: string;
   userId: string;
   onNavigateToMoments?: () => void;
+  onFriendRequestSent?: () => void;
 }
 
 interface PublicUserProfile {
@@ -53,9 +57,15 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
   userAvatar,
   userId,
   onNavigateToMoments,
+  onFriendRequestSent,
 }) => {
   const [showActions, setShowActions] = useState(false);
   const [showShareContacts, setShowShareContacts] = useState(false);
+  const [friendshipStatus, setFriendshipStatus] = useState<FriendshipStatus | null>(null);
+  const [loadingFriendship, setLoadingFriendship] = useState(true);
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const [userMoments, setUserMoments] = useState<CommunityPost[]>([]);
+  const [loadingMoments, setLoadingMoments] = useState(true);
   // Mock user data - in real app, fetch based on userId
   const userProfile: PublicUserProfile = {
     name: userName,
@@ -95,6 +105,63 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
     ],
   };
 
+  // Load friendship status and user moments when component mounts
+  useEffect(() => {
+    loadFriendshipStatus();
+    loadUserMoments();
+  }, [userId]);
+
+  const loadFriendshipStatus = async () => {
+    try {
+      setLoadingFriendship(true);
+      const result = await friendService.getFriendshipStatus(userId);
+      if (result.success && result.status) {
+        setFriendshipStatus(result.status);
+      }
+    } catch (error) {
+      console.error('Error loading friendship status:', error);
+    } finally {
+      setLoadingFriendship(false);
+    }
+  };
+
+  const handleSendFriendRequest = async () => {
+    try {
+      setSendingRequest(true);
+      const result = await friendService.sendFriendRequest(
+        userId,
+        `Hi ${userName}! I'd like to connect with you on ilePay.`
+      );
+      
+      if (result.success) {
+        Alert.alert('Success', 'Friend request sent!');
+        // Reload friendship status
+        await loadFriendshipStatus();
+        onFriendRequestSent?.();
+      } else {
+        Alert.alert('Error', result.message);
+      }
+    } catch (error) {
+      console.error('Error sending friend request:', error);
+      Alert.alert('Error', 'Failed to send friend request');
+    } finally {
+      setSendingRequest(false);
+    }
+  };
+
+  const loadUserMoments = async () => {
+    try {
+      setLoadingMoments(true);
+      const result = await communityService.getUserPosts(userId, 1, 6); // Load 6 recent posts
+      if (result.success && result.data) {
+        setUserMoments(result.data.posts);
+      }
+    } catch (error) {
+      console.error('Error loading user moments:', error);
+    } finally {
+      setLoadingMoments(false);
+    }
+  };
 
   const handleBlockUser = () => {
     setShowActions(false);
@@ -128,41 +195,52 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Typography variant="h5" style={styles.sectionTitle}>Moments</Typography>
-        <TouchableOpacity onPress={onNavigateToMoments || onViewMoments}>
-          <Typography variant="body2" color="primary" style={styles.viewAllText}>
-            View All
-          </Typography>
-        </TouchableOpacity>
+        {userMoments.length > 4 && (
+          <TouchableOpacity onPress={onNavigateToMoments || onViewMoments}>
+            <Typography variant="body2" color="primary" style={styles.viewAllText}>
+              View All
+            </Typography>
+          </TouchableOpacity>
+        )}
       </View>
       
-      <TouchableOpacity onPress={onViewMoments}>
-        <View style={styles.momentsThumbnails}>
-          {userProfile.momentThumbnails.slice(0, 4).map((moment, index) => (
-            <View key={moment.id} style={styles.thumbnailWrapper}>
-              <Image source={{ uri: moment.image }} style={styles.thumbnail} />
-              <View style={styles.thumbnailOverlay}>
-                <MaterialIcons 
-                  name={
-                    moment.type === 'investment' ? 'trending-up' :
-                    moment.type === 'achievement' ? 'emoji-events' : 'group'
-                  } 
-                  size={12} 
-                  color="white" 
-                />
-              </View>
-              {index === 3 && userProfile.momentThumbnails.length > 4 && (
-                <View style={styles.moreOverlay}>
-                  <Typography variant="body2" style={styles.moreText}>
-                    +{userProfile.momentThumbnails.length - 4}
-                  </Typography>
-                </View>
-              )}
-            </View>
-          ))}
+      {loadingMoments ? (
+        <View style={styles.loadingMoments}>
+          <LoadingSpinner size="small" />
         </View>
-      </TouchableOpacity>
-      
-      {userProfile.momentThumbnails.length === 0 && (
+      ) : userMoments.length > 0 ? (
+        <TouchableOpacity onPress={onViewMoments}>
+          <View style={styles.momentsThumbnails}>
+            {userMoments.slice(0, 4).map((moment, index) => (
+              <View key={moment.id || moment._id} style={styles.thumbnailWrapper}>
+                {moment.image ? (
+                  <Image source={{ uri: moment.image }} style={styles.thumbnail} />
+                ) : (
+                  <View style={[styles.thumbnail, styles.textThumbnail]}>
+                    <Typography variant="caption" style={styles.textThumbnailContent}>
+                      {moment.content.substring(0, 30)}...
+                    </Typography>
+                  </View>
+                )}
+                <View style={styles.thumbnailOverlay}>
+                  <MaterialIcons 
+                    name={moment.image ? 'photo' : 'chat'} 
+                    size={12} 
+                    color="white" 
+                  />
+                </View>
+                {index === 3 && userMoments.length > 4 && (
+                  <View style={styles.moreOverlay}>
+                    <Typography variant="body2" style={styles.moreText}>
+                      +{userMoments.length - 4}
+                    </Typography>
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+        </TouchableOpacity>
+      ) : (
         <View style={styles.emptyMoments}>
           <MaterialIcons name="photo-library" size={48} color={Colors.gray400} />
           <Typography variant="body1" color="textSecondary" style={styles.emptyText}>
@@ -212,21 +290,50 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
         {renderMomentsSection()}
         
         {/* Action Buttons Outside Card */}
-        <View style={styles.bottomActions}>
-          <Button
-            title="Message"
-            icon="message"
-            onPress={onMessage}
-            style={styles.actionButton}
-          />
-          <Button
-            title="Send Money"
-            icon="payment"
-            variant="outline"
-            onPress={onSendMoney}
-            style={styles.actionButton}
-          />
-        </View>
+        {loadingFriendship ? (
+          <View style={styles.loadingActions}>
+            <LoadingSpinner size="small" />
+          </View>
+        ) : (
+          <View style={styles.bottomActions}>
+            {friendshipStatus?.status === 'friends' ? (
+              <>
+                <Button
+                  title="Message"
+                  icon="message"
+                  onPress={onMessage}
+                  style={styles.actionButton}
+                />
+                <Button
+                  title="Send Money"
+                  icon="payment"
+                  variant="outline"
+                  onPress={onSendMoney}
+                  style={styles.actionButton}
+                />
+              </>
+            ) : friendshipStatus?.status === 'pending' ? (
+              <Button
+                title={friendshipStatus.isSender ? "Request Sent" : "Respond to Request"}
+                icon={friendshipStatus.isSender ? "schedule" : "person-add"}
+                disabled={friendshipStatus.isSender || sendingRequest}
+                onPress={() => {
+                  // Navigate to friend requests screen or handle response
+                  Alert.alert('Info', 'Check your friend requests to respond');
+                }}
+                style={styles.fullActionButton}
+              />
+            ) : (
+              <Button
+                title={sendingRequest ? "Sending..." : "Add Contact"}
+                icon="person-add"
+                onPress={handleSendFriendRequest}
+                disabled={sendingRequest}
+                style={styles.fullActionButton}
+              />
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* Contact Selector for Sharing */}
@@ -391,6 +498,28 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  fullActionButton: {
+    width: '100%',
+  },
+  loadingActions: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+  },
+  loadingMoments: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+  },
+  textThumbnail: {
+    backgroundColor: Colors.gray100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.xs,
+  },
+  textThumbnailContent: {
+    textAlign: 'center',
+    color: Colors.text,
+    fontSize: 10,
   },
   section: {
     marginBottom: Spacing.lg,

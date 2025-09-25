@@ -6,7 +6,8 @@ import {
   KeyboardAvoidingView, 
   Platform,
   Keyboard,
-  TouchableOpacity
+  TouchableOpacity,
+  Alert
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MessageBubble, Message } from './MessageBubble';
@@ -17,6 +18,8 @@ import { SendMoneyModal } from '../wallet/SendMoneyModal';
 import { GroupDetailsScreen } from './GroupDetailsScreen';
 import { ChatTheme } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
+import chatService, { ChatMessage } from '../../services/chatService';
+import authService from '../../services/authService';
 
 interface ChatScreenProps {
   chatId: string;
@@ -39,54 +42,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onInfo,
   onNavigateToMoments,
 }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hey! I wanted to discuss the property investment opportunity we talked about.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-      isOwn: false,
-      status: 'read',
-      senderName: chatName,
-      senderAvatar: chatAvatar,
-      type: 'text',
-    },
-    {
-      id: '2', 
-      text: 'Sure! I\'m interested in learning more about the fractional ownership model.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 25), // 25 minutes ago
-      isOwn: true,
-      status: 'read',
-      type: 'text',
-    },
-    {
-      id: '3',
-      text: 'Great! The property is located in a prime area with high growth potential. You can buy tokens representing ownership shares.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 20), // 20 minutes ago
-      isOwn: false,
-      status: 'read',
-      senderName: chatName,
-      senderAvatar: chatAvatar,
-      type: 'text',
-    },
-    {
-      id: '4',
-      text: 'What\'s the minimum investment amount?',
-      timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 minutes ago
-      isOwn: true,
-      status: 'read',
-      type: 'text',
-    },
-    {
-      id: '5',
-      text: 'You can start with as little as $100. Each token represents a fraction of the property value.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 10), // 10 minutes ago
-      isOwn: false,
-      status: 'read',
-      senderName: chatName,
-      senderAvatar: chatAvatar,
-      type: 'text',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [isTyping, setIsTyping] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -102,6 +59,58 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       flatListRef.current.scrollToEnd({ animated: true });
     }
   };
+
+  // Convert Firebase ChatMessage to local Message format
+  const convertToLocalMessage = (chatMessage: ChatMessage, currentUserId: string): Message => {
+    return {
+      id: chatMessage._id,
+      text: chatMessage.text,
+      timestamp: chatMessage.createdAt,
+      isOwn: chatMessage.user._id === currentUserId,
+      status: 'read', // Default status
+      senderName: chatMessage.user.name,
+      senderAvatar: chatMessage.user.avatar,
+      type: 'text', // Default type, can be enhanced based on message content
+    };
+  };
+
+  // Load messages when component mounts
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        setLoading(true);
+        const currentUser = await authService.getCurrentUser();
+        if (!currentUser) {
+          Alert.alert('Error', 'User not authenticated');
+          return;
+        }
+
+        // Subscribe to real-time messages
+        const unsubscribe = chatService.getMessages(chatId, (chatMessages: ChatMessage[]) => {
+          const convertedMessages = chatMessages.map(msg => 
+            convertToLocalMessage(msg, currentUser.id)
+          );
+          setMessages(convertedMessages);
+          setLoading(false);
+        });
+
+        return unsubscribe;
+      } catch (error) {
+        console.error('Error loading messages:', error);
+        setLoading(false);
+        Alert.alert('Error', 'Failed to load messages. Please try again.');
+      }
+    };
+
+    const unsubscribe = loadMessages();
+    
+    // Cleanup subscription on unmount
+    return () => {
+      if (unsubscribe && typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, [chatId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -129,46 +138,45 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     };
   }, []);
 
-  const handleSendMessage = (text: string) => {
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text,
-      timestamp: new Date(),
-      isOwn: true,
-      status: 'sending',
-      type: 'text',
-    };
+  const handleSendMessage = async (text: string) => {
+    try {
+      const currentUser = await authService.getCurrentUser();
+      if (!currentUser) {
+        Alert.alert('Error', 'Please sign in to send messages');
+        return;
+      }
 
-    setMessages(prev => [...prev, newMessage]);
-
-    // Simulate message delivery
-    setTimeout(() => {
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === newMessage.id 
-            ? { ...msg, status: 'delivered' as const }
-            : msg
-        )
-      );
-    }, 1000);
-
-    // Simulate typing indicator and response
-    setTimeout(() => {
-      setIsTyping(true);
-    }, 2000);
-
-    setTimeout(() => {
-      setIsTyping(false);
-      const responseMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: 'That sounds like a great plan! Let me know if you need any help with the process.',
+      // Create optimistic message for immediate UI feedback
+      const optimisticMessage: Message = {
+        id: `temp_${Date.now()}`,
+        text,
         timestamp: new Date(),
-        isOwn: false,
-        status: 'read',
-        senderName: chatName,
+        isOwn: true,
+        status: 'sending',
+        type: 'text',
       };
-      setMessages(prev => [...prev, responseMessage]);
-    }, 4000);
+
+      setMessages(prev => [...prev, optimisticMessage]);
+
+      // Send message via Firebase
+      const sender = {
+        _id: currentUser.id,
+        name: currentUser.name || 'User',
+        avatar: currentUser.profilePicture,
+      };
+
+      await chatService.sendMessage(chatId, text, sender);
+
+      // Remove optimistic message (real message will come through the listener)
+      setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+      
+      // Remove failed optimistic message
+      setMessages(prev => prev.filter(msg => msg.id.startsWith('temp_')));
+    }
   };
 
   const handleSendPayment = (amount: number, currency: string) => {
@@ -399,17 +407,41 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         />
         
         <View style={styles.messagesContainer}>
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            onContentSizeChange={scrollToBottom}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesListContent}
-          />
-          {renderTypingIndicator()}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <Typography variant="body2" color="textSecondary">Loading messages...</Typography>
+            </View>
+          ) : (
+            <>
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={renderMessage}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                onContentSizeChange={scrollToBottom}
+                style={styles.messagesList}
+                contentContainerStyle={[
+                  styles.messagesListContent,
+                  messages.length === 0 && styles.emptyMessages
+                ]}
+                ListEmptyComponent={
+                  !loading ? (
+                    <View style={styles.emptyMessagesContainer}>
+                      <MaterialIcons name="message" size={48} color={ChatTheme.textSecondary} />
+                      <Typography variant="h6" style={styles.emptyTitle}>
+                        Start a conversation
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary" style={styles.emptyDescription}>
+                        Send a message to begin chatting with {chatName}
+                      </Typography>
+                    </View>
+                  ) : null
+                }
+              />
+              {renderTypingIndicator()}
+            </>
+          )}
         </View>
         
         <MessageComposer 
@@ -495,5 +527,31 @@ const styles = StyleSheet.create({
   },
   optionText: {
     marginLeft: 12,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  emptyMessages: {
+    flexGrow: 1,
+  },
+  emptyMessagesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  emptyDescription: {
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

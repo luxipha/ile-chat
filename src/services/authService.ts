@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebaseAuthService from './firebaseAuthService';
 
-// Detect environment and use appropriate URL
+// API Base URL from environment variables with fallbacks
 const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const API_BASE_URL = isWeb
+const API_BASE_URL = process.env.API_BASE_URL || (isWeb
   ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.100:3000'; // Mobile device
+  : 'http://192.168.31.102:3000'); // Mobile device
 
 export interface User {
   id: string;
@@ -69,6 +70,19 @@ class AuthService {
       await AsyncStorage.setItem('authToken', authData.token);
       await AsyncStorage.setItem('userData', JSON.stringify(authData.user));
 
+      // Authenticate with Firebase after successful login
+      try {
+        console.log('🔥 Initiating Firebase authentication...');
+        const firebaseResult = await firebaseAuthService.authenticateWithFirebase();
+        if (!firebaseResult.success) {
+          console.warn('⚠️ Firebase authentication failed:', firebaseResult.error);
+          // Continue with login success even if Firebase fails - Firebase is for chat only
+        }
+      } catch (error) {
+        console.warn('⚠️ Firebase authentication error:', error);
+        // Don't fail the login if Firebase fails
+      }
+
       return { success: true, user: authData.user };
     } catch (error) {
       console.error('Login error:', error);
@@ -97,6 +111,19 @@ class AuthService {
       
       await AsyncStorage.setItem('authToken', authData.token);
       await AsyncStorage.setItem('userData', JSON.stringify(authData.user));
+
+      // Authenticate with Firebase after successful registration
+      try {
+        console.log('🔥 Initiating Firebase authentication for new user...');
+        const firebaseResult = await firebaseAuthService.authenticateWithFirebase();
+        if (!firebaseResult.success) {
+          console.warn('⚠️ Firebase authentication failed:', firebaseResult.error);
+          // Continue with registration success even if Firebase fails
+        }
+      } catch (error) {
+        console.warn('⚠️ Firebase authentication error:', error);
+        // Don't fail the registration if Firebase fails
+      }
 
       return { success: true, user: authData.user };
     } catch (error) {
@@ -266,6 +293,15 @@ class AuthService {
       console.log('🗑️ Clearing AsyncStorage items: authToken, userData');
       
       await AsyncStorage.multiRemove(['authToken', 'userData']);
+      
+      // Clear Firebase authentication data
+      try {
+        await firebaseAuthService.clearFirebaseAuth();
+        console.log('🔥 Firebase authentication cleared');
+      } catch (error) {
+        console.warn('⚠️ Error clearing Firebase auth:', error);
+      }
+      
       console.log('✅ Logout completed successfully');
       
       // Verify items were removed
@@ -313,6 +349,7 @@ class AuthService {
       return null;
     }
   }
+
 
   getToken(): string | null {
     return this.token;

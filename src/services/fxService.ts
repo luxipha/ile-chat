@@ -9,7 +9,7 @@ import { FXOffer, FXTrade, FXFilter, CreateTradeResponse, FXOffersResponse, Trad
 class FXService {
   private apiBaseUrl = (typeof window !== 'undefined' && typeof window.document !== 'undefined')
     ? 'http://localhost:3000/api/fx'  // Web browser
-    : 'http://192.168.31.100:3000/api/fx'; // Mobile device
+    : 'http://192.168.31.102:3000/api/fx'; // Mobile device
 
   /**
    * Get available FX offers from the marketplace

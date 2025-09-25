@@ -301,6 +301,50 @@ class CommunityService {
     }
   }
 
+  /**
+   * Get posts by a specific user
+   */
+  async getUserPosts(userId: string, page = 1, limit = 10): Promise<CommunityResponse<PostsResponse>> {
+    try {
+      console.log('👤 CommunityService.getUserPosts() called with userId:', userId, 'page:', page);
+      const response = await apiClient.get(`/api/community/posts/user/${userId}`, {
+        params: { page, limit }
+      });
+      console.log('📥 User posts API response:', {
+        success: response.success,
+        postsCount: response.data?.posts?.length || 0,
+        hasData: !!response.data
+      });
+      
+      // Transform the data to match our expected format
+      const posts = response.data?.posts?.map((post: any) => ({
+        ...post,
+        id: post._id,
+        authorId: post.author?._id || post.authorId,
+        authorName: post.author?.name || post.authorName,
+        time: post.createdAt ? new Date(post.createdAt).toLocaleDateString() : 'Unknown'
+      })) || [];
+
+      return {
+        success: response.success,
+        data: {
+          posts,
+          total: response.data?.total || 0,
+          page: response.data?.page || 1,
+          pages: response.data?.pages || 1
+        },
+        error: response.error
+      };
+    } catch (error: any) {
+      console.error('❌ Failed to fetch user posts:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch user posts',
+        data: { posts: [], total: 0, page: 1, pages: 0 }
+      };
+    }
+  }
+
   // Utility function to format posts for the UI
   formatPostForUI(post: CommunityPost, currentUserId?: string): CommunityPost {
     console.log('🔄 Formatting post for UI:', {

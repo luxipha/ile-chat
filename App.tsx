@@ -39,6 +39,8 @@ import { LoginScreen } from './src/components/auth/LoginScreen';
 import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView';
 import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
 import { QRScannerModal } from './src/components/scanner/QRScannerModal';
+import { AddContactScreen } from './src/components/contacts/AddContactScreen';
+import { FriendRequestsScreen } from './src/components/friends/FriendRequestsScreen';
 import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
 import { LoadingOverlay } from './src/components/ui/LoadingOverlay';
 import { SkeletonContactItem, SkeletonCard } from './src/components/ui/SkeletonLoader';
@@ -58,7 +60,9 @@ import chatService from './src/services/chatService';
 import fxService from './src/services/fxService';
 import aptosService from './src/services/aptosService';
 import { apiService } from './src/services/api';
-// import { signInWithCustomFirebaseToken } from './src/services/firebaseConfig';
+import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
+import { signInWithCustomToken } from 'firebase/auth'; // Import from Firebase SDK
+import { auth as firebaseAuth } from './src/services/firebaseConfig'; // Assuming you have a firebaseConfig.ts
 // crossmintService removed - now using frontend SDK
 import { CrossmintProviders } from './src/providers/CrossmintProviders';
 import { useBalance } from './src/hooks/useBalance';
@@ -146,6 +150,12 @@ function AppWithCrossmint() {
   const [currentWalletScreen, setCurrentWalletScreen] = useState<WalletScreen>('main');
   const [showContactProfile, setShowContactProfile] = useState(false);
   const [selectedContact, setSelectedContact] = useState<{name: string; avatar?: string; id: string} | null>(null);
+  
+  // Contact management state
+  const [currentContactScreen, setCurrentContactScreen] = useState<'main' | 'add' | 'requests'>('main');
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [sentRequests, setSentRequests] = useState<any[]>([]);
+  const [friends, setFriends] = useState<any[]>([]);
   const [showDeleteMenu, setShowDeleteMenu] = useState<string | null>(null);
   const [showP2PSend, setShowP2PSend] = useState(false);
   const [showLoanRequest, setShowLoanRequest] = useState(false);
@@ -172,6 +182,15 @@ function AppWithCrossmint() {
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [momentsError, setMomentsError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  
+  // Device contacts discovery state
+  const [deviceContactsResult, setDeviceContactsResult] = useState<ContactDiscoveryResult | null>(null);
+  const [isLoadingDeviceContacts, setIsLoadingDeviceContacts] = useState(false);
+  const [deviceContactsPermissionGranted, setDeviceContactsPermissionGranted] = useState<boolean | null>(null);
+  const [showContactsPermissionPrompt, setShowContactsPermissionPrompt] = useState(false);
+  
+  // Chat state
+  const [conversationsLoading, setConversationsLoading] = useState(false);
 
   // Test backend connectivity on app start
   useEffect(() => {
@@ -197,26 +216,46 @@ function AppWithCrossmint() {
     checkAuthStatus();
   }, []);
 
-  // Authenticate with Firebase and fetch conversations
+  // Setup Firebase chat when user is authenticated
   useEffect(() => {
     if (isAuthenticated && currentUser) {
-      const authenticateAndFetchData = async () => {
+      const setupFirebaseChat = async () => {
         try {
-          // 1. Get custom token from your backend
-          // const tokenResponse = await authService.getFirebaseToken(); // You need to implement this in authService
-          // if (tokenResponse.success && tokenResponse.token) {
-          //   // 2. Sign in to Firebase
-          //   await signInWithCustomFirebaseToken(tokenResponse.token);
+          console.log('🔥 Setting up Firebase chat for user:', currentUser.email);
+          
+          // Import Firebase auth service
+          const firebaseAuthService = (await import('./src/services/firebaseAuthService')).default;
+          
+          // Check if user is already authenticated with Firebase
+          const isFirebaseAuth = await firebaseAuthService.isFirebaseAuthenticated();
+          
+          if (!isFirebaseAuth) {
+            console.log('🔄 Authenticating with Firebase...');
+            const authResult = await firebaseAuthService.authenticateWithFirebase();
             
-            // 3. Listen for conversations
-            const unsubscribe = chatService.getConversations(currentUser.id, setConversations);
-            return () => unsubscribe(); // Cleanup listener on unmount
-          // }
+            if (!authResult.success) {
+              console.error('❌ Firebase authentication failed:', authResult.error);
+              return;
+            }
+            console.log('✅ Firebase authentication successful');
+          }
+          
+          // Setup conversations listener
+          console.log('🔄 Setting up conversations listener...');
+          const chatService = (await import('./src/services/chatService')).default;
+          const unsubscribe = chatService.getConversations(currentUser.id, setConversations);
+          
+          // Cleanup function
+          return () => {
+            if (unsubscribe) unsubscribe();
+          };
+          
         } catch (error) {
-          console.error("Failed to setup Firebase chat:", error);
+          console.error("❌ Failed to setup Firebase chat:", error);
         }
       };
-      authenticateAndFetchData();
+      
+      setupFirebaseChat();
     }
   }, [isAuthenticated, currentUser]);
   // Community posts loading function
@@ -1000,6 +1039,76 @@ function AppWithCrossmint() {
     setPaymentError(null);
   };
 
+  // Device contacts discovery functions
+  const handleContactsPermissionRequest = async () => {
+    try {
+      setIsLoadingDeviceContacts(true);
+      const hasPermission = await contactsService.requestPermission();
+      setDeviceContactsPermissionGranted(hasPermission);
+      
+      if (hasPermission) {
+        await performContactsDiscovery();
+      }
+    } catch (error) {
+      console.error('Error requesting contacts permission:', error);
+      setContactsError('Failed to access contacts. Please check your permissions.');
+    } finally {
+      setIsLoadingDeviceContacts(false);
+    }
+  };
+
+  const performContactsDiscovery = async () => {
+    try {
+      setIsLoadingDeviceContacts(true);
+      const result = await contactsService.performContactDiscovery();
+      setDeviceContactsResult(result);
+      console.log('📱 Device contacts discovery completed:', result);
+    } catch (error) {
+      console.error('Error performing contacts discovery:', error);
+      setContactsError('Failed to sync contacts. Please try again.');
+    } finally {
+      setIsLoadingDeviceContacts(false);
+    }
+  };
+
+  const handleInviteContact = (contact: any) => {
+    const inviteLink = contactsService.generateInviteLink(contact);
+    // Open SMS with invite link
+    Alert.alert(
+      'Invite Contact',
+      `Send an invite to ${contact.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Send Invite', 
+          onPress: () => {
+            // In a real app, this would open the SMS app
+            console.log('Opening SMS with invite link:', inviteLink);
+            Alert.alert('Invite Sent', `Invitation sent to ${contact.name}`);
+          }
+        }
+      ]
+    );
+  };
+
+  // Load conversations when user is authenticated
+  useEffect(() => {
+    if (currentUser && activeTab === 'chat') {
+      setConversationsLoading(true);
+      
+      const unsubscribe = chatService.getConversations(currentUser.id, (firebaseConversations) => {
+        setConversations(firebaseConversations);
+        setConversationsLoading(false);
+      });
+
+      return () => {
+        if (unsubscribe && typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      };
+    }
+  }, [currentUser, activeTab]);
+
   // Tab switch with loading and error handling
   const handleTabSwitch = (tab: TabName) => {
     if (tab === activeTab) return;
@@ -1603,6 +1712,47 @@ function AppWithCrossmint() {
   };
 
   const renderContact = () => {
+    // Handle different contact screens
+    switch (currentContactScreen) {
+      case 'add':
+        return (
+          <AddContactScreen
+            onBack={() => setCurrentContactScreen('main')}
+            onUserSelect={(user) => {
+              // Navigate to user's profile
+              setSelectedContact({
+                id: user.id,
+                name: user.name,
+                avatar: user.avatar
+              });
+              setShowContactProfile(true);
+              setCurrentContactScreen('main');
+            }}
+            onOpenQRScanner={() => {
+              setCurrentContactScreen('main');
+              setShowQRScanner(true);
+            }}
+          />
+        );
+      
+      case 'requests':
+        return (
+          <FriendRequestsScreen
+            onBack={() => setCurrentContactScreen('main')}
+            onFriendAdded={(conversationId) => {
+              // Navigate to new chat
+              setCurrentContactScreen('main');
+              setActiveTab('chat');
+            }}
+          />
+        );
+      
+      default:
+        return renderContactMain();
+    }
+  };
+
+  const renderContactMain = () => {
     const getTrustBadgeIcon = (badge: string) => {
       switch (badge) {
         case 'verified': return 'verified';
@@ -1680,12 +1830,29 @@ function AppWithCrossmint() {
         {/* Header with Add Contact Button */}
         <View style={styles.enhancedHeader}>
           <Typography variant="h2">Contacts</Typography>
-          <TouchableOpacity 
-            onPress={() => setShowQRScanner(true)}
-            style={styles.addContactButton}
-          >
-            <MaterialIcons name="person-add" size={24} color={Colors.primary} />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {(pendingRequests.length > 0 || sentRequests.length > 0) && (
+              <TouchableOpacity 
+                onPress={() => setCurrentContactScreen('requests')}
+                style={styles.requestsButton}
+              >
+                <MaterialIcons name="notifications" size={20} color={Colors.primary} />
+                {pendingRequests.length > 0 && (
+                  <View style={styles.notificationBadge}>
+                    <Typography variant="caption" style={styles.badgeText}>
+                      {pendingRequests.length}
+                    </Typography>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity 
+              onPress={() => setCurrentContactScreen('add')}
+              style={styles.addContactButton}
+            >
+              <MaterialIcons name="person-add" size={24} color={Colors.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Search Bar */}
@@ -1709,6 +1876,187 @@ function AppWithCrossmint() {
             )}
           </View>
         </View>
+
+        {/* Pending Friend Requests Section */}
+        {(pendingRequests.length > 0 || sentRequests.length > 0) && (
+          <Card style={styles.pendingRequestsCard}>
+            <View style={styles.pendingRequestsHeader}>
+              <Typography variant="h6" style={styles.pendingRequestsTitle}>
+                Friend Requests
+              </Typography>
+              <TouchableOpacity 
+                onPress={() => setCurrentContactScreen('requests')}
+                style={styles.viewAllRequestsButton}
+              >
+                <Typography variant="body2" color="primary">
+                  View All
+                </Typography>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Show first 2 pending requests */}
+            {pendingRequests.slice(0, 2).map((request, index) => (
+              <View key={request._id} style={styles.pendingRequestItem}>
+                <View style={styles.pendingRequestAvatar}>
+                  <Typography variant="h6" style={styles.avatarText}>
+                    {request.sender.name.charAt(0).toUpperCase()}
+                  </Typography>
+                </View>
+                <View style={styles.pendingRequestInfo}>
+                  <Typography variant="body1" style={styles.pendingRequestName}>
+                    {request.sender.name}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Wants to connect
+                  </Typography>
+                </View>
+                <View style={styles.pendingRequestActions}>
+                  <TouchableOpacity style={styles.acceptButton}>
+                    <MaterialIcons name="check" size={16} color={Colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.rejectButton}>
+                    <MaterialIcons name="close" size={16} color={Colors.white} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+            
+            {/* Show first 2 sent requests */}
+            {sentRequests.slice(0, 2).map((request, index) => (
+              <View key={request._id} style={styles.sentRequestItem}>
+                <View style={styles.pendingRequestAvatar}>
+                  <Typography variant="h6" style={styles.avatarText}>
+                    {request.recipient.name.charAt(0).toUpperCase()}
+                  </Typography>
+                </View>
+                <View style={styles.pendingRequestInfo}>
+                  <Typography variant="body1" style={styles.pendingRequestName}>
+                    {request.recipient.name}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Request sent
+                  </Typography>
+                </View>
+                <View style={styles.pendingTag}>
+                  <Typography variant="caption" style={styles.pendingTagText}>
+                    Pending
+                  </Typography>
+                </View>
+              </View>
+            ))}
+          </Card>
+        )}
+
+        {/* Device Contacts Section */}
+        {!deviceContactsPermissionGranted && (
+          <Card style={styles.deviceContactsPrompt}>
+            <View style={styles.deviceContactsHeader}>
+              <MaterialIcons name="contacts" size={24} color={Colors.primary} />
+              <Typography variant="h6" style={styles.deviceContactsTitle}>
+                Find Friends on Ilé
+              </Typography>
+            </View>
+            <Typography variant="body2" color="textSecondary" style={styles.deviceContactsDescription}>
+              Sync your contacts to see which friends are already on Ilé and invite others.
+            </Typography>
+            <Button
+              title="Sync Contacts"
+              onPress={handleContactsPermissionRequest}
+              loading={isLoadingDeviceContacts}
+              style={styles.syncContactsButton}
+            />
+          </Card>
+        )}
+
+        {/* Device Contacts Results */}
+        {deviceContactsResult && (
+          <>
+            {/* On Ilé Section */}
+            {deviceContactsResult.onIle.length > 0 && (
+              <View style={styles.deviceContactsSection}>
+                <View style={styles.sectionHeader}>
+                  <Typography variant="h6" style={styles.sectionTitle}>
+                    On Ilé ({deviceContactsResult.onIle.length})
+                  </Typography>
+                  <MaterialIcons name="verified" size={20} color={Colors.success} />
+                </View>
+                {deviceContactsResult.onIle.slice(0, 3).map((contact) => (
+                  <TouchableOpacity
+                    key={contact.userId}
+                    style={styles.deviceContactItem}
+                    onPress={() => {
+                      // Navigate to user profile or start chat
+                      console.log('View profile:', contact.userId);
+                    }}
+                  >
+                    <View style={styles.contactAvatar}>
+                      <Typography variant="h6" style={styles.avatarText}>
+                        {contact.name.split(' ').map(n => n[0]).join('')}
+                      </Typography>
+                    </View>
+                    <View style={styles.contactInfo}>
+                      <Typography variant="h6">{contact.name}</Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {contact.username ? `@${contact.username}` : 'On Ilé'}
+                      </Typography>
+                    </View>
+                    {contact.trustBadge && (
+                      <MaterialIcons name="verified" size={16} color={Colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {deviceContactsResult.onIle.length > 3 && (
+                  <TouchableOpacity style={styles.showMoreButton}>
+                    <Typography variant="body2" color="primary">
+                      Show {deviceContactsResult.onIle.length - 3} more
+                    </Typography>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* Invite Friends Section */}
+            {deviceContactsResult.toInvite.length > 0 && (
+              <View style={styles.deviceContactsSection}>
+                <View style={styles.sectionHeader}>
+                  <Typography variant="h6" style={styles.sectionTitle}>
+                    Invite to Ilé ({deviceContactsResult.toInvite.length})
+                  </Typography>
+                  <MaterialIcons name="person-add" size={20} color={Colors.secondary} />
+                </View>
+                {deviceContactsResult.toInvite.slice(0, 3).map((contact) => (
+                  <View key={contact.id} style={styles.deviceContactItem}>
+                    <View style={styles.contactAvatar}>
+                      <Typography variant="h6" style={styles.avatarText}>
+                        {contact.name.split(' ').map(n => n[0]).join('')}
+                      </Typography>
+                    </View>
+                    <View style={styles.contactInfo}>
+                      <Typography variant="h6">{contact.name}</Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {contact.phoneNumbers?.[0] || 'Phone contact'}
+                      </Typography>
+                    </View>
+                    <Button
+                      title="Invite"
+                      variant="outline"
+                      size="small"
+                      onPress={() => handleInviteContact(contact)}
+                      style={styles.inviteButton}
+                    />
+                  </View>
+                ))}
+                {deviceContactsResult.toInvite.length > 3 && (
+                  <TouchableOpacity style={styles.showMoreButton}>
+                    <Typography variant="body2" color="primary">
+                      Show {deviceContactsResult.toInvite.length - 3} more
+                    </Typography>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </>
+        )}
 
         {/* Filter Tabs */}
         <ScrollView 
@@ -1858,7 +2206,22 @@ function AppWithCrossmint() {
     }
   };
 
-  const handleQRCodeScanned = (data: string) => {
+  const [lastScannedData, setLastScannedData] = useState<string | null>(null);
+  const [lastScannedTime, setLastScannedTime] = useState<number>(0);
+
+  const handleQRCodeScanned = async (data: string) => {
+    const currentTime = Date.now();
+    
+    // Prevent duplicate scans within 2 seconds
+    if (lastScannedData === data && currentTime - lastScannedTime < 2000) {
+      console.log('Duplicate QR scan ignored:', data);
+      return;
+    }
+    
+    setLastScannedData(data);
+    setLastScannedTime(currentTime);
+    setShowQRScanner(false); // Close scanner immediately
+    
     console.log('QR Code scanned:', data);
     
     // Handle different QR code types
@@ -1869,8 +2232,84 @@ function AppWithCrossmint() {
       // Parse and initiate payment
       setShowP2PSend(true);
     } else if (data.startsWith('contact:')) {
-      // Add contact and switch to contacts tab
+      // Parse contact QR code and send friend request
+      try {
+        const friendService = (await import('./src/services/friendService')).default;
+        const contactInfo = friendService.parseContactQRData(data);
+        
+        if (contactInfo && contactInfo.userId !== currentUser?.id) {
+          Alert.alert(
+            'Add Contact',
+            `Send friend request to ${contactInfo.userName}?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Send Request',
+                onPress: async () => {
+                  const result = await friendService.sendFriendRequest(
+                    contactInfo.userId,
+                    `Hi ${contactInfo.userName}! I'd like to connect with you on ilePay.`
+                  );
+                  
+                  if (result.success) {
+                    Alert.alert('Success', 'Friend request sent!');
+                  } else {
+                    Alert.alert('Error', result.message);
+                  }
+                }
+              }
+            ]
+          );
+        } else if (contactInfo?.userId === currentUser?.id) {
+          Alert.alert('Info', "You can't add yourself as a contact!");
+        } else {
+          Alert.alert('Error', 'Invalid contact QR code');
+        }
+      } catch (error) {
+        console.error('Error processing contact QR:', error);
+        Alert.alert('Error', 'Failed to process contact QR code');
+      }
+      
       setActiveTab('contact');
+    } else if (data.startsWith('ilepay://')) {
+      // Handle ilePay deep links
+      if (data.includes('/contact/') || data.includes('/profile/')) {
+        // Parse the ilepay:// URL to extract user info
+        try {
+          // Extract user ID and name from URL like "ilepay://profile/68d29ddb1658e154861934f7:Notaword113"
+          const urlParts = data.replace('ilepay://', '').split('/');
+          if (urlParts.length >= 2) {
+            const userPart = urlParts[1]; // "68d29ddb1658e154861934f7:Notaword113"
+            const [userId, userName] = userPart.split(':');
+            
+            if (userId && userName && userId !== currentUser?.id) {
+              // Navigate directly to the user's profile
+              setSelectedContact({
+                id: userId,
+                name: userName,
+                status: 'online', // Default status
+                lastMessage: '',
+                timestamp: '',
+                unreadCount: 0,
+                avatar: undefined
+              });
+              setShowContactProfile(true);
+            } else if (userId === currentUser?.id) {
+              Alert.alert('Info', "This is your own QR code!");
+              setActiveTab('me'); // Navigate to their own profile
+            } else {
+              Alert.alert('Error', 'Invalid QR code format');
+            }
+          } else {
+            Alert.alert('Error', 'Invalid QR code format');
+          }
+        } catch (error) {
+          console.error('Error processing ilepay QR:', error);
+          Alert.alert('Error', 'Failed to process QR code');
+        }
+      } else if (data.includes('/pay/')) {
+        setShowP2PSend(true);
+      }
     } else {
       // Default action - could be a wallet address
       setActiveTab('wallet');
@@ -2140,11 +2579,14 @@ function AppWithCrossmint() {
         );
 
       case 'qrCode':
+        // Debug current user data
+        console.log('🔍 QR Code Screen - Current User:', currentUser);
+        
         return (
           <QRCodeScreen
             onBack={() => setCurrentMeScreen('main')}
-            userName="John Doe"
-            userId="john_doe_123"
+            userName={currentUser?.name || 'User'}
+            userId={currentUser?.id || currentUser?._id || ''}
           />
         );
       
@@ -2217,6 +2659,16 @@ function AppWithCrossmint() {
   };
 
   const renderChat = () => {
+    if (conversationsLoading) {
+      return (
+        <View style={styles.chatContainer}>
+          <View style={styles.loadingContainer}>
+            <Typography variant="body2" color="textSecondary">Loading conversations...</Typography>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.chatContainer}>
         <ConversationList 
@@ -2513,7 +2965,7 @@ function AppWithCrossmint() {
           {renderContent()}
 
         {/* Tab Bar - Hide when in chat room or on sub-screens */}
-        {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentFXScreen === 'marketplace' && (
+        {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentFXScreen === 'marketplace' && currentContactScreen === 'main' && (
           <View style={styles.tabBar}>
           <TouchableOpacity 
             style={styles.tabItem}
@@ -2791,6 +3243,12 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     backgroundColor: Colors.surface,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
   
   // Token row
   tokenRow: {
@@ -2839,10 +3297,111 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     backgroundColor: Colors.background,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   addContactButton: {
     padding: Spacing.sm,
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.primary + '10',
+  },
+  requestsButton: {
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary + '10',
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: Colors.error,
+    borderRadius: BorderRadius.full,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: Colors.white,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  pendingRequestsCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  pendingRequestsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  pendingRequestsTitle: {
+    fontWeight: '600',
+  },
+  viewAllRequestsButton: {
+    padding: Spacing.xs,
+  },
+  pendingRequestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray200,
+  },
+  sentRequestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  pendingRequestAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  pendingRequestInfo: {
+    flex: 1,
+  },
+  pendingRequestName: {
+    fontWeight: '600',
+    marginBottom: Spacing.xs,
+  },
+  pendingRequestActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  acceptButton: {
+    backgroundColor: Colors.success,
+    borderRadius: BorderRadius.full,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectButton: {
+    backgroundColor: Colors.error,
+    borderRadius: BorderRadius.full,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingTag: {
+    backgroundColor: Colors.warning + '20',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  pendingTagText: {
+    color: Colors.warning,
+    fontWeight: '600',
   },
   searchContainer: {
     paddingHorizontal: Spacing.lg,
@@ -3218,5 +3777,56 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     textAlign: 'center',
     fontSize: 10,
+  },
+  
+  // Device Contacts Styles
+  deviceContactsPrompt: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  deviceContactsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  deviceContactsTitle: {
+    fontWeight: '600',
+  },
+  deviceContactsDescription: {
+    marginBottom: Spacing.lg,
+    lineHeight: 20,
+  },
+  syncContactsButton: {
+    width: '100%',
+  },
+  deviceContactsSection: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  deviceContactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray100,
+  },
+  inviteButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  showMoreButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.sm,
   },
 });

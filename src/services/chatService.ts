@@ -9,6 +9,7 @@ import {
   doc,
   updateDoc,
   limit,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Conversation } from '../components/chat/ConversationList';
@@ -115,6 +116,54 @@ const chatService = {
     });
 
     return unsubscribe;
+  },
+
+  /**
+   * Creates a new conversation between users
+   * @param participants Array of user IDs to include in the conversation
+   * @param isGroup Whether this is a group conversation
+   * @param name Optional name for the conversation (required for groups)
+   */
+  createConversation: async (participants: string[], isGroup: boolean = false, name?: string) => {
+    const conversationData = {
+      members: participants,
+      isGroup,
+      name: name || '',
+      createdAt: serverTimestamp(),
+      lastMessage: {
+        text: '',
+        createdAt: serverTimestamp(),
+        senderId: '',
+      },
+    };
+
+    const docRef = await addDoc(conversationsCollection, conversationData);
+    return docRef.id;
+  },
+
+  /**
+   * Finds an existing conversation between two users
+   * @param userId1 First user ID
+   * @param userId2 Second user ID
+   * @returns Conversation ID if found, null otherwise
+   */
+  findDirectConversation: async (userId1: string, userId2: string): Promise<string | null> => {
+    const q = query(
+      conversationsCollection,
+      where('members', 'array-contains', userId1),
+      where('isGroup', '==', false)
+    );
+
+    const querySnapshot = await getDocs(q);
+    
+    for (const doc of querySnapshot.docs) {
+      const data = doc.data();
+      if (data.members.includes(userId2)) {
+        return doc.id;
+      }
+    }
+    
+    return null;
   },
 };
 
