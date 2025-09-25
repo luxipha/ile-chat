@@ -13,6 +13,7 @@ interface MessageComposerProps {
   onSendMessage: (text: string) => void;
   onSendPayment?: (amount: number, currency: string) => void;
   onSendAttachment?: (type: 'camera' | 'gallery' | 'document') => void;
+  onActionsToggle?: (show: boolean) => void;
   placeholder?: string;
 }
 
@@ -20,6 +21,7 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
   onSendMessage,
   onSendPayment = () => {},
   onSendAttachment = () => {},
+  onActionsToggle,
   placeholder = 'Type a message...',
 }) => {
   const [message, setMessage] = useState('');
@@ -45,68 +47,19 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
   };
 
   const handleAttachmentPress = () => {
-    if (showActions) {
-      setShowActions(false);
-    } else {
+    const newShowActions = !showActions;
+    setShowActions(newShowActions);
+    onActionsToggle?.(newShowActions);
+    
+    if (newShowActions) {
       Keyboard.dismiss(); // Collapse keyboard
-      setShowActions(true);
     }
   };
 
-  const handlePaymentPress = () => {
-    // For demo, send a quick payment
-    onSendPayment(50, 'USD');
-    setShowActions(false);
-  };
 
-  const renderActionButtons = () => {
-    if (!showActions) return null;
-
-    return (
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => {
-            onSendAttachment('camera');
-            setShowActions(false);
-          }}
-        >
-          <MaterialIcons name="camera-alt" size={24} color={ChatTheme.primary} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => {
-            onSendAttachment('gallery');
-            setShowActions(false);
-          }}
-        >
-          <MaterialIcons name="photo" size={24} color={ChatTheme.primary} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => {
-            onSendAttachment('document');
-            setShowActions(false);
-          }}
-        >
-          <MaterialIcons name="attach-file" size={24} color={ChatTheme.primary} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={handlePaymentPress}
-        >
-          <MaterialIcons name="payment" size={24} color={ChatTheme.accent} />
-        </TouchableOpacity>
-      </View>
-    );
-  };
 
   return (
     <View style={styles.wrapper}>
-      {renderActionButtons()}
       
       <View style={[styles.container, isExpanded && styles.expandedContainer]}>
         <View style={styles.inputContainer}>
@@ -168,23 +121,6 @@ const styles = StyleSheet.create({
   },
   expandedContainer: {
     paddingBottom: ChatSpacing.lg,
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: ChatSpacing.lg,
-    paddingVertical: ChatSpacing.md,
-    backgroundColor: ChatTheme.background2,
-    borderTopWidth: 1,
-    borderTopColor: ChatTheme.border,
-  },
-  actionButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: ChatTheme.background3,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   inputContainer: {
     flex: 1,

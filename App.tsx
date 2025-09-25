@@ -1768,9 +1768,14 @@ function AppWithCrossmint() {
       }
     }
     
-    // Create new conversation
+    // Create new conversation with proper conversation ID
+    // Generate consistent conversation ID by sorting user IDs
+    const currentUserId = currentUser?.id || '';
+    const otherUserId = contact.id;
+    const conversationId = [currentUserId, otherUserId].sort().join('_');
+    
     const newConversation = {
-      id: contact.id,
+      id: conversationId,
       name: contact.name,
       lastMessage: contact.isGroup ? 'Welcome to the group!' : 'Hello! How can I help you?',
       timestamp: new Date(),

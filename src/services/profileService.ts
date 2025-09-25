@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService, { User } from './authService';
+import { apiClient } from './api';
 
 const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 const API_BASE_URL = isWeb
@@ -15,8 +16,16 @@ export interface UserProfileData extends User {
   // Extended profile data if needed in the future
 }
 
+export interface ChatUserProfile {
+  id: string;
+  name: string;
+  avatar?: string;
+  onlineStatus?: boolean;
+}
+
 class ProfileService {
   private cachedProfile: UserProfileData | null = null;
+  private userProfileCache = new Map<string, ChatUserProfile>();
 
   async getProfile(forceRefresh = false): Promise<{ success: boolean; profile?: UserProfileData; error?: string }> {
     try {
@@ -36,6 +45,36 @@ class ProfileService {
       return { success: true, profile: this.cachedProfile };
     } catch (error) {
       console.error('Get profile error:', error);
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  }
+
+  async getUserProfile(firebaseUid: string): Promise<{ success: boolean; profile?: ChatUserProfile; error?: string }> {
+    try {
+      // Check cache first
+      const cachedProfile = this.userProfileCache.get(firebaseUid);
+      if (cachedProfile) {
+        return { success: true, profile: cachedProfile };
+      }
+
+      console.log('🔍 Fetching user profile for Firebase UID:', firebaseUid);
+      
+      // Fetch from backend API
+      const response = await apiClient.get(`/api/user/profile/${firebaseUid}`);
+      
+      if (response.success && response.data) {
+        const profileData = response.data as { success: boolean; profile: ChatUserProfile };
+        if (profileData.success && profileData.profile) {
+          // Cache the profile
+          this.userProfileCache.set(firebaseUid, profileData.profile);
+          console.log('✅ User profile resolved:', profileData.profile);
+          return { success: true, profile: profileData.profile };
+        }
+      }
+      
+      return { success: false, error: response.error || 'User not found' };
+    } catch (error) {
+      console.error('Get user profile error:', error);
       return { success: false, error: 'Network error. Please try again.' };
     }
   }

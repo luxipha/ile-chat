@@ -365,7 +365,11 @@ const styles = StyleSheet.create({
     backgroundColor: ChatTheme.background2,
   },
   conversationItem: {
-    backgroundColor: ChatTheme.background2,
+    flexDirection: 'row',
+    paddingHorizontal: ChatSpacing.lg,
+    paddingVertical: ChatSpacing.md,
+    backgroundColor: ChatTheme.background1,
+    alignItems: 'center',
   },
   pinIndicator: {
     position: 'absolute',

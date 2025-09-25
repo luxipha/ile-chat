@@ -16,6 +16,8 @@ import { MessageComposer } from './MessageComposer';
 import { PublicProfileScreen } from '../profile/PublicProfileScreen';
 import { SendMoneyModal } from '../wallet/SendMoneyModal';
 import { GroupDetailsScreen } from './GroupDetailsScreen';
+import { ChatActionsMenu } from './ChatActionsMenu';
+import { MessageComposerActions } from './MessageComposerActions';
 import { ChatTheme } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 import chatService, { ChatMessage } from '../../services/chatService';
@@ -50,6 +52,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [showPublicProfile, setShowPublicProfile] = useState(false);
   const [showSendMoney, setShowSendMoney] = useState(false);
   const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string } | null>(null);
+  const [showChatActions, setShowChatActions] = useState(false);
+  const [showComposerActions, setShowComposerActions] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -173,8 +177,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         avatar: (currentUser as any).profilePicture || null, // Handle undefined avatar properly
       };
 
-      console.log('📤 Sending message with sender:', sender);
-      await chatService.sendMessage(chatId, text, sender);
+      // Extract recipient ID from chatId if possible
+      const recipientId = chatId.includes('_') 
+        ? chatId.split('_').find(id => id !== currentUser.id)
+        : undefined;
+      
+      console.log('📤 Sending message with sender:', sender, 'to recipient:', recipientId);
+      await chatService.sendMessage(chatId, text, sender, recipientId);
       console.log('✅ Message sent successfully');
 
       // Remove optimistic message (real message will come through the listener)
@@ -418,7 +427,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           isTyping={isTyping}
           isGroup={isGroup}
           onBack={onBack}
-          onOptions={handleChatOptions}
+          onOptions={() => setShowChatActions(true)}
           onGroupInfo={handleGroupInfo}
         />
         
@@ -464,30 +473,40 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           onSendMessage={handleSendMessage}
           onSendPayment={handleSendPayment}
           onSendAttachment={handleSendAttachment}
+          onActionsToggle={(show) => setShowComposerActions(show)}
+        />
+
+        {/* Message Composer Actions - Below text input like WeChat */}
+        <MessageComposerActions
+          visible={showComposerActions}
+          onClose={() => setShowComposerActions(false)}
+          onSendMoney={() => {
+            setShowComposerActions(false);
+            setShowSendMoney(true);
+          }}
+          onSendImage={(imageUri) => {
+            console.log('📷 Send image:', imageUri);
+            // TODO: Implement image message sending
+          }}
+          onSendDocument={(documentUri) => {
+            console.log('📎 Send document:', documentUri);
+            // TODO: Implement document message sending
+          }}
         />
       </KeyboardAvoidingView>
 
-      {/* Chat Options Menu */}
-      {showChatOptions && (
-        <View style={styles.optionsMenu}>
-          <TouchableOpacity onPress={handleMuteChat} style={styles.optionItem}>
-            <MaterialIcons name="volume-off" size={20} color={ChatTheme.textSecondary} />
-            <Typography variant="body1" style={styles.optionText}>Mute notifications</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleClearChat} style={styles.optionItem}>
-            <MaterialIcons name="delete-sweep" size={20} color={ChatTheme.textSecondary} />
-            <Typography variant="body1" style={styles.optionText}>Clear chat</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleBlockUser} style={styles.optionItem}>
-            <MaterialIcons name="block" size={20} color={ChatTheme.error} />
-            <Typography variant="body1" style={[styles.optionText, { color: ChatTheme.error }]}>Block user</Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleReportUser} style={styles.optionItem}>
-            <MaterialIcons name="report" size={20} color={ChatTheme.error} />
-            <Typography variant="body1" style={[styles.optionText, { color: ChatTheme.error }]}>Report user</Typography>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Chat Actions Menu */}
+      <ChatActionsMenu
+        visible={showChatActions}
+        onClose={() => setShowChatActions(false)}
+        chatId={chatId}
+        chatName={chatName}
+        isGroup={isGroup}
+        onMuteToggle={(isMuted) => console.log('🔇 Chat muted:', isMuted)}
+        onClearChat={() => console.log('🗑️ Clear chat requested')}
+        onBlockUser={() => console.log('🚫 Block user requested')}
+        onReportUser={() => console.log('🚨 Report user requested')}
+      />
 
       {/* Send Money Modal */}
       <SendMoneyModal
