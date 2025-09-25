@@ -29,7 +29,7 @@ class ApiService {
 
       // Add a timeout to the request
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
       const requestOptions = {
         ...options,
@@ -234,9 +234,25 @@ export const apiClient = {
     const token = await getAuthToken(); // We'll need to implement this
     return apiService.post(endpoint, data, token);
   },
-  get: async (endpoint: string) => {
+  get: async (endpoint: string, options?: { params?: Record<string, any> }) => {
     const token = await getAuthToken();
-    return apiService.get(endpoint, token);
+    let fullEndpoint = endpoint;
+    
+    // Add query parameters if provided
+    if (options?.params) {
+      const searchParams = new URLSearchParams();
+      Object.entries(options.params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          searchParams.append(key, String(value));
+        }
+      });
+      const queryString = searchParams.toString();
+      if (queryString) {
+        fullEndpoint += `?${queryString}`;
+      }
+    }
+    
+    return apiService.get(fullEndpoint, token);
   },
   delete: async (endpoint: string) => {
     const token = await getAuthToken();

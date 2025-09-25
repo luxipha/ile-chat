@@ -223,6 +223,29 @@ class FriendService {
       };
     }
   }
+
+  /**
+   * Delete a friend (remove friendship)
+   */
+  async deleteFriend(userId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('🔄 Making delete request to:', `${API_BASE_URL}/api/friends/delete/${userId}`);
+      console.log('🎯 Target user ID:', userId);
+      
+      const result = await this.makeRequest(`/api/friends/delete/${userId}`, {
+        method: 'DELETE',
+      });
+
+      console.log('✅ Delete request completed:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Error deleting friend:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete friend'
+      };
+    }
+  }
 }
 
 export const friendService = new FriendService();

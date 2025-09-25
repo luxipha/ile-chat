@@ -59,6 +59,7 @@ import profileService from './src/services/profileService';
 import chatService from './src/services/chatService';
 import fxService from './src/services/fxService';
 import aptosService from './src/services/aptosService';
+import friendService from './src/services/friendService';
 import { apiService } from './src/services/api';
 import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
 import { signInWithCustomToken } from 'firebase/auth'; // Import from Firebase SDK
@@ -149,7 +150,13 @@ function AppWithCrossmint() {
   const [currentMeScreen, setCurrentMeScreen] = useState<MeScreen>('main');
   const [currentWalletScreen, setCurrentWalletScreen] = useState<WalletScreen>('main');
   const [showContactProfile, setShowContactProfile] = useState(false);
-  const [selectedContact, setSelectedContact] = useState<{name: string; avatar?: string; id: string} | null>(null);
+  const [selectedContact, setSelectedContact] = useState<{
+    name: string; 
+    avatar?: string; 
+    id: string;
+    friendRequestId?: string;
+    isFriendRequest?: boolean;
+  } | null>(null);
   
   // Contact management state
   const [currentContactScreen, setCurrentContactScreen] = useState<'main' | 'add' | 'requests'>('main');
@@ -170,7 +177,7 @@ function AppWithCrossmint() {
   const [moments, setMoments] = useState<any[]>([]);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
-  const [contactFilter, setContactFilter] = useState<'all' | 'agents' | 'investors' | 'recent'>('all');
+  const [contactFilter, setContactFilter] = useState<'all' | 'friends'>('all');
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isLoadingMoments, setIsLoadingMoments] = useState(false);
   const [refreshingMoments, setRefreshingMoments] = useState(false);
@@ -1109,7 +1116,166 @@ function AppWithCrossmint() {
     }
   }, [currentUser, activeTab]);
 
+  // Friend requests management
+  useEffect(() => {
+    // Load friend requests and friends when app starts
+    loadFriendRequests();
+    loadFriends();
+    
+    // Set up periodic refresh for contact tab
+    const interval = setInterval(() => {
+      if (activeTab === 'contact') {
+        loadPendingRequests();
+        loadFriends(); // Also refresh friends list
+      }
+    }, 30000); // Refresh every 30 seconds when on contact tab
+    
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
   // Tab switch with loading and error handling
+  const loadFriendRequests = async () => {
+    try {
+      const [pendingResult, sentResult] = await Promise.all([
+        friendService.getPendingRequests(),
+        friendService.getSentRequests()
+      ]);
+      
+      if (pendingResult.success) {
+        setPendingRequests(pendingResult.requests);
+      }
+      
+      if (sentResult.success) {
+        setSentRequests(sentResult.requests);
+      }
+    } catch (error) {
+      console.error('Error loading friend requests:', error);
+    }
+  };
+
+  const loadPendingRequests = async () => {
+    try {
+      console.log('🔄 Refreshing pending friend requests...');
+      const pendingResult = await friendService.getPendingRequests();
+      
+      if (pendingResult.success) {
+        setPendingRequests(pendingResult.requests);
+        console.log('✅ Updated pending requests:', pendingResult.requests.length);
+      }
+    } catch (error) {
+      console.error('Error loading pending requests:', error);
+    }
+  };
+
+  const loadFriends = async () => {
+    try {
+      console.log('👥 Loading friends list...');
+      const result = await friendService.getFriends();
+      
+      if (result.success) {
+        // Transform friends data to match contact format
+        const transformedFriends = result.friends.map((friend: any) => ({
+          id: friend.id,
+          name: friend.name,
+          role: 'Friend', // Default role for friends
+          category: 'friends',
+          avatar: friend.name.split(' ').map((n: string) => n[0]).join('').toUpperCase(),
+          imageUrl: friend.avatar,
+          bricks: 0, // Will be populated if available
+          trustBadge: null,
+          isOnline: true, // Default to online, could be enhanced with real status
+          lastSeen: 'Online',
+          conversationId: friend.conversationId,
+          friendshipId: friend.friendshipId,
+          email: friend.email
+        }));
+        
+        setFriends(transformedFriends);
+        console.log('✅ Loaded friends:', transformedFriends.length);
+      }
+    } catch (error) {
+      console.error('❌ Error loading friends:', error);
+    }
+  };
+
+  const handleQuickRequestResponse = async (request: any, action: 'accept' | 'reject') => {
+    try {
+      const result = await friendService.respondToRequest(request._id, action);
+      
+      if (result.success) {
+        // Remove from pending requests
+        setPendingRequests(prev => prev.filter(r => r._id !== request._id));
+        
+        if (action === 'accept') {
+          // Refresh friends list to show the newly accepted friend
+          await loadFriends();
+          
+          Alert.alert(
+            'Success',
+            `You are now friends with ${request.sender.name}!`,
+            [
+              {
+                text: 'Start Chatting',
+                onPress: () => {
+                  setActiveTab('chat');
+                }
+              },
+              { text: 'OK', style: 'default' }
+            ]
+          );
+        } else {
+          Alert.alert('Request Declined', 'Friend request declined');
+        }
+      } else {
+        Alert.alert('Error', result.message);
+      }
+    } catch (error) {
+      console.error('Error responding to request:', error);
+      Alert.alert('Error', 'Failed to respond to request');
+    }
+  };
+
+  const handleProfileFriendRequestResponse = async (action: 'accept' | 'reject') => {
+    try {
+      console.log('🔄 Profile friend request response:', { action, selectedContact: selectedContact?.name });
+      
+      // Remove the request from pending requests immediately (optimistic update)
+      if (selectedContact?.friendRequestId) {
+        setPendingRequests(prev => prev.filter(r => r._id !== selectedContact.friendRequestId));
+      }
+      
+      // Close the profile screen
+      setShowContactProfile(false);
+      setSelectedContact(null);
+      
+      if (action === 'accept') {
+        Alert.alert(
+          'Success',
+          `You are now friends with ${selectedContact?.name}!`,
+          [
+            {
+              text: 'Start Chatting',
+              onPress: () => {
+                setActiveTab('chat');
+              }
+            },
+            { text: 'OK', style: 'default' }
+          ]
+        );
+      } else {
+        Alert.alert('Request Declined', 'Friend request declined');
+      }
+      
+      // Refresh the friend requests and friends list to sync with server
+      await loadPendingRequests();
+      await loadFriends(); // Refresh friends list to show newly accepted friends
+    } catch (error) {
+      console.error('Error handling profile friend request response:', error);
+      // Refresh the list in case of error
+      await loadPendingRequests();
+    }
+  };
+
   const handleTabSwitch = (tab: TabName) => {
     if (tab === activeTab) return;
     
@@ -1119,6 +1285,12 @@ function AppWithCrossmint() {
     // Reset sub-screen states when switching tabs
     if (tab !== 'me') setCurrentMeScreen('main');
     if (tab !== 'wallet') setCurrentWalletScreen('main');
+    if (tab !== 'contact') setCurrentContactScreen('main');
+    
+    // Load friend requests when switching to contact tab
+    if (tab === 'contact') {
+      loadFriendRequests();
+    }
     
     // Simulate loading for different tabs
     switch (tab) {
@@ -1566,106 +1738,8 @@ function AppWithCrossmint() {
     }
   };
 
-  // Enhanced Contact Data and Functions
-  const allContacts = [
-    {
-      id: 'sarah_anderson',
-      name: 'Sarah Anderson',
-      role: 'Senior Property Agent',
-      category: 'agents',
-      avatar: 'SA',
-      imageUrl: 'https://randomuser.me/api/portraits/women/1.jpg',
-      bricks: 4500,
-      trustBadge: 'verified',
-      isOnline: true,
-      lastSeen: 'Online',
-      conversationId: '1',
-    },
-    {
-      id: 'michael_roberts',
-      name: 'Michael Roberts',
-      role: 'Luxury Property Specialist',
-      category: 'agents',
-      avatar: 'MR',
-      imageUrl: 'https://randomuser.me/api/portraits/men/2.jpg',
-      bricks: 2100,
-      trustBadge: 'premium',
-      isOnline: true,
-      lastSeen: '5 min ago',
-      conversationId: 'michael_roberts',
-    },
-    {
-      id: 'lisa_johnson',
-      name: 'Lisa Johnson',
-      role: 'Commercial Real Estate',
-      category: 'agents',
-      avatar: 'LJ',
-      imageUrl: 'https://randomuser.me/api/portraits/women/3.jpg',
-      bricks: 3200,
-      trustBadge: 'agent',
-      isOnline: false,
-      lastSeen: '2 hours ago',
-      conversationId: 'lisa_johnson',
-    },
-    {
-      id: 'real_estate_investors',
-      name: 'Real Estate Investors',
-      role: '42 members',
-      category: 'investors',
-      avatar: 'REI',
-      bricks: 15600,
-      trustBadge: 'community',
-      isGroup: true,
-      isOnline: true,
-      lastSeen: 'Active',
-    },
-    {
-      id: 'lagos_property_club',
-      name: 'Lagos Property Club',
-      role: '128 members',
-      category: 'investors',
-      avatar: 'LPC',
-      bricks: 28400,
-      trustBadge: 'premium',
-      isGroup: true,
-      isOnline: true,
-      lastSeen: 'Active',
-      conversationId: '2',
-    },
-    {
-      id: 'alex_davis',
-      name: 'Alex Davis',
-      role: 'Property Investor',
-      category: 'recent',
-      avatar: 'AD',
-      bricks: 890,
-      trustBadge: 'member',
-      isOnline: false,
-      lastSeen: '1 day ago',
-    },
-    {
-      id: 'nina_kumar',
-      name: 'Nina Kumar',
-      role: 'Real Estate Analyst',
-      category: 'recent',
-      avatar: 'NK',
-      bricks: 1250,
-      trustBadge: 'verified',
-      isOnline: true,
-      lastSeen: 'Online',
-    },
-    {
-      id: 'tom_okafor',
-      name: 'Tom Okafor',
-      role: 'Property Developer',
-      category: 'recent',
-      avatar: 'TO',
-      bricks: 5600,
-      trustBadge: 'premium',
-      isOnline: false,
-      lastSeen: '3 hours ago',
-    },
-  ];
+  // Real friends only - no more mock data
+  const allContacts = friends;
 
   const filteredContacts = allContacts.filter(contact => {
     const matchesSearch = contact.name.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
@@ -1879,7 +1953,7 @@ function AppWithCrossmint() {
 
         {/* Pending Friend Requests Section */}
         {(pendingRequests.length > 0 || sentRequests.length > 0) && (
-          <Card style={styles.pendingRequestsCard}>
+          <View style={styles.friendRequestsSection}>
             <View style={styles.pendingRequestsHeader}>
               <Typography variant="h6" style={styles.pendingRequestsTitle}>
                 Friend Requests
@@ -1896,55 +1970,96 @@ function AppWithCrossmint() {
             
             {/* Show first 2 pending requests */}
             {pendingRequests.slice(0, 2).map((request, index) => (
-              <View key={request._id} style={styles.pendingRequestItem}>
-                <View style={styles.pendingRequestAvatar}>
+              <TouchableOpacity 
+                key={request._id} 
+                style={styles.friendRequestRow}
+                onPress={async () => {
+                  // Validate that the request is still pending before opening profile
+                  try {
+                    const currentRequests = await friendService.getPendingRequests();
+                    const stillPending = currentRequests.requests.find(r => r._id === request._id);
+                    
+                    if (!stillPending) {
+                      Alert.alert(
+                        'Request Not Found', 
+                        'This friend request has already been processed or is no longer available.',
+                        [
+                          {
+                            text: 'OK',
+                            onPress: () => loadPendingRequests() // Refresh the list
+                          }
+                        ]
+                      );
+                      return;
+                    }
+                  } catch (error) {
+                    console.warn('Could not validate friend request, proceeding anyway:', error);
+                  }
+                  
+                  // Navigate to the sender's profile with friend request context
+                  setSelectedContact({
+                    id: request.sender._id,
+                    name: request.sender.name,
+                    status: 'online',
+                    lastMessage: '',
+                    timestamp: '',
+                    unreadCount: 0,
+                    avatar: undefined,
+                    friendRequestId: request._id,
+                    isFriendRequest: true
+                  });
+                  setShowContactProfile(true);
+                }}
+              >
+                <View style={styles.friendRequestAvatar}>
                   <Typography variant="h6" style={styles.avatarText}>
                     {request.sender.name.charAt(0).toUpperCase()}
                   </Typography>
                 </View>
-                <View style={styles.pendingRequestInfo}>
-                  <Typography variant="body1" style={styles.pendingRequestName}>
-                    {request.sender.name}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary">
+                <View style={styles.friendRequestInfo}>
+                  <View style={styles.contactNameRow}>
+                    <Typography variant="h6" style={styles.contactName}>
+                      {request.sender.name}
+                    </Typography>
+                    <View style={styles.pendingIndicator}>
+                      <Typography variant="caption" style={styles.pendingIndicatorText}>
+                        Pending
+                      </Typography>
+                    </View>
+                  </View>
+                  <Typography variant="body2" color="textSecondary" style={styles.contactRole}>
                     Wants to connect
                   </Typography>
                 </View>
-                <View style={styles.pendingRequestActions}>
-                  <TouchableOpacity style={styles.acceptButton}>
-                    <MaterialIcons name="check" size={16} color={Colors.white} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.rejectButton}>
-                    <MaterialIcons name="close" size={16} color={Colors.white} />
-                  </TouchableOpacity>
-                </View>
-              </View>
+              </TouchableOpacity>
             ))}
             
             {/* Show first 2 sent requests */}
             {sentRequests.slice(0, 2).map((request, index) => (
-              <View key={request._id} style={styles.sentRequestItem}>
-                <View style={styles.pendingRequestAvatar}>
+              <View key={request._id} style={styles.friendRequestRow}>
+                <View style={styles.friendRequestAvatar}>
                   <Typography variant="h6" style={styles.avatarText}>
                     {request.recipient.name.charAt(0).toUpperCase()}
                   </Typography>
                 </View>
-                <View style={styles.pendingRequestInfo}>
-                  <Typography variant="body1" style={styles.pendingRequestName}>
-                    {request.recipient.name}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    Request sent
-                  </Typography>
-                </View>
-                <View style={styles.pendingTag}>
-                  <Typography variant="caption" style={styles.pendingTagText}>
-                    Pending
+                <View style={styles.friendRequestInfo}>
+                  <View style={styles.contactNameRow}>
+                    <Typography variant="h6" style={styles.contactName}>
+                      {request.recipient.name}
+                    </Typography>
+                    <View style={styles.sentIndicator}>
+                      <Typography variant="caption" style={styles.sentIndicatorText}>
+                        Request Sent
+                      </Typography>
+                    </View>
+                  </View>
+                  <Typography variant="body2" color="textSecondary" style={styles.contactRole}>
+                    Pending response
                   </Typography>
                 </View>
               </View>
             ))}
-          </Card>
+          </View>
         )}
 
         {/* Device Contacts Section */}
@@ -2066,9 +2181,7 @@ function AppWithCrossmint() {
         >
           {[
             { key: 'all', label: 'All', count: allContacts.length },
-            { key: 'agents', label: 'Agents', count: allContacts.filter(c => c.category === 'agents').length },
-            { key: 'investors', label: 'Groups', count: allContacts.filter(c => c.category === 'investors').length },
-            { key: 'recent', label: 'Recent', count: allContacts.filter(c => c.category === 'recent').length },
+            { key: 'friends', label: 'Friends', count: allContacts.filter(c => c.category === 'friends').length },
           ].map((filter) => (
             <TouchableOpacity
               key={filter.key}
@@ -2911,6 +3024,9 @@ function AppWithCrossmint() {
           userName={selectedContact.name}
           userAvatar={selectedContact.avatar}
           userId={selectedContact.id}
+          friendRequestId={selectedContact.friendRequestId}
+          isFriendRequest={selectedContact.isFriendRequest}
+          onFriendRequestResponse={handleProfileFriendRequestResponse}
         />
       );
     }
@@ -3329,9 +3445,30 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  pendingRequestsCard: {
+  friendRequestsSection: {
     marginHorizontal: Spacing.lg,
     marginBottom: Spacing.md,
+  },
+  friendRequestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray100,
+  },
+  friendRequestAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  friendRequestInfo: {
+    flex: 1,
   },
   pendingRequestsHeader: {
     flexDirection: 'row',
@@ -3345,37 +3482,32 @@ const styles = StyleSheet.create({
   viewAllRequestsButton: {
     padding: Spacing.xs,
   },
-  pendingRequestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
+  pendingIndicator: {
+    backgroundColor: Colors.warning + '20',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
   },
-  sentRequestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-  },
-  pendingRequestAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  pendingRequestInfo: {
-    flex: 1,
-  },
-  pendingRequestName: {
+  pendingIndicatorText: {
+    color: Colors.warning,
     fontWeight: '600',
-    marginBottom: Spacing.xs,
+    fontSize: 12,
+  },
+  sentIndicator: {
+    backgroundColor: Colors.info + '20',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  sentIndicatorText: {
+    color: Colors.info,
+    fontWeight: '600',
+    fontSize: 12,
   },
   pendingRequestActions: {
     flexDirection: 'row',
     gap: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   acceptButton: {
     backgroundColor: Colors.success,
@@ -3392,16 +3524,6 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pendingTag: {
-    backgroundColor: Colors.warning + '20',
-    borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  pendingTagText: {
-    color: Colors.warning,
-    fontWeight: '600',
   },
   searchContainer: {
     paddingHorizontal: Spacing.lg,

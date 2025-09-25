@@ -78,9 +78,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   useEffect(() => {
     const loadMessages = async () => {
       try {
+        console.log('📱 Loading messages for chatId:', chatId);
         setLoading(true);
-        const currentUser = await authService.getCurrentUser();
+        const currentUser = await authService.getCachedUser();
+        console.log('👤 Loading messages - Current user:', currentUser ? { id: currentUser.id, name: currentUser.name } : 'null');
+        
         if (!currentUser) {
+          console.log('❌ User not authenticated for loading messages');
           Alert.alert('Error', 'User not authenticated');
           return;
         }
@@ -140,8 +144,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
   const handleSendMessage = async (text: string) => {
     try {
-      const currentUser = await authService.getCurrentUser();
+      console.log('💬 Sending message:', { text, chatId });
+      const currentUser = await authService.getCachedUser();
+      console.log('👤 Current user:', currentUser ? { id: currentUser.id, name: currentUser.name } : 'null');
+      
       if (!currentUser) {
+        console.log('❌ No current user found');
         Alert.alert('Error', 'Please sign in to send messages');
         return;
       }
@@ -162,16 +170,24 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       const sender = {
         _id: currentUser.id,
         name: currentUser.name || 'User',
-        avatar: currentUser.profilePicture,
+        avatar: (currentUser as any).profilePicture || null, // Handle undefined avatar properly
       };
 
+      console.log('📤 Sending message with sender:', sender);
       await chatService.sendMessage(chatId, text, sender);
+      console.log('✅ Message sent successfully');
 
       // Remove optimistic message (real message will come through the listener)
       setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ Error sending message:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        code: (error as any).code
+      });
+      
       Alert.alert('Error', 'Failed to send message. Please try again.');
       
       // Remove failed optimistic message

@@ -312,12 +312,16 @@ class CommunityService {
       });
       console.log('📥 User posts API response:', {
         success: response.success,
-        postsCount: response.data?.posts?.length || 0,
-        hasData: !!response.data
+        postsCount: response.data?.data?.posts?.length || 0,
+        hasData: !!response.data,
+        responseStructure: response.data ? Object.keys(response.data) : null
       });
       
+      // Handle the nested data structure from backend
+      const responseData = response.data?.data || response.data;
+      
       // Transform the data to match our expected format
-      const posts = response.data?.posts?.map((post: any) => ({
+      const posts = responseData?.posts?.map((post: any) => ({
         ...post,
         id: post._id,
         authorId: post.author?._id || post.authorId,
@@ -329,9 +333,9 @@ class CommunityService {
         success: response.success,
         data: {
           posts,
-          total: response.data?.total || 0,
-          page: response.data?.page || 1,
-          pages: response.data?.pages || 1
+          total: responseData?.total || 0,
+          page: responseData?.page || 1,
+          pages: responseData?.pages || 1
         },
         error: response.error
       };

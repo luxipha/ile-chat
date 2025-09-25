@@ -14,6 +14,8 @@ import { Button } from '../ui/Button';
 import { ContactSelector } from '../ui/ContactSelector';
 import { ProfileCard } from '../ui/ProfileCard';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { ProfileActionButtons } from './ProfileActionButtons';
+import { ProfileActionsMenu } from './ProfileActionsMenu';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import friendService, { FriendshipStatus } from '../../services/friendService';
 import { communityService, CommunityPost } from '../../services/communityService';
@@ -29,6 +31,9 @@ interface PublicProfileScreenProps {
   userId: string;
   onNavigateToMoments?: () => void;
   onFriendRequestSent?: () => void;
+  friendRequestId?: string;
+  isFriendRequest?: boolean;
+  onFriendRequestResponse?: (action: 'accept' | 'reject') => void;
 }
 
 interface PublicUserProfile {
@@ -58,14 +63,15 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
   userId,
   onNavigateToMoments,
   onFriendRequestSent,
+  friendRequestId,
+  isFriendRequest,
+  onFriendRequestResponse,
 }) => {
   const [showActions, setShowActions] = useState(false);
   const [showShareContacts, setShowShareContacts] = useState(false);
-  const [friendshipStatus, setFriendshipStatus] = useState<FriendshipStatus | null>(null);
-  const [loadingFriendship, setLoadingFriendship] = useState(true);
-  const [sendingRequest, setSendingRequest] = useState(false);
   const [userMoments, setUserMoments] = useState<CommunityPost[]>([]);
   const [loadingMoments, setLoadingMoments] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   // Mock user data - in real app, fetch based on userId
   const userProfile: PublicUserProfile = {
     name: userName,
@@ -105,75 +111,36 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
     ],
   };
 
-  // Load friendship status and user moments when component mounts
+  // Load user moments when component mounts
   useEffect(() => {
-    loadFriendshipStatus();
     loadUserMoments();
   }, [userId]);
-
-  const loadFriendshipStatus = async () => {
-    try {
-      setLoadingFriendship(true);
-      const result = await friendService.getFriendshipStatus(userId);
-      if (result.success && result.status) {
-        setFriendshipStatus(result.status);
-      }
-    } catch (error) {
-      console.error('Error loading friendship status:', error);
-    } finally {
-      setLoadingFriendship(false);
-    }
-  };
-
-  const handleSendFriendRequest = async () => {
-    try {
-      setSendingRequest(true);
-      const result = await friendService.sendFriendRequest(
-        userId,
-        `Hi ${userName}! I'd like to connect with you on ilePay.`
-      );
-      
-      if (result.success) {
-        Alert.alert('Success', 'Friend request sent!');
-        // Reload friendship status
-        await loadFriendshipStatus();
-        onFriendRequestSent?.();
-      } else {
-        Alert.alert('Error', result.message);
-      }
-    } catch (error) {
-      console.error('Error sending friend request:', error);
-      Alert.alert('Error', 'Failed to send friend request');
-    } finally {
-      setSendingRequest(false);
-    }
-  };
 
   const loadUserMoments = async () => {
     try {
       setLoadingMoments(true);
+      console.log('🔄 Loading moments for userId:', userId);
       const result = await communityService.getUserPosts(userId, 1, 6); // Load 6 recent posts
+      console.log('📊 Moments load result:', { 
+        success: result.success, 
+        postsCount: result.data?.posts?.length || 0,
+        error: result.error 
+      });
+      
       if (result.success && result.data) {
         setUserMoments(result.data.posts);
+      } else {
+        console.warn('⚠️ Failed to load user moments:', result.error);
+        setUserMoments([]); // Set empty array to show "No moments"
       }
     } catch (error) {
-      console.error('Error loading user moments:', error);
+      console.error('❌ Error loading user moments:', error);
+      setUserMoments([]); // Set empty array on error
     } finally {
       setLoadingMoments(false);
     }
   };
 
-  const handleBlockUser = () => {
-    setShowActions(false);
-    // Handle block user logic
-    console.log('Block user:', userProfile.name);
-  };
-
-  const handleReportUser = () => {
-    setShowActions(false);
-    // Handle report user logic
-    console.log('Report user:', userProfile.name);
-  };
 
 
   const renderProfileCard = () => (
@@ -267,73 +234,35 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Action Menu */}
-      {showActions && (
-        <View style={styles.actionMenu}>
-          <TouchableOpacity onPress={handleBlockUser} style={styles.actionMenuItem}>
-            <MaterialIcons name="block" size={20} color={Colors.error} />
-            <Typography variant="body1" style={[styles.actionMenuText, { color: Colors.error }]}>
-              Block User
-            </Typography>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleReportUser} style={styles.actionMenuItem}>
-            <MaterialIcons name="report" size={20} color={Colors.error} />
-            <Typography variant="body1" style={[styles.actionMenuText, { color: Colors.error }]}>
-              Report User
-            </Typography>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Profile Actions Menu */}
+      <ProfileActionsMenu
+        visible={showActions}
+        onClose={() => setShowActions(false)}
+        userId={userId}
+        userName={userName}
+        onFriendDeleted={() => {
+          setShowActions(false);
+          setRefreshKey(prev => prev + 1); // Force ProfileActionButtons to refresh
+          // No parent callbacks - just silent local refresh
+        }}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {renderProfileCard()}
         {renderMomentsSection()}
         
-        {/* Action Buttons Outside Card */}
-        {loadingFriendship ? (
-          <View style={styles.loadingActions}>
-            <LoadingSpinner size="small" />
-          </View>
-        ) : (
-          <View style={styles.bottomActions}>
-            {friendshipStatus?.status === 'friends' ? (
-              <>
-                <Button
-                  title="Message"
-                  icon="message"
-                  onPress={onMessage}
-                  style={styles.actionButton}
-                />
-                <Button
-                  title="Send Money"
-                  icon="payment"
-                  variant="outline"
-                  onPress={onSendMoney}
-                  style={styles.actionButton}
-                />
-              </>
-            ) : friendshipStatus?.status === 'pending' ? (
-              <Button
-                title={friendshipStatus.isSender ? "Request Sent" : "Respond to Request"}
-                icon={friendshipStatus.isSender ? "schedule" : "person-add"}
-                disabled={friendshipStatus.isSender || sendingRequest}
-                onPress={() => {
-                  // Navigate to friend requests screen or handle response
-                  Alert.alert('Info', 'Check your friend requests to respond');
-                }}
-                style={styles.fullActionButton}
-              />
-            ) : (
-              <Button
-                title={sendingRequest ? "Sending..." : "Add Contact"}
-                icon="person-add"
-                onPress={handleSendFriendRequest}
-                disabled={sendingRequest}
-                style={styles.fullActionButton}
-              />
-            )}
-          </View>
-        )}
+        {/* Action Buttons */}
+        <ProfileActionButtons
+          key={refreshKey}
+          userId={userId}
+          userName={userName}
+          friendRequestId={friendRequestId}
+          isFriendRequest={isFriendRequest}
+          onMessage={onMessage}
+          onSendMoney={onSendMoney}
+          onFriendRequestResponse={onFriendRequestResponse}
+          onFriendRequestSent={onFriendRequestSent}
+        />
       </ScrollView>
 
       {/* Contact Selector for Sharing */}
@@ -467,44 +396,6 @@ const styles = StyleSheet.create({
   trustPercentage: {
     color: Colors.secondary,
     fontWeight: '600',
-  },
-  actionMenu: {
-    position: 'absolute',
-    top: 60,
-    right: Spacing.lg,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 1000,
-  },
-  actionMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  actionMenuText: {
-    marginLeft: Spacing.md,
-  },
-  bottomActions: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    paddingVertical: Spacing.lg,
-  },
-  actionButton: {
-    flex: 1,
-  },
-  fullActionButton: {
-    width: '100%',
-  },
-  loadingActions: {
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
   },
   loadingMoments: {
     alignItems: 'center',
