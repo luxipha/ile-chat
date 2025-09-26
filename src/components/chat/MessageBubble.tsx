@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
+import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
 
 export interface Message {
   id: string;
@@ -17,6 +18,7 @@ export interface Message {
     amount: number;
     currency: string;
     status: 'pending' | 'completed' | 'failed';
+    note?: string;
   };
   attachmentData?: {
     type: 'camera' | 'gallery' | 'document';
@@ -78,22 +80,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const renderMessageContent = () => {
     switch (message.type) {
       case 'payment':
+        if (!message.paymentData) return null;
+        
+        const paymentData: PaymentMessageData = {
+          amount: message.paymentData.amount,
+          currency: message.paymentData.currency,
+          status: message.paymentData.status === 'pending' ? 'sending' : 
+                 message.paymentData.status === 'completed' ? 'completed' : 'failed',
+          senderName: message.isOwn ? undefined : message.senderName,
+          recipientName: message.isOwn ? 'Recipient' : undefined,
+          note: message.paymentData.note,
+          transactionId: message.id,
+        };
+        
         return (
-          <View style={styles.paymentContainer}>
-            <MaterialIcons name="payment" size={20} color={ChatTheme.accent} />
-            <Text style={[
-              styles.paymentText,
-              message.isOwn ? styles.ownText : styles.otherText
-            ]}>
-              Payment: ${message.paymentData?.amount} {message.paymentData?.currency}
-            </Text>
-            <Text style={[
-              styles.paymentStatus,
-              message.isOwn ? styles.ownTimestamp : styles.otherTimestamp
-            ]}>
-              {message.paymentData?.status}
-            </Text>
-          </View>
+          <PaymentMessageBubble
+            paymentData={paymentData}
+            isOwn={message.isOwn}
+            timestamp={message.timestamp}
+            onPress={() => {
+              // Handle payment message press - could show transaction details
+              console.log('Payment message pressed:', message.id);
+            }}
+          />
         );
       
       case 'attachment':
@@ -260,6 +269,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         );
     }
   };
+
+  // Payment messages are rendered as standalone components
+  if (message.type === 'payment') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
 
   return (
     <View style={[

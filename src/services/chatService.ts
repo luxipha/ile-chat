@@ -38,6 +38,13 @@ export interface ChatMessage {
     name: string;
     avatar?: string;
   };
+  type?: string;
+  paymentData?: {
+    amount: number;
+    currency: string;
+    status: string;
+    note?: string;
+  };
 }
 
 const chatService = {
@@ -144,12 +151,24 @@ const chatService = {
    * @param conversationId The ID of the conversation.
    * @param messageText The text of the message.
    * @param sender The user object of the sender.
+   * @param recipientId Optional recipient ID for direct messages.
+   * @param messageType Optional message type (text, payment, etc.).
+   * @param metadata Optional additional data for special message types.
    */
-  sendMessage: async (conversationId: string, messageText: string, sender: { _id: string; name: string; avatar?: string }, recipientId?: string) => {
+  sendMessage: async (
+    conversationId: string, 
+    messageText: string, 
+    sender: { _id: string; name: string; avatar?: string }, 
+    recipientId?: string,
+    messageType: string = 'text',
+    metadata?: any
+  ) => {
     const messageData = {
       text: messageText,
       createdAt: serverTimestamp(),
       user: sender,
+      type: messageType,
+      ...metadata, // Include payment data, etc.
     };
 
     // Add the message to the messages subcollection
@@ -212,6 +231,18 @@ const chatService = {
           text: data.text,
           createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
           user: data.user,
+          type: data.type || 'text', // Include message type
+          paymentData: data.paymentData ? {
+            ...data.paymentData,
+            // Ensure all required fields are present
+            amount: data.paymentData.amount || 0,
+            currency: data.paymentData.currency || 'USDC',
+            status: data.paymentData.status || 'pending',
+            note: data.paymentData.note,
+            transactionId: data.paymentData.transactionId,
+            senderName: data.paymentData.senderName || data.user.name,
+            recipientName: data.paymentData.recipientName,
+          } : undefined,
         };
       });
       callback(messages);

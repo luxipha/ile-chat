@@ -49,7 +49,7 @@ class ProfileService {
     }
   }
 
-  async getUserProfile(firebaseUid: string): Promise<{ success: boolean; profile?: ChatUserProfile; error?: string }> {
+  async getUserProfile(firebaseUid: string): Promise<{ success: boolean; profile?: ChatUserProfile & { aptosAddress?: string }; error?: string }> {
     try {
       // Check cache first
       const cachedProfile = this.userProfileCache.get(firebaseUid);
@@ -63,7 +63,7 @@ class ProfileService {
       const response = await apiClient.get(`/api/user/profile/${firebaseUid}`);
       
       if (response.success && response.data) {
-        const profileData = response.data as { success: boolean; profile: ChatUserProfile };
+        const profileData = response.data as { success: boolean; profile: ChatUserProfile & { aptosAddress?: string } };
         if (profileData.success && profileData.profile) {
           // Cache the profile
           this.userProfileCache.set(firebaseUid, profileData.profile);

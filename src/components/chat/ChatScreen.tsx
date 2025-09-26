@@ -15,6 +15,8 @@ import { ChatHeader } from './ChatHeader';
 import { MessageComposer } from './MessageComposer';
 import { PublicProfileScreen } from '../profile/PublicProfileScreen';
 import { SendMoneyModal } from '../wallet/SendMoneyModal';
+import { InChatTransferModal } from './InChatTransferModal';
+import { TransferConfirmationModal } from './TransferConfirmationModal';
 import { GroupDetailsScreen } from './GroupDetailsScreen';
 import { ChatActionsMenu } from './ChatActionsMenu';
 import { MessageComposerActions } from './MessageComposerActions';
@@ -22,6 +24,8 @@ import { ChatTheme } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 import chatService, { ChatMessage } from '../../services/chatService';
 import authService from '../../services/authService';
+import aptosService from '../../services/aptosService';
+import profileService from '../../services/profileService';
 
 interface ChatScreenProps {
   chatId: string;
@@ -51,7 +55,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showPublicProfile, setShowPublicProfile] = useState(false);
   const [showSendMoney, setShowSendMoney] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string } | null>(null);
+  const [showInChatTransfer, setShowInChatTransfer] = useState(false);
+  const [showTransferConfirmation, setShowTransferConfirmation] = useState(false);
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string } | null>(null);
   const [showChatActions, setShowChatActions] = useState(false);
   const [showComposerActions, setShowComposerActions] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
@@ -74,7 +83,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       status: 'read', // Default status
       senderName: chatMessage.user.name,
       senderAvatar: chatMessage.user.avatar,
-      type: 'text', // Default type, can be enhanced based on message content
+      type: chatMessage.type || 'text',
+      paymentData: chatMessage.paymentData ? {
+        amount: chatMessage.paymentData.amount,
+        currency: chatMessage.paymentData.currency,
+        status: chatMessage.paymentData.status || 'pending',
+        note: chatMessage.paymentData.note,
+        senderName: chatMessage.user.name,
+        recipientName: undefined, // Will be resolved from chat context
+        transactionId: chatMessage.paymentData.transactionId,
+      } : undefined,
     };
   };
 
@@ -174,7 +192,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       const sender = {
         _id: currentUser.id,
         name: currentUser.name || 'User',
-        avatar: (currentUser as any).profilePicture || null, // Handle undefined avatar properly
+        avatar: (currentUser as any).profilePicture || (currentUser as any).avatar || null, // Handle undefined avatar properly
       };
 
       // Extract recipient ID from chatId if possible
@@ -265,20 +283,170 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }, 1500);
   };
 
-  const handleAvatarPress = (message: Message) => {
+  const handleAvatarPress = async (message: Message) => {
     if (!message.isOwn && message.senderName) {
-      setSelectedUser({
-        name: message.senderName,
-        avatar: message.senderAvatar,
-        id: `user_${message.senderName.toLowerCase().replace(' ', '_')}`,
-      });
-      setShowPublicProfile(true);
+      // The senderName should contain the user's Firebase UID for proper lookup
+      const userFirebaseId = message.senderName; // This should be Firebase UID
+      
+      try {
+        // Get user profile which should contain the Aptos address
+        const profileResult = await profileService.getUserProfile(userFirebaseId);
+        
+        if (profileResult.success && profileResult.profile) {
+          setSelectedUser({
+            name: profileResult.profile.name,
+            avatar: profileResult.profile.avatar || message.senderAvatar,
+            id: userFirebaseId,
+            aptosAddress: profileResult.profile.aptosAddress,
+          });
+          setShowPublicProfile(true);
+        } else {
+          Alert.alert('Error', 'Unable to get user information');
+        }
+      } catch (error) {
+        console.error('Failed to get user profile:', error);
+        Alert.alert('Error', 'Unable to get user information');
+      }
     }
   };
 
   const handleSendMoneyFromProfile = () => {
     setShowPublicProfile(false);
-    setShowSendMoney(true);
+    setShowInChatTransfer(true);
+  };
+
+  const handleInChatTransferContinue = (amount: string, note: string) => {
+    setTransferAmount(amount);
+    setTransferNote(note);
+    setShowInChatTransfer(false);
+    setShowTransferConfirmation(true);
+  };
+
+  const handleTransferConfirm = async (walletId: string) => {
+    if (!selectedUser) return;
+
+    setIsProcessing(true);
+
+    try {
+      const cryptoAmount = parseFloat(transferAmount);
+      let transactionResult;
+      let currency = 'USDC';
+      
+      // Get recipient's Aptos address
+      const recipientAddress = selectedUser.aptosAddress || selectedUser.id;
+      
+      if (!recipientAddress || recipientAddress === 'placeholder_address') {
+        throw new Error('Recipient Aptos address not available. Please ensure the recipient has a wallet.');
+      }
+
+      // Execute transaction directly with crypto amounts
+      if (walletId === 'usdc_aptos' || walletId === 'usdc_crossmint') {
+        transactionResult = await aptosService.sendUSDC(recipientAddress, cryptoAmount);
+        currency = 'USDC';
+      } else if (walletId === 'apt_native') {
+        transactionResult = await aptosService.sendAPT(recipientAddress, cryptoAmount);
+        currency = 'APT';
+      } else {
+        throw new Error('Unsupported wallet type');
+      }
+
+      if (!transactionResult.success) {
+        throw new Error(transactionResult.error || 'Transaction failed');
+      }
+
+      // Don't add local message - let Firebase real-time listener handle it
+
+      // Save payment message to Firebase so it persists and recipient sees it
+      try {
+        const currentUser = await authService.getSession();
+        if (currentUser.success && currentUser.user) {
+          console.log('💾 Saving payment message to Firebase');
+          
+          // Send payment message that both sender and recipient will see
+          await chatService.sendMessage(
+            chatId,
+            `Sent ${cryptoAmount.toFixed(currency === 'APT' ? 4 : 2)} ${currency}`,
+            {
+              _id: currentUser.user.id,
+              name: currentUser.user.name || 'You',
+              avatar: currentUser.user.avatar || null
+            },
+            selectedUser.id,
+            'payment',
+            {
+              paymentData: {
+                amount: cryptoAmount,
+                currency: currency,
+                status: 'completed',
+                note: transferNote,
+                transactionId: transactionResult.hash,
+                senderName: currentUser.user.name,
+                recipientName: selectedUser.name,
+              }
+            }
+          );
+
+          console.log('✅ Payment message saved to Firebase');
+        }
+      } catch (firebaseError) {
+        console.error('❌ Failed to save payment to Firebase:', firebaseError);
+        // Don't fail the whole transaction for Firebase errors
+      }
+
+      // Reset transfer state
+      setTransferAmount('');
+      setTransferNote('');
+      setShowTransferConfirmation(false);
+      setSelectedUser(null);
+
+      Alert.alert(
+        'Payment Sent Successfully!', 
+        `${cryptoAmount.toFixed(currency === 'APT' ? 4 : 2)} ${currency} sent to ${selectedUser.name}\n\nTransaction ID: ${transactionResult.hash?.slice(-8)}`
+      );
+
+      console.log('✅ Payment completed:', {
+        recipient: selectedUser,
+        amount: cryptoAmount,
+        currency: currency,
+        hash: transactionResult.hash,
+        note: transferNote,
+        walletId
+      });
+
+    } catch (error) {
+      console.error('❌ Payment failed:', error);
+      
+      // Show user-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      if (errorMessage.includes('insufficient')) {
+        Alert.alert(
+          'Insufficient Balance', 
+          'You don\'t have enough balance to complete this transaction. Please add funds to your wallet.'
+        );
+      } else if (errorMessage.includes('gas') || errorMessage.includes('fee')) {
+        Alert.alert(
+          'Insufficient Gas', 
+          'You need APT for transaction fees. Please ensure you have some APT in your wallet.'
+        );
+      } else {
+        Alert.alert('Payment Failed', `Transaction failed: ${errorMessage}`);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleTransferBack = () => {
+    setShowTransferConfirmation(false);
+    setShowInChatTransfer(true);
+  };
+
+  const handleCloseAllTransferModals = () => {
+    setShowInChatTransfer(false);
+    setShowTransferConfirmation(false);
+    setTransferAmount('');
+    setTransferNote('');
   };
 
   const handleMessageFromProfile = () => {
@@ -480,9 +648,53 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         <MessageComposerActions
           visible={showComposerActions}
           onClose={() => setShowComposerActions(false)}
-          onSendMoney={() => {
+          onSendMoney={async () => {
             setShowComposerActions(false);
-            setShowSendMoney(true);
+            
+            try {
+              // Get current user to determine the other participant
+              const currentUser = await authService.getSession();
+              if (!currentUser.success || !currentUser.user) {
+                Alert.alert('Error', 'Please log in to send money.');
+                return;
+              }
+
+              // Extract recipient user ID from conversation ID
+              // chatId format: "userId1_userId2"
+              console.log('💬 Chat ID:', chatId);
+              console.log('💬 Current user ID:', currentUser.user.id);
+              
+              const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+              console.log('💬 Participant IDs:', participantIds);
+              
+              const recipientId = participantIds.find(id => id !== currentUser.user.id);
+              
+              if (!recipientId) {
+                console.error('💬 Unable to identify recipient from:', { chatId, currentUserId: currentUser.user.id, participantIds });
+                Alert.alert('Error', 'Unable to identify recipient.');
+                return;
+              }
+
+              console.log('💬 Getting profile for recipient:', recipientId);
+              
+              // Get the recipient's profile including their Aptos address
+              const profileResult = await profileService.getUserProfile(recipientId);
+              
+              if (profileResult.success && profileResult.profile) {
+                setSelectedUser({
+                  name: profileResult.profile.name,
+                  avatar: profileResult.profile.avatar,
+                  id: recipientId,
+                  aptosAddress: profileResult.profile.aptosAddress,
+                });
+                setShowInChatTransfer(true);
+              } else {
+                Alert.alert('Error', 'Unable to get recipient wallet address. Please make sure the recipient has an active wallet.');
+              }
+            } catch (error) {
+              console.error('Failed to get recipient profile:', error);
+              Alert.alert('Error', 'Network error. Please try again.');
+            }
           }}
           onSendImage={(imageUri) => {
             console.log('📷 Send image:', imageUri);
@@ -515,6 +727,28 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         recipientName={selectedUser?.name || chatName}
         onSendComplete={handleSendComplete}
       />
+
+      {/* New In-Chat Transfer Modals */}
+      {selectedUser && (
+        <>
+          <InChatTransferModal
+            visible={showInChatTransfer}
+            onClose={handleCloseAllTransferModals}
+            recipient={selectedUser}
+            onContinue={handleInChatTransferContinue}
+          />
+
+          <TransferConfirmationModal
+            visible={showTransferConfirmation}
+            onClose={handleCloseAllTransferModals}
+            recipient={selectedUser}
+            amount={transferAmount}
+            note={transferNote}
+            onConfirm={handleTransferConfirm}
+            onBack={handleTransferBack}
+          />
+        </>
+      )}
     </View>
   );
 };
