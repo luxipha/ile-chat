@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
+import { ChatActionMenu } from './ChatActionMenu';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 import { EmptyState, EmptyChat, EmptySearch } from '../ui/EmptyState';
@@ -37,6 +38,7 @@ interface ConversationListProps {
   onHide?: (conversationId: string) => void;
   onDelete?: (conversationId: string) => void;
   onCreateGroup?: () => void;
+  onAddContact?: () => void;
   userBricksCount?: number;
 }
 
@@ -191,10 +193,13 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   onHide = () => {},
   onDelete = () => {},
   onCreateGroup = () => {},
+  onAddContact = () => {},
   userBricksCount = 0,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [swipedItemId, setSwipedItemId] = useState<string | null>(null);
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [menuAnchorPosition, setMenuAnchorPosition] = useState({ x: 0, y: 0 });
 
   // Filter and sort conversations
   const filteredConversations = useMemo(() => {
@@ -225,6 +230,13 @@ export const ConversationList: React.FC<ConversationListProps> = ({
     );
   };
 
+  const handleActionMenuPress = (event: any) => {
+    // Get the position of the button to position the menu
+    const { pageY } = event.nativeEvent;
+    setMenuAnchorPosition({ x: 0, y: pageY });
+    setShowActionMenu(true);
+  };
+
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerTop}>
@@ -236,8 +248,11 @@ export const ConversationList: React.FC<ConversationListProps> = ({
               <Text style={styles.headerBricksText}>{userBricksCount}</Text>
             </View>
           )}
-          <TouchableOpacity onPress={onCreateGroup} style={styles.createGroupButton}>
-            <MaterialIcons name="group-add" size={24} color={ChatTheme.sendBubbleBackground} />
+          <TouchableOpacity 
+            onPress={handleActionMenuPress} 
+            style={styles.createGroupButton}
+          >
+            <MaterialIcons name="add" size={24} color={ChatTheme.sendBubbleBackground} />
           </TouchableOpacity>
         </View>
       </View>
@@ -278,10 +293,25 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             />
           ) : (
             <EmptyChat
-              onStartChat={onCreateGroup}
+              onStartChat={() => setShowActionMenu(true)}
             />
           )
         )}
+      />
+      
+      {/* Chat Action Menu */}
+      <ChatActionMenu
+        visible={showActionMenu}
+        onClose={() => setShowActionMenu(false)}
+        onAddContact={() => {
+          setShowActionMenu(false);
+          onAddContact();
+        }}
+        onCreateGroup={() => {
+          setShowActionMenu(false);
+          onCreateGroup();
+        }}
+        anchorPosition={menuAnchorPosition}
       />
     </View>
   );

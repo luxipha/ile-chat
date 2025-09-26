@@ -20,7 +20,8 @@ import { Colors, Spacing, BorderRadius } from '../../theme';
 interface CreateGroupModalProps {
   visible: boolean;
   onClose: () => void;
-  onGroupCreated: (group: GroupData) => void;
+  onGroupCreated: (group: GroupData) => Promise<void>;
+  contacts?: Contact[];
 }
 
 interface GroupData {
@@ -40,6 +41,7 @@ interface Contact {
   lastSeen?: string;
 }
 
+// Sample contacts for development/fallback - now replaced with real contacts data
 const SAMPLE_CONTACTS: Contact[] = [
   {
     id: '1',
@@ -79,6 +81,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   visible,
   onClose,
   onGroupCreated,
+  contacts = [],
 }) => {
   const [step, setStep] = useState<'details' | 'members' | 'review'>('details');
   const [groupName, setGroupName] = useState('');
@@ -125,11 +128,19 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   };
 
   const handleCreateGroup = async () => {
+    console.log('🔄 Creating group - Starting process...');
+    console.log('📋 Group details:', {
+      name: groupName.trim(),
+      description: groupDescription.trim(),
+      memberCount: selectedMembers.length,
+      members: selectedMembers.map(m => m.name),
+      privacy,
+      hasPin: privacy === 'private' && groupPin.length > 0
+    });
+    
     setIsLoading(true);
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       const groupData: GroupData = {
         name: groupName.trim(),
         description: groupDescription.trim(),
@@ -138,13 +149,19 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         pin: privacy === 'private' ? groupPin : undefined,
       };
       
-      onGroupCreated(groupData);
+      console.log('📤 Calling parent onGroupCreated handler...');
+      // Call the parent's onGroupCreated handler which will handle Firebase creation
+      await onGroupCreated(groupData);
+      
+      console.log('✅ Group creation successful - closing modal');
+      // Close modal - parent will handle navigation and success feedback
       handleClose();
-      Alert.alert('Success', 'Group created successfully!');
     } catch (error) {
-      Alert.alert('Error', 'Failed to create group. Please try again.');
+      console.error('❌ Group creation error in modal:', error);
+      // Error handling is done in parent component
     } finally {
       setIsLoading(false);
+      console.log('🏁 Group creation process completed (modal side)');
     }
   };
 
@@ -159,7 +176,9 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     });
   };
 
-  const filteredContacts = SAMPLE_CONTACTS.filter(contact =>
+  // Use real contacts data if available, otherwise empty array to show empty state
+  const availableContacts = contacts.length > 0 ? contacts : [];
+  const filteredContacts = availableContacts.filter(contact =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -366,6 +385,17 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               )}
             </View>
           </TouchableOpacity>
+        )}
+        ListEmptyComponent={() => (
+          <View style={styles.emptyContactsContainer}>
+            <MaterialIcons name="people-outline" size={48} color={ChatTheme.textSecondary} />
+            <Typography variant="h6" style={styles.emptyContactsTitle}>
+              No contacts found
+            </Typography>
+            <Typography variant="body2" color="textSecondary" style={styles.emptyContactsDescription}>
+              {contacts.length === 0 ? 'Add some contacts first to create a group' : 'Try a different search term'}
+            </Typography>
+          </View>
         )}
         style={styles.contactsList}
       />
@@ -643,6 +673,22 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: ChatTheme.border,
+  },
+  emptyContactsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xl * 2,
+    paddingHorizontal: Spacing.lg,
+  },
+  emptyContactsTitle: {
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
+    color: ChatTheme.textPrimary,
+  },
+  emptyContactsDescription: {
+    textAlign: 'center',
+    lineHeight: 20,
   },
   reviewCard: {
     marginBottom: Spacing.lg,

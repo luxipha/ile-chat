@@ -35,6 +35,8 @@ import { AboutScreen } from './src/components/settings/AboutScreen';
 import { QRCodeScreen } from './src/components/profile/QRCodeScreen';
 import { DepositFlow } from './src/components/wallet/DepositFlow';
 import { CreateGroupModal } from './src/components/chat/CreateGroupModal';
+import { GroupChatDebugPanel } from './src/components/debug/GroupChatDebugPanel';
+import { GroupCreationErrorHandler, useGroupCreationErrorHandler } from './src/components/chat/GroupCreationErrorHandler';
 import { LoginScreen } from './src/components/auth/LoginScreen';
 import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView';
 import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
@@ -70,6 +72,7 @@ import { useBalance } from './src/hooks/useBalance';
 import { useWallet } from '@crossmint/client-sdk-react-native-ui';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import crossmintService from './src/services/crossmintService';
+import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
 
 import { FXOffer, FXTrade } from './src/types/fx';
 
@@ -174,6 +177,16 @@ function AppWithCrossmint() {
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showCreateMoment, setShowCreateMoment] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Group creation error handling
+  const { 
+    error: groupCreationError, 
+    showError: showGroupCreationError, 
+    clearError: clearGroupCreationError,
+    handleGroupCreationError,
+    handleValidationErrors 
+  } = useGroupCreationErrorHandler();
   const [moments, setMoments] = useState<any[]>([]);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
@@ -250,7 +263,20 @@ function AppWithCrossmint() {
           // Setup conversations listener
           console.log('🔄 Setting up conversations listener...');
           const chatService = (await import('./src/services/chatService')).default;
-          const unsubscribe = chatService.getConversations(currentUser.id, setConversations);
+          const unsubscribe = chatService.getConversations(currentUser.id, (firebaseConversations) => {
+            console.log('📱 Conversations update received:', {
+              count: firebaseConversations.length,
+              groupCount: firebaseConversations.filter(c => c.isGroup).length,
+              directCount: firebaseConversations.filter(c => !c.isGroup).length,
+              conversations: firebaseConversations.map(conv => ({
+                id: conv.id,
+                name: conv.name,
+                isGroup: conv.isGroup,
+                lastMessage: conv.lastMessage?.slice(0, 30) + '...'
+              }))
+            });
+            setConversations(firebaseConversations);
+          });
           
           // Cleanup function
           return () => {
@@ -1104,6 +1130,12 @@ function AppWithCrossmint() {
       setConversationsLoading(true);
       
       const unsubscribe = chatService.getConversations(currentUser.id, (firebaseConversations) => {
+        console.log('💬 Chat tab - Conversations loaded:', {
+          count: firebaseConversations.length,
+          groupCount: firebaseConversations.filter(c => c.isGroup).length,
+          directCount: firebaseConversations.filter(c => !c.isGroup).length,
+          groups: firebaseConversations.filter(c => c.isGroup).map(g => g.name)
+        });
         setConversations(firebaseConversations);
         setConversationsLoading(false);
       });
@@ -2770,6 +2802,20 @@ function AppWithCrossmint() {
                   <MaterialIcons name="chevron-right" size={24} color={Colors.gray400} style={{ marginLeft: 'auto' }} />
                 </View>
               </TouchableOpacity>
+
+              {/* Debug Panel - Only show in development */}
+              {__DEV__ && (
+                <TouchableOpacity onPress={() => setShowDebugPanel(true)}>
+                  <View style={[styles.menuItem, styles.menuItemSpacing]}>
+                    <MaterialIcons name="bug-report" size={24} color={Colors.warning} />
+                    <Typography variant="h6" style={{ marginLeft: Spacing.md }}>Group Chat Debug</Typography>
+                    <View style={styles.debugBadge}>
+                      <Typography variant="caption" style={styles.debugBadgeText}>DEV</Typography>
+                    </View>
+                    <MaterialIcons name="chevron-right" size={24} color={Colors.gray400} style={{ marginLeft: Spacing.sm }} />
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
           </ScrollView>
         );
@@ -2791,7 +2837,15 @@ function AppWithCrossmint() {
       <View style={styles.chatContainer}>
         <ConversationList 
           conversations={conversations}
-          onConversationPress={(conversation) => setSelectedChat(conversation)}
+          onConversationPress={(conversation) => {
+            console.log('💬 User selected conversation:', {
+              id: conversation.id,
+              name: conversation.name,
+              isGroup: conversation.isGroup,
+              lastMessage: conversation.lastMessage
+            });
+            setSelectedChat(conversation);
+          }}
           onPin={(conversationId) => {
             console.log('Pin conversation:', conversationId);
             // Update conversation pin status
@@ -2805,6 +2859,11 @@ function AppWithCrossmint() {
             // Delete conversation
           }}
           onCreateGroup={() => setShowCreateGroup(true)}
+          onAddContact={() => {
+            // Navigate to the add contact screen
+            setActiveTab('contact');
+            setCurrentContactScreen('add');
+          }}
           userBricksCount={currentUser?.bricks || 0}
         />
       </View>
@@ -2985,6 +3044,13 @@ function AppWithCrossmint() {
   const renderContent = () => {
     // If a chat is selected, render it regardless of active tab
     if (selectedChat) {
+      console.log('🔄 Rendering chat screen for:', {
+        chatId: selectedChat.id,
+        chatName: selectedChat.name,
+        isGroup: selectedChat.isGroup,
+        hasAvatar: !!selectedChat.avatar
+      });
+      
       return (
         <ChatScreen
           chatId={selectedChat.id}
@@ -2993,9 +3059,15 @@ function AppWithCrossmint() {
           isOnline={selectedChat.isOnline}
           currentUser={currentUser}
           isGroup={selectedChat.isGroup}
-          onBack={() => setSelectedChat(null)}
-          onInfo={() => console.log('Show chat info')}
+          onBack={() => {
+            console.log('🔙 User navigating back from chat:', selectedChat.name);
+            setSelectedChat(null);
+          }}
+          onInfo={() => {
+            console.log('ℹ️ Show chat info requested for:', selectedChat.name);
+          }}
           onNavigateToMoments={() => {
+            console.log('📸 Navigate to moments from chat:', selectedChat.name);
             setSelectedChat(null);
             setActiveTab('moments');
           }}
@@ -3209,11 +3281,157 @@ function AppWithCrossmint() {
         <CreateGroupModal
           visible={showCreateGroup}
           onClose={() => setShowCreateGroup(false)}
-          onGroupCreated={(group) => {
-            console.log('Group created:', group);
-            // Could add group to conversations or moments
+          onGroupCreated={async (group) => {
+            try {
+              console.log('🔄 Creating group:', group);
+
+              // Validate group data before proceeding
+              if (handleValidationErrors(group, currentUser?.id)) {
+                return; // Validation errors will be displayed by the error handler
+              }
+
+              setGeneralLoadingMessage('Creating group...');
+              setIsLoadingGeneral(true);
+
+              // Get current user
+              const currentUserSession = await authService.getSession();
+              if (!currentUserSession.success || !currentUserSession.user) {
+                throw new Error('User not authenticated');
+              }
+
+              // Prepare participants array (current user + selected members)
+              const participantIds = [
+                currentUserSession.user.id,
+                ...group.members.map(member => member.id)
+              ];
+
+              console.log('👥 Group participants:', participantIds);
+              console.log('🏷️ Group details:', {
+                name: group.name,
+                description: group.description,
+                privacy: group.privacy,
+              });
+
+              // Create group conversation in Firebase
+              const groupId = await chatService.createConversation(
+                participantIds,
+                true, // isGroup
+                group.name,
+                group.description
+              );
+
+              console.log('✅ Group created successfully with ID:', groupId);
+
+              // Send initial group welcome message
+              try {
+                await chatService.sendMessage(
+                  groupId,
+                  `Welcome to ${group.name}! 👋`,
+                  {
+                    _id: currentUserSession.user.id,
+                    name: currentUserSession.user.name || 'Admin',
+                    avatar: currentUserSession.user.avatar || null,
+                  },
+                  undefined, // no specific recipient for group messages
+                  'text'
+                );
+                console.log('✅ Welcome message sent to group');
+              } catch (welcomeError) {
+                console.warn('⚠️ Failed to send welcome message:', welcomeError);
+                // Don't fail the entire group creation for this
+              }
+
+              // Create new conversation object for local state
+              const newConversation = {
+                id: groupId,
+                name: group.name,
+                lastMessage: `Welcome to ${group.name}! 👋`,
+                timestamp: new Date(),
+                unreadCount: 0,
+                isGroup: true,
+                avatar: undefined, // Groups don't have avatars by default
+                isOnline: false,
+                isPinned: false,
+              };
+
+              // Add to conversations list immediately for better UX
+              console.log('🔄 Adding new group to conversations list:', {
+                groupId,
+                groupName: group.name,
+                participantCount: participantIds.length,
+                currentConversationsCount: conversations.length
+              });
+              
+              setConversations(prev => {
+                const updated = [newConversation, ...prev];
+                console.log('✅ Conversations list updated:', {
+                  previousCount: prev.length,
+                  newCount: updated.length,
+                  newGroupAtTop: updated[0]?.name === group.name
+                });
+                return updated;
+              });
+
+              // Close modal and navigate to the new group
+              console.log('🔄 Navigating to new group chat...');
+              setShowCreateGroup(false);
+              setSelectedChat(newConversation);
+              console.log('✅ Navigation completed - user should now see group chat');
+
+              console.log('✅ Group creation completed successfully');
+              debugGroupAction(currentUserSession.user.id, 'GROUP_CREATION_SUCCESS', true, {
+                groupId,
+                groupName: group.name,
+                memberCount: participantIds.length
+              });
+            } catch (error) {
+              console.error('❌ Failed to create group:', error);
+              
+              // Use enhanced error handling
+              handleGroupCreationError(error, currentUser?.id, group);
+              
+              debugGroupAction(
+                currentUser?.id || 'unknown',
+                'GROUP_CREATION_FAILED',
+                false,
+                group,
+                error
+              );
+            } finally {
+              setIsLoadingGeneral(false);
+            }
           }}
+          contacts={friends.map((friend: any) => ({
+            id: friend.id,
+            name: friend.name,
+            avatar: friend.imageUrl,
+            isOnline: friend.isOnline,
+            lastSeen: friend.lastSeen,
+          }))}
         />
+
+        {/* Group Creation Error Handler */}
+        <GroupCreationErrorHandler
+          visible={showGroupCreationError}
+          error={groupCreationError}
+          onClose={clearGroupCreationError}
+          onRetryGroupCreation={async () => {
+            // Re-open the create group modal for retry
+            clearGroupCreationError();
+            setShowCreateGroup(true);
+          }}
+          userId={currentUser?.id}
+          groupData={groupCreationError?.context?.groupData}
+        />
+
+        {/* Group Chat Debug Panel */}
+        {__DEV__ && (
+          <GroupChatDebugPanel
+            visible={showDebugPanel}
+            onClose={() => setShowDebugPanel(false)}
+            currentUser={currentUser}
+          />
+        )}
 
         {/* Create Moment Modal */}
         <CreateMomentModal
@@ -3691,6 +3909,18 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   inviteBadgeText: {
+    color: Colors.background,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  debugBadge: {
+    backgroundColor: Colors.warning,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs / 2,
+    borderRadius: BorderRadius.full,
+    marginLeft: 'auto',
+  },
+  debugBadgeText: {
     color: Colors.background,
     fontSize: 10,
     fontWeight: '600',

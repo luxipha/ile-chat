@@ -163,6 +163,14 @@ const chatService = {
     messageType: string = 'text',
     metadata?: any
   ) => {
+    console.log('💬 ChatService: Sending message...', {
+      conversationId,
+      messageType,
+      senderName: sender.name,
+      messagePreview: messageText.slice(0, 50) + '...',
+      hasMetadata: !!metadata
+    });
+    
     const messageData = {
       text: messageText,
       createdAt: serverTimestamp(),
@@ -173,7 +181,13 @@ const chatService = {
 
     // Add the message to the messages subcollection
     const messagesRef = messagesCollection(conversationId);
-    await addDoc(messagesRef, messageData);
+    const messageDoc = await addDoc(messagesRef, messageData);
+    
+    console.log('✅ ChatService: Message sent successfully:', {
+      messageId: messageDoc.id,
+      conversationId,
+      messageType
+    });
 
     // Update or create the parent conversation document with the last message
     const conversationRef = doc(db, 'conversations', conversationId);
@@ -257,21 +271,44 @@ const chatService = {
    * @param isGroup Whether this is a group conversation
    * @param name Optional name for the conversation (required for groups)
    */
-  createConversation: async (participants: string[], isGroup: boolean = false, name?: string) => {
-    const conversationData = {
-      members: participants,
+  createConversation: async (participants: string[], isGroup: boolean = false, name?: string, description?: string) => {
+    console.log('🔄 ChatService: Creating conversation...', {
+      participantCount: participants.length,
       isGroup,
+      name,
+      hasDescription: !!description
+    });
+    
+    const conversationData = {
+      participants: participants, // Use 'participants' to match query structure
+      type: isGroup ? 'group' : 'direct', // Use 'type' to match existing structure
       name: name || '',
+      description: description || '',
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
       lastMessage: {
-        text: '',
+        text: isGroup ? `${name} group created` : '',
         createdAt: serverTimestamp(),
-        senderId: '',
+        senderId: participants[0], // Creator is first participant
       },
     };
 
+    console.log('💾 ChatService: Saving conversation to Firebase...', {
+      type: conversationData.type,
+      name: conversationData.name,
+      participantIds: participants
+    });
+
     const docRef = await addDoc(conversationsCollection, conversationData);
-    return docRef.id;
+    const conversationId = docRef.id;
+    
+    console.log('✅ ChatService: Conversation created successfully:', {
+      conversationId,
+      type: isGroup ? 'group' : 'direct',
+      name: name || 'Direct chat'
+    });
+    
+    return conversationId;
   },
 
   /**
@@ -283,15 +320,15 @@ const chatService = {
   findDirectConversation: async (userId1: string, userId2: string): Promise<string | null> => {
     const q = query(
       conversationsCollection,
-      where('members', 'array-contains', userId1),
-      where('isGroup', '==', false)
+      where('participants', 'array-contains', userId1),
+      where('type', '==', 'direct')
     );
 
     const querySnapshot = await getDocs(q);
     
     for (const doc of querySnapshot.docs) {
       const data = doc.data();
-      if (data.members.includes(userId2)) {
+      if (data.participants.includes(userId2)) {
         return doc.id;
       }
     }
