@@ -14,6 +14,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import contributionGroupService from '../../services/contributionGroupService';
 
 interface ContributionFlowProps {
   visible: boolean;
@@ -50,9 +51,9 @@ const AVAILABLE_TOKENS: Token[] = [
     icon: 'account-balance',
   },
   {
-    symbol: 'ETH',
-    name: 'Ethereum',
-    balance: 2.8,
+    symbol: 'APT',
+    name: 'Aptos Token',
+    balance: 12.5,
     icon: 'currency-bitcoin',
   },
   {
@@ -172,11 +173,36 @@ export const ContributionFlow: React.FC<ContributionFlowProps> = ({
   const handleContribute = async () => {
     if (!selectedType || !selectedToken || !amount) return;
 
+    console.log('🔄 [ContributionFlow] Starting contribution process:', {
+      groupId,
+      amount: parseFloat(amount),
+      token: selectedToken.symbol,
+      type: selectedType,
+      isRecurring,
+      frequency: isRecurring ? frequency : undefined,
+    });
+
     setIsLoading(true);
     
     try {
-      // Simulate blockchain transaction
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Make contribution using backend service
+      const result = await contributionGroupService.contributeToGroup(
+        groupId,
+        parseFloat(amount),
+        selectedToken.symbol,
+        purpose.trim(),
+        isRecurring,
+        isRecurring ? frequency : undefined
+      );
+
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+
+      console.log('✅ [ContributionFlow] Contribution successful:', {
+        transactionId: result.transactionId,
+        txHash: result.txHash,
+      });
       
       const contributionData: ContributionData = {
         amount: parseFloat(amount),
@@ -187,11 +213,42 @@ export const ContributionFlow: React.FC<ContributionFlowProps> = ({
         isRecurring,
       };
       
+      console.log('✅ [ContributionFlow] Contribution flow completed successfully:', {
+        contributionData,
+        transactionId: result.transactionId,
+        txHash: result.txHash,
+        groupId,
+        timestamp: new Date().toISOString(),
+      });
+
       onContributionComplete(contributionData);
       handleClose();
-      Alert.alert('Success', 'Your contribution has been submitted successfully!');
+      
+      // Show success message with transaction details
+      if (result.txHash) {
+        console.log('🎉 [ContributionFlow] Showing success alert with transaction hash');
+        Alert.alert(
+          'Contribution Successful!', 
+          `Your contribution of ${amount} ${selectedToken.symbol} has been processed.\n\nTransaction: ${result.txHash.substring(0, 10)}...\n\nYou can view this transaction on the Aptos explorer.`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        console.log('🎉 [ContributionFlow] Showing success alert without transaction hash');
+        Alert.alert('Contribution Successful!', `Your contribution of ${amount} ${selectedToken.symbol} has been processed.`);
+      }
+      
     } catch (error) {
-      Alert.alert('Error', 'Failed to process contribution. Please try again.');
+      console.error('❌ [ContributionFlow] Contribution failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process contribution';
+      
+      Alert.alert(
+        'Contribution Failed', 
+        errorMessage,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Try Again', onPress: () => handleContribute() }
+        ]
+      );
     } finally {
       setIsLoading(false);
     }

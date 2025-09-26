@@ -48,6 +48,17 @@ interface BlockchainNetwork {
 
 const BLOCKCHAIN_NETWORKS: BlockchainNetwork[] = [
   {
+    id: 2,
+    name: 'Aptos Testnet',
+    symbol: 'APT',
+    rpcUrl: 'https://api.testnet.aptoslabs.com/v1',
+    explorerUrl: 'https://explorer.aptoslabs.com/testnet',
+    gasPrice: '0.01 APT',
+    deploymentCost: 0.1,
+    confirmationTime: 3,
+    icon: 'auto-awesome',
+  },
+  {
     id: 1,
     name: 'Ethereum Mainnet',
     symbol: 'ETH',
@@ -137,7 +148,7 @@ export const GroupWalletCreation: React.FC<GroupWalletCreationProps> = ({
   const [currentStep, setCurrentStep] = useState<'network' | 'configuration' | 'verification' | 'deployment' | 'testing'>('network');
   const [selectedNetwork, setSelectedNetwork] = useState<BlockchainNetwork | null>(null);
   const [threshold, setThreshold] = useState('3');
-  const [selectedTokens, setSelectedTokens] = useState<string[]>(['USDC', 'ETH']);
+  const [selectedTokens, setSelectedTokens] = useState<string[]>(['USDC', 'APT']);
   const [creationStatus, setCreationStatus] = useState<WalletCreationStatus | null>(null);
   const [deploymentProgress] = useState(new Animated.Value(0));
 
@@ -153,7 +164,7 @@ export const GroupWalletCreation: React.FC<GroupWalletCreationProps> = ({
     setCurrentStep('network');
     setSelectedNetwork(null);
     setThreshold('3');
-    setSelectedTokens(['USDC', 'ETH']);
+    setSelectedTokens(['USDC', 'APT']);
     setCreationStatus(null);
     onClose();
   };
@@ -204,11 +215,34 @@ export const GroupWalletCreation: React.FC<GroupWalletCreationProps> = ({
   };
 
   const startWalletDeployment = async () => {
+    console.log('🚀 [GroupWalletCreation] Starting wallet deployment:', {
+      groupName,
+      groupType,
+      selectedNetwork: selectedNetwork?.name,
+      chainId: selectedNetwork?.id,
+      threshold: parseInt(threshold),
+      supportedTokens: selectedTokens,
+      memberCount: memberAddresses.length,
+      timestamp: new Date().toISOString(),
+    });
+
     const steps = [
       { step: 'initializing', message: 'Initializing wallet deployment...', progress: 10 },
-      { step: 'deploying', message: 'Deploying multi-signature contract...', progress: 40 },
+      { 
+        step: 'deploying', 
+        message: selectedNetwork?.name === 'Aptos Testnet' 
+          ? 'Creating Aptos group wallet...' 
+          : 'Deploying multi-signature contract...', 
+        progress: 40 
+      },
       { step: 'configuring', message: 'Configuring signatories and threshold...', progress: 70 },
-      { step: 'completed', message: 'Wallet deployment completed!', progress: 100 },
+      { 
+        step: 'completed', 
+        message: selectedNetwork?.name === 'Aptos Testnet'
+          ? 'Aptos wallet deployment completed!'
+          : 'Wallet deployment completed!', 
+        progress: 100 
+      },
     ];
 
     for (const stepData of steps) {
@@ -257,9 +291,26 @@ export const GroupWalletCreation: React.FC<GroupWalletCreationProps> = ({
       chainId: selectedNetwork?.id || 1,
     };
 
+    console.log('✅ [GroupWalletCreation] Wallet creation completed:', {
+      groupType,
+      groupName,
+      selectedNetwork: selectedNetwork?.name,
+      chainId: selectedNetwork?.id,
+      threshold: parseInt(threshold),
+      memberCount: memberAddresses.length,
+      supportedTokens: selectedTokens,
+      contractAddress: walletConfig.contractAddress,
+      timestamp: new Date().toISOString(),
+    });
+
     onWalletCreated(walletConfig);
     handleClose();
-    Alert.alert('Success', 'Group wallet has been created successfully!');
+    
+    if (selectedNetwork?.name === 'Aptos Testnet') {
+      Alert.alert('Success', 'Aptos group wallet has been created successfully! You can now make USDC and APT contributions.');
+    } else {
+      Alert.alert('Success', 'Group wallet has been created successfully!');
+    }
   };
 
   const generateMockTxHash = (): string => {
@@ -336,7 +387,17 @@ export const GroupWalletCreation: React.FC<GroupWalletCreationProps> = ({
               styles.networkCard,
               selectedNetwork?.id === network.id && styles.selectedNetworkCard
             ]}
-            onPress={() => setSelectedNetwork(network)}
+            onPress={() => {
+              console.log('🔄 [GroupWalletCreation] Network selected:', {
+                networkName: network.name,
+                chainId: network.id,
+                symbol: network.symbol,
+                deploymentCost: network.deploymentCost,
+                confirmationTime: network.confirmationTime,
+                timestamp: new Date().toISOString(),
+              });
+              setSelectedNetwork(network);
+            }}
           >
             <View style={styles.networkIcon}>
               <MaterialIcons name="public" size={24} color={ChatTheme.sendBubbleBackground} />

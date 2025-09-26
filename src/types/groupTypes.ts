@@ -273,7 +273,7 @@ export const GROUP_TEMPLATES: { [key in GroupType]: GroupCreationConfig } = {
     },
     features: ['messaging', 'contributions', 'goalTracking', 'analytics'],
     walletConfig: {
-      supportedTokens: ['USDC', 'USDT', 'ETH'],
+      supportedTokens: ['USDC', 'APT', 'USDT', 'ETH'],
       minimumThreshold: 2,
       maximumThreshold: 10,
       defaultThreshold: 3,
@@ -297,7 +297,7 @@ export const GROUP_TEMPLATES: { [key in GroupType]: GroupCreationConfig } = {
     },
     features: ['messaging', 'contributions', 'investments', 'proposals', 'voting', 'analytics', 'yieldDistribution'],
     walletConfig: {
-      supportedTokens: ['USDC', 'USDT', 'ETH', 'WBTC'],
+      supportedTokens: ['USDC', 'APT', 'USDT', 'ETH', 'WBTC'],
       minimumThreshold: 3,
       maximumThreshold: 15,
       defaultThreshold: 5,
@@ -343,7 +343,7 @@ export const GROUP_TEMPLATES: { [key in GroupType]: GroupCreationConfig } = {
     },
     features: ['messaging', 'contributions', 'expenses', 'revenue', 'invoicing', 'analytics', 'taxReporting'],
     walletConfig: {
-      supportedTokens: ['USDC', 'USDT', 'ETH'],
+      supportedTokens: ['USDC', 'APT', 'USDT', 'ETH'],
       minimumThreshold: 2,
       maximumThreshold: 10,
       defaultThreshold: 3,
@@ -367,7 +367,7 @@ export const GROUP_TEMPLATES: { [key in GroupType]: GroupCreationConfig } = {
     },
     features: ['messaging', 'governance', 'proposals', 'voting', 'treasury', 'tokenManagement', 'analytics'],
     walletConfig: {
-      supportedTokens: ['USDC', 'USDT', 'ETH', 'WBTC', 'DAI'],
+      supportedTokens: ['USDC', 'APT', 'USDT', 'ETH', 'WBTC', 'DAI'],
       minimumThreshold: 5,
       maximumThreshold: 50,
       defaultThreshold: 7,
