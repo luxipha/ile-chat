@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   TextInput, 
@@ -13,7 +13,7 @@ interface MessageComposerProps {
   onSendMessage: (text: string) => void;
   onSendPayment?: (amount: number, currency: string) => void;
   onSendAttachment?: (type: 'camera' | 'gallery' | 'document') => void;
-  onActionsToggle?: (show: boolean) => void;
+  onActionsToggle?: (show: boolean, mode: 'actions' | 'stickers') => void;
   placeholder?: string;
 }
 
@@ -40,16 +40,27 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
   const handleFocus = () => {
     setIsExpanded(true);
     setShowActions(false); // Hide actions when typing
+    onActionsToggle?.(false, 'actions'); // Close action panel
   };
 
   const handleBlur = () => {
     setIsExpanded(false);
   };
 
+  const handleStickerPress = () => {
+    const newShowStickers = !showActions || showActions;
+    setShowActions(false); // Always close actions first
+    onActionsToggle?.(true, 'stickers'); // Open sticker mode
+    
+    if (newShowStickers) {
+      Keyboard.dismiss(); // Collapse keyboard
+    }
+  };
+
   const handleAttachmentPress = () => {
     const newShowActions = !showActions;
     setShowActions(newShowActions);
-    onActionsToggle?.(newShowActions);
+    onActionsToggle?.(newShowActions, 'actions'); // Toggle actions mode
     
     if (newShowActions) {
       Keyboard.dismiss(); // Collapse keyboard
@@ -86,7 +97,19 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
           blurOnSubmit={false}
         />
         
-        {/* Microphone/Send button */}
+        {/* Sticker button - always visible */}
+        <TouchableOpacity 
+          onPress={handleStickerPress}
+          style={styles.stickerButton}
+        >
+          <MaterialIcons 
+            name="sentiment-very-satisfied" 
+            size={20} 
+            color={ChatTheme.textSecondary} 
+          />
+        </TouchableOpacity>
+        
+        {/* Send button - only visible when there's text */}
         {message.trim() ? (
           <TouchableOpacity 
             onPress={handleSend}
@@ -112,7 +135,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: ChatSpacing.lg,
+    paddingHorizontal: ChatSpacing.lg * 0.9, // Reduce horizontal padding by 10%
     paddingVertical: ChatSpacing.md,
     backgroundColor: ChatTheme.background1,
     borderTopWidth: 1,
@@ -143,6 +166,10 @@ const styles = StyleSheet.create({
     maxHeight: 80,
     paddingVertical: ChatSpacing.xs,
     paddingHorizontal: ChatSpacing.xs,
+  },
+  stickerButton: {
+    padding: ChatSpacing.xs,
+    marginLeft: ChatSpacing.xs,
   },
   micButton: {
     padding: ChatSpacing.xs,

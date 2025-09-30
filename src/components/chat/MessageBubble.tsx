@@ -4,6 +4,8 @@ import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
+import StickerMessage from './StickerMessage';
+import { StickerData } from '../../types/sticker';
 
 export interface Message {
   id: string;
@@ -13,7 +15,7 @@ export interface Message {
   status?: 'sending' | 'sent' | 'delivered' | 'read';
   senderName?: string;
   senderAvatar?: string;
-  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment';
+  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker';
   paymentData?: {
     amount: number;
     currency: string;
@@ -37,6 +39,7 @@ export interface Message {
     lenderName?: string;
     dueDate?: Date;
   };
+  stickerData?: StickerData;
 }
 
 interface MessageBubbleProps {
@@ -258,6 +261,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </View>
         );
       
+      case 'sticker':
+        if (!message.stickerData) return null;
+        
+        return (
+          <StickerMessage
+            sticker={message.stickerData}
+            isCurrentUser={message.isOwn}
+            onPress={() => {
+              console.log('Sticker message pressed:', message.stickerData?.name);
+            }}
+          />
+        );
+      
       default:
         return (
           <Text style={[
@@ -272,6 +288,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   // Payment messages are rendered as standalone components
   if (message.type === 'payment') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
+
+  // Sticker messages are rendered as standalone components
+  if (message.type === 'sticker') {
     return (
       <View style={[
         styles.container,

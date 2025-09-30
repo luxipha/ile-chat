@@ -26,6 +26,7 @@ import chatService, { ChatMessage } from '../../services/chatService';
 import authService from '../../services/authService';
 import aptosService from '../../services/aptosService';
 import profileService from '../../services/profileService';
+import { StickerData } from '../../types/sticker';
 
 interface ChatScreenProps {
   chatId: string;
@@ -63,6 +64,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string } | null>(null);
   const [showChatActions, setShowChatActions] = useState(false);
   const [showComposerActions, setShowComposerActions] = useState(false);
+  const [actionPanelMode, setActionPanelMode] = useState<'actions' | 'stickers'>('actions');
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -93,6 +95,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         recipientName: undefined, // Will be resolved from chat context
         transactionId: chatMessage.paymentData.transactionId,
       } : undefined,
+      stickerData: chatMessage.stickerData,
     };
   };
 
@@ -219,6 +222,34 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       
       // Remove failed optimistic message
       setMessages(prev => prev.filter(msg => msg.id.startsWith('temp_')));
+    }
+  };
+
+  const handleStickerSelect = async (sticker: StickerData) => {
+    try {
+      console.log('🎭 Sending sticker from text input:', sticker);
+      
+      // Get current user for sender info
+      const currentUser = await authService.getCachedUser();
+      if (!currentUser) {
+        Alert.alert('Error', 'Please log in to send stickers.');
+        return;
+      }
+
+      const sender = {
+        _id: currentUser.id,
+        name: currentUser.name || 'User',
+        // Only include avatar if it exists, otherwise omit the field entirely
+        ...(currentUser.avatar && { avatar: currentUser.avatar }),
+      };
+
+      // Send the sticker message
+      await chatService.sendStickerMessage(chatId, sticker, sender);
+      
+      console.log('✅ Sticker sent successfully from text input');
+    } catch (error) {
+      console.error('Failed to send sticker from text input:', error);
+      Alert.alert('Error', 'Failed to send sticker. Please try again.');
     }
   };
 
@@ -585,8 +616,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     <View style={styles.container}>
       <KeyboardAvoidingView 
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 35}
       >
         <ChatHeader
           name={chatName}
@@ -641,12 +672,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           onSendMessage={handleSendMessage}
           onSendPayment={handleSendPayment}
           onSendAttachment={handleSendAttachment}
-          onActionsToggle={(show) => setShowComposerActions(show)}
+          onActionsToggle={(show, mode) => {
+            setShowComposerActions(show);
+            setActionPanelMode(mode);
+          }}
         />
 
         {/* Message Composer Actions - Below text input like WeChat */}
         <MessageComposerActions
           visible={showComposerActions}
+          mode={actionPanelMode}
           onClose={() => setShowComposerActions(false)}
           onSendMoney={async () => {
             setShowComposerActions(false);
@@ -704,6 +739,33 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             console.log('📎 Send document:', documentUri);
             // TODO: Implement document message sending
           }}
+          onSendSticker={async (sticker) => {
+            console.log('🎭 Send sticker:', sticker);
+            
+            try {
+              // Get current user for sender info
+              const currentUser = await authService.getSession();
+              if (!currentUser.success || !currentUser.user) {
+                Alert.alert('Error', 'Please log in to send stickers.');
+                return;
+              }
+
+              const sender = {
+                _id: currentUser.user.id,
+                name: currentUser.user.name,
+                // Only include avatar if it exists, otherwise omit the field entirely
+                ...(currentUser.user.avatar && { avatar: currentUser.user.avatar }),
+              };
+
+              // Send the sticker message
+              await chatService.sendStickerMessage(chatId, sticker, sender);
+              
+              console.log('✅ Sticker sent successfully');
+            } catch (error) {
+              console.error('Failed to send sticker:', error);
+              Alert.alert('Error', 'Failed to send sticker. Please try again.');
+            }
+          }}
         />
       </KeyboardAvoidingView>
 
@@ -749,6 +811,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           />
         </>
       )}
+
     </View>
   );
 };

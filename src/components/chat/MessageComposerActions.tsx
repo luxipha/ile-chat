@@ -1,26 +1,67 @@
-import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, TouchableOpacity, StyleSheet, Alert, Animated } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Typography } from '../ui/Typography';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import GiphyStickerGrid from './GiphyStickerGrid';
+import { StickerData } from '../../types/sticker';
+
 
 interface MessageComposerActionsProps {
   visible: boolean;
+  mode: 'actions' | 'stickers'; // Two modes for the panel
   onClose: () => void;
   onSendMoney: () => void;
   onSendImage?: (imageUri: string) => void;
   onSendDocument?: (documentUri: string) => void;
+  onSendSticker?: (sticker: StickerData) => void;
 }
 
 export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   visible,
+  mode,
   onClose,
   onSendMoney,
   onSendImage,
   onSendDocument,
+  onSendSticker,
 }) => {
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      // Slide up animation when showing
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Slide down animation when hiding
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
 
   const handleTakePhoto = async () => {
     try {
@@ -103,12 +144,32 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     onSendMoney();
   };
 
-  if (!visible) {
+
+  if (!visible && opacityAnim._value === 0) {
     return null;
   }
 
-  return (
-    <View style={styles.container}>
+  const translateY = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [100, 0], // Slide up from 100px below
+  });
+
+  // Render GIPHY sticker grid mode
+  const renderStickerGrid = () => (
+    <View style={styles.stickerContainer}>
+      <GiphyStickerGrid
+        onStickerSelect={(sticker) => {
+          console.log('GIPHY sticker selected:', sticker);
+          onSendSticker?.(sticker);
+          onClose();
+        }}
+      />
+    </View>
+  );
+
+  // Render action buttons mode
+  const renderActionButtons = () => (
+    <>
       {/* First Row */}
       <View style={styles.row}>
         {/* Camera Option */}
@@ -164,7 +225,7 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Second Row - can add more actions here */}
+      {/* Second Row */}
       <View style={styles.row}>
         <TouchableOpacity style={styles.actionItem}>
           <View style={styles.actionIcon}>
@@ -193,10 +254,26 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity>
 
-        {/* Empty slot */}
+        {/* Empty slot for now */}
         <View style={styles.actionItem} />
       </View>
-    </View>
+    </>
+  );
+
+  return (
+    <Animated.View
+      style={[
+        styles.container,
+        {
+          transform: [{ translateY }],
+          opacity: opacityAnim,
+        },
+      ]}
+    >
+      {/* Conditional rendering based on mode */}
+      {mode === 'stickers' ? renderStickerGrid() : renderActionButtons()}
+      
+    </Animated.View>
   );
 };
 
@@ -241,5 +318,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: Colors.textSecondary || '#666',
     fontSize: 12,
+  },
+  // Sticker styles
+  stickerContainer: {
+    height: 200, // Further reduced to better match action buttons height
+    backgroundColor: Colors.surface,
   },
 });

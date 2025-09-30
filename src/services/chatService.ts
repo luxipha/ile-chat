@@ -18,6 +18,7 @@ import { db } from './firebaseConfig';
 import { Conversation } from '../components/chat/ConversationList';
 import { apiClient } from './api';
 import profileService from './profileService';
+import { StickerData } from '../types/sticker';
 
 // Firestore collections
 const conversationsCollection = collection(db, 'conversations');
@@ -47,6 +48,7 @@ export interface ChatMessage {
     status: string;
     note?: string;
   };
+  stickerData?: StickerData;
 }
 
 // Interface for group member data
@@ -264,6 +266,83 @@ const chatService = {
   },
 
   /**
+   * Sends a sticker message to a conversation.
+   * @param conversationId The ID of the conversation.
+   * @param sticker The sticker data to send.
+   * @param sender The user object of the sender.
+   * @param recipientId Optional recipient ID for direct messages.
+   */
+  sendStickerMessage: async (
+    conversationId: string,
+    sticker: StickerData,
+    sender: { _id: string; name: string; avatar?: string },
+    recipientId?: string
+  ) => {
+    console.log('🎭 ChatService: Sending sticker message...', {
+      conversationId,
+      stickerName: sticker.name,
+      stickerEmoji: sticker.emoji,
+      senderName: sender.name,
+    });
+
+    const messageData = {
+      text: sticker.emoji || sticker.title || sticker.name, // Use emoji, title, or name as fallback
+      createdAt: serverTimestamp(),
+      user: sender,
+      type: 'sticker',
+      stickerData: sticker,
+    };
+
+    // Add the message to the messages subcollection
+    const messagesRef = messagesCollection(conversationId);
+    const messageDoc = await addDoc(messagesRef, messageData);
+
+    console.log('✅ ChatService: Sticker message sent successfully:', {
+      messageId: messageDoc.id,
+      conversationId,
+      stickerName: sticker.name,
+    });
+
+    // Update or create the parent conversation document with the last message
+    const conversationRef = doc(db, 'conversations', conversationId);
+    try {
+      await updateDoc(conversationRef, {
+        lastMessage: {
+          text: `${sticker.emoji} Sticker`, // Show "🎉 Sticker" in conversation list
+          createdAt: serverTimestamp(),
+          senderId: sender._id,
+        },
+      });
+    } catch (error: any) {
+      // If conversation doesn't exist, create it
+      if (error.code === 'not-found') {
+        console.log('📝 Creating new conversation document for sticker:', conversationId);
+
+        // Extract participants from conversationId (format: userId1_userId2)
+        const participants = conversationId.includes('_')
+          ? conversationId.split('_')
+          : [sender._id, recipientId].filter(Boolean);
+
+        console.log('👥 Conversation participants:', participants);
+
+        await setDoc(conversationRef, {
+          participants: participants,
+          type: 'direct',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          lastMessage: {
+            text: `${sticker.emoji} Sticker`,
+            createdAt: serverTimestamp(),
+            senderId: sender._id,
+          },
+        });
+      } else {
+        throw error; // Re-throw other errors
+      }
+    }
+  },
+
+  /**
    * Listens for real-time messages in a specific conversation.
    * @param conversationId The ID of the conversation.
    * @param callback A function to call with the updated list of messages.
@@ -291,6 +370,12 @@ const chatService = {
             transactionId: data.paymentData.transactionId,
             senderName: data.paymentData.senderName || data.user.name,
             recipientName: data.paymentData.recipientName,
+          } : undefined,
+          stickerData: data.stickerData ? {
+            id: data.stickerData.id,
+            emoji: data.stickerData.emoji,
+            name: data.stickerData.name,
+            category: data.stickerData.category,
           } : undefined,
         };
       });

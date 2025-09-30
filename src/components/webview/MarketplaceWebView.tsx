@@ -14,13 +14,13 @@ interface MarketplaceWebViewProps {
   userId?: string;
 }
 
-// Try multiple URLs for marketplace
+// Try multiple URLs for marketplace (using correct port 8080)
 const MARKETPLACE_URLS = [
-  'http://localhost:8081',
-  'http://127.0.0.1:8081',
-  'http://192.168.31.100:8081', // Your network IP
-  'http://10.0.2.2:8081', // Android emulator
-  'https://google.com', // Fallback test URL
+  'http://192.168.31.102:8080', // Your actual network IP (matches API)
+  'http://localhost:8080',
+  'http://127.0.0.1:8080', 
+  'http://10.0.2.2:8080', // Android emulator
+  'http://192.168.1.102:8080', // Alternative network range
 ];
 
 const { height: screenHeight } = Dimensions.get('window');
@@ -77,15 +77,25 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
   };
 
   const handleLoadEnd = () => {
+    console.log('✅ WebView successfully loaded:', currentUrl);
     setLoading(false);
   };
 
-  const handleError = () => {
+  const handleLoadStart = () => {
+    console.log('🔄 WebView starting to load:', currentUrl);
+    setLoading(true);
+  };
+
+  const handleError = (event: any) => {
+    console.log('WebView error:', event.nativeEvent);
+    console.log('Failed URL:', currentUrl);
+    console.log('Current URL index:', urlIndex);
     setLoading(false);
     
     // Try next URL if available
     if (urlIndex < MARKETPLACE_URLS.length - 1) {
       const nextIndex = urlIndex + 1;
+      console.log(`Trying next URL (${nextIndex + 1}/${MARKETPLACE_URLS.length}):`, MARKETPLACE_URLS[nextIndex]);
       setUrlIndex(nextIndex);
       setCurrentUrl(MARKETPLACE_URLS[nextIndex]);
       setLoading(true);
@@ -95,15 +105,19 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
     // If all URLs failed, show error
     Alert.alert(
       'Connection Error',
-      'Unable to load marketplace. Please ensure the marketplace server is running on localhost:8081',
+      `Unable to load marketplace. Tried ${MARKETPLACE_URLS.length} URLs.\n\nLast attempted: ${currentUrl}\n\nPlease ensure:\n1. Marketplace server is running\n2. You're on the same network\n3. Port 8080 is accessible`,
       [
-        { text: 'Retry', onPress: () => {
+        { text: 'Retry All', onPress: () => {
+          console.log('Retrying all URLs from beginning');
           setUrlIndex(0);
           setCurrentUrl(MARKETPLACE_URLS[0]);
           setLoading(true);
           webViewRef.current?.reload();
         }},
         { text: 'Go Back', onPress: handleBackPress },
+        { text: 'Debug Info', onPress: () => {
+          Alert.alert('Debug Info', `URLs tried:\n${MARKETPLACE_URLS.join('\n')}\n\nCurrent network: Check your WiFi/network settings`);
+        }}
       ]
     );
   };
@@ -178,12 +192,15 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
           // Allow navigation within the marketplace domain
           onShouldStartLoadWithRequest={(request) => {
             // Allow navigation within marketplace or to external payment providers
+            console.log('WebView navigation request:', request.url);
             return request.url.includes('localhost') || 
                    request.url.includes('127.0.0.1') ||
                    request.url.includes('192.168') ||
                    request.url.includes('10.0.2.2') ||
                    request.url.includes('paystack.co') ||
-                   request.url.includes('google.com');
+                   request.url.includes('ile.africa') || // Production domain
+                   request.url.startsWith('http://') ||
+                   request.url.startsWith('https://');
           }}
           // Additional WebView settings for better connectivity
           mixedContentMode="compatibility"
