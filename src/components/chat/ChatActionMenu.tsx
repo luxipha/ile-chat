@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
     backgroundColor: ChatTheme.background1,
     borderRadius: 12,
     paddingVertical: ChatSpacing.sm,
-    minWidth: 150,
+    minWidth: 200, // Increased from 150 to provide more space
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -124,16 +124,18 @@ const styles = StyleSheet.create({
   },
   menuItem: {
     paddingHorizontal: ChatSpacing.md,
-    paddingVertical: ChatSpacing.sm,
+    paddingVertical: ChatSpacing.md, // Increased vertical padding
+    marginVertical: 2, // Added margin for better spacing
   },
   menuItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    width: '100%', // Ensure full width
   },
   iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40, // Slightly larger icons
+    height: 40, // Slightly larger icons
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: ChatSpacing.md,
@@ -142,6 +144,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: ChatTheme.textPrimary,
     flex: 1,
+    fontSize: 16, // Explicitly set font size
   },
   separator: {
     height: 1,

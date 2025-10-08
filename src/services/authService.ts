@@ -1,14 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebaseAuthService from './firebaseAuthService';
-
-// API Base URL from environment variables with fallbacks
-const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const API_BASE_URL = process.env.API_BASE_URL || (isWeb
-  ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.102:3000'); // Mobile device
+import { API_BASE_URL } from '../config/apiConfig';
 
 export interface User {
   id: string;
+  _id?: string; // Adding _id for backward compatibility
   name: string;
   email: string;
   balance: number;
@@ -17,6 +13,7 @@ export interface User {
   loginStreak?: number;
   onboardingCompleted: boolean;
   authMethod: 'email' | 'google' | 'telegram';
+  avatar?: string; // Adding avatar property
 }
 
 export interface AuthResponse {
@@ -352,6 +349,11 @@ class AuthService {
 
 
   getToken(): string | null {
+    console.log('🔍 authService.getToken() called', {
+      hasTokenInMemory: !!this.token,
+      tokenLength: this.token?.length,
+      tokenPrefix: this.token?.substring(0, 30) + '...'
+    });
     return this.token;
   }
 }

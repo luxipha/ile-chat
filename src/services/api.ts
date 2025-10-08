@@ -1,16 +1,11 @@
-import { ApiResponse, User, Transaction, Property } from '../types';
+import { API_BASE_URL } from '../config/apiConfig';
+import { ApiResponse, Property, Transaction, User } from '../types';
 
-// Detect environment and use appropriate URL
-// In React Native, window exists but we still want to use the mobile URL
-const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const API_BASE_URL = isWeb
-  ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.102:3000'; // Mobile device (React Native)
-
-console.log('🔧 API_BASE_URL configured as:', API_BASE_URL);
-console.log('🔧 Environment check - isWeb:', isWeb);
-console.log('🔧 Environment check - window exists:', typeof window !== 'undefined');
-console.log('🔧 Environment check - document exists:', typeof window !== 'undefined' && typeof window.document !== 'undefined');
+if (__DEV__) {
+  const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  console.log('🔧 API_BASE_URL configured as:', API_BASE_URL);
+  console.log('🔧 Environment check - isWeb:', isWeb);
+}
 
 class ApiService {
   private async request<T>(
@@ -29,7 +24,7 @@ class ApiService {
 
       // Add a timeout to the request
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for better reliability
       
       const requestOptions = {
         ...options,
@@ -77,29 +72,34 @@ class ApiService {
       };
     } catch (error) {
       console.error('❌ Network error in request:', error);
+      
+      // Create a safe error object to prevent issues with non-Error objects
+      const safeError = error instanceof Error ? error : new Error(String(error));
+      
       console.error('❌ Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : null,
-        name: error instanceof Error ? error.name : 'Unknown',
+        message: safeError.message || 'Unknown error',
+        stack: safeError.stack || null,
+        name: safeError.name || 'Unknown',
         endpoint: endpoint,
         fullUrl: `${API_BASE_URL}${endpoint}`,
         timestamp: new Date().toISOString()
       });
       
       let errorMessage = 'Network error';
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          errorMessage = 'Request timeout';
-        } else if (error.message.includes('Network request failed')) {
-          errorMessage = 'Cannot reach server. Check your network connection and server status.';
-        } else {
-          errorMessage = error.message;
-        }
+      if (safeError.name === 'AbortError') {
+        errorMessage = 'Request timeout. The server is taking longer than expected to respond.';
+        console.log('⚠️ Request timeout detected - consider retrying the request');
+      } else if (safeError.message.includes('Network request failed')) {
+        errorMessage = 'Cannot reach server. Check your network connection and server status.';
+      } else {
+        errorMessage = safeError.message;
       }
       
       return {
         success: false,
         error: errorMessage,
+        isTimeout: safeError.name === 'AbortError',
+        isNetworkError: safeError.message?.includes('Network request failed')
       };
     }
   }
@@ -222,7 +222,7 @@ class ApiService {
   // Add health check method for testing connectivity
   async healthCheck(): Promise<ApiResponse<any>> {
     console.log('🏥 Testing backend connectivity...');
-    return this.request('/health');
+    return this.request('/api/health');
   }
 }
 

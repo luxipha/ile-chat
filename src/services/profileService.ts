@@ -2,10 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService, { User } from './authService';
 import { apiClient } from './api';
 
-const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const API_BASE_URL = isWeb
-  ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.102:3000'; // Mobile device
+import { API_BASE_URL } from '../config/apiConfig';
 
 export interface ProfileUpdateData {
   name?: string;

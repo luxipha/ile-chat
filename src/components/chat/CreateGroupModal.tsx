@@ -8,7 +8,9 @@ import {
   Modal,
   Alert,
   FlatList,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
@@ -86,19 +88,50 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const [step, setStep] = useState<'details' | 'members' | 'review'>('details');
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
-  const [privacy, setPrivacy] = useState<'public' | 'private'>('private');
+  const [privacy, setPrivacy] = useState<'public' | 'private'>('public'); // Default to public since private is commented out
   const [groupPin, setGroupPin] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<Contact[]>([]);
+  const [groupImage, setGroupImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleClose = () => {
+  const handleImagePicker = async () => {
+    try {
+      // Request permission to access media library
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        alert('Sorry, we need camera roll permissions to select a group photo!');
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1], // Square aspect ratio for group photos
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setGroupImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      alert('Failed to select image. Please try again.');
+    }
+  };
+
+  const handleClose = (resetImage: boolean = true) => {
     setStep('details');
     setGroupName('');
     setGroupDescription('');
-    setPrivacy('private');
+    setPrivacy('public'); // Always set to public since private is commented out
     setGroupPin('');
     setSelectedMembers([]);
+    if (resetImage) {
+      setGroupImage(null);
+    }
     setSearchQuery('');
     onClose();
   };
@@ -117,7 +150,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const canProceed = () => {
     switch (step) {
       case 'details':
-        return groupName.trim().length > 0 && (privacy === 'public' || groupPin.length === 4);
+        return groupName.trim().length > 0; // Removed PIN requirement since private groups are commented out
       case 'members':
         return selectedMembers.length > 0;
       case 'review':
@@ -146,6 +179,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         description: groupDescription.trim(),
         members: selectedMembers,
         privacy,
+        avatar: groupImage || undefined,
         pin: privacy === 'private' ? groupPin : undefined,
       };
       
@@ -154,8 +188,8 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       await onGroupCreated(groupData);
       
       console.log('✅ Group creation successful - closing modal');
-      // Close modal - parent will handle navigation and success feedback
-      handleClose();
+      // Close modal without resetting image - parent will handle navigation and success feedback
+      handleClose(false);
     } catch (error) {
       console.error('❌ Group creation error in modal:', error);
       // Error handling is done in parent component
@@ -184,7 +218,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <TouchableOpacity onPress={step === 'details' ? handleClose : handleBack}>
+      <TouchableOpacity onPress={() => step === 'details' ? handleClose() : handleBack()}>
         <MaterialIcons 
           name={step === 'details' ? 'close' : 'arrow-back'} 
           size={24} 
@@ -203,11 +237,17 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const renderDetailsStep = () => (
     <ScrollView style={styles.stepContainer}>
       <View style={styles.avatarSection}>
-        <TouchableOpacity style={styles.avatarPicker}>
-          <MaterialIcons name="add-a-photo" size={32} color={ChatTheme.textSecondary} />
-          <Typography variant="body2" color="textSecondary" style={styles.avatarText}>
-            Add Group Photo
-          </Typography>
+        <TouchableOpacity style={styles.avatarPicker} onPress={handleImagePicker}>
+          {groupImage ? (
+            <Image source={{ uri: groupImage }} style={styles.selectedImage} />
+          ) : (
+            <>
+              <MaterialIcons name="add-a-photo" size={32} color={ChatTheme.textSecondary} />
+              <Typography variant="body2" color="textSecondary" style={styles.avatarText}>
+                Add Group Photo
+              </Typography>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -251,6 +291,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           Privacy
         </Typography>
         <View style={styles.privacyOptions}>
+          {/* TODO: Private groups functionality commented out for now
           <TouchableOpacity
             style={[
               styles.privacyOption,
@@ -275,6 +316,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               <MaterialIcons name="check-circle" size={20} color={ChatTheme.sendBubbleBackground} />
             )}
           </TouchableOpacity>
+          */}
 
           <TouchableOpacity
             style={[
@@ -303,6 +345,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         </View>
       </View>
 
+      {/* TODO: PIN functionality commented out since private groups are disabled
       {privacy === 'private' && (
         <View style={styles.inputGroup}>
           <Typography variant="body1" style={styles.inputLabel}>
@@ -323,6 +366,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           />
         </View>
       )}
+      */}
     </ScrollView>
   );
 
@@ -407,7 +451,11 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       <Card style={styles.reviewCard}>
         <View style={styles.reviewHeader}>
           <View style={styles.reviewAvatar}>
-            <MaterialIcons name="group" size={32} color={ChatTheme.sendBubbleBackground} />
+            {groupImage ? (
+              <Image source={{ uri: groupImage }} style={styles.reviewAvatarImage} />
+            ) : (
+              <MaterialIcons name="group" size={32} color={ChatTheme.sendBubbleBackground} />
+            )}
           </View>
           <View style={styles.reviewInfo}>
             <Typography variant="h5" style={styles.reviewGroupName}>
@@ -551,6 +599,11 @@ const styles = StyleSheet.create({
   avatarText: {
     marginTop: Spacing.xs,
     fontSize: 12,
+  },
+  selectedImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
   inputGroup: {
     marginBottom: Spacing.lg,
@@ -706,6 +759,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: Spacing.md,
+    overflow: 'hidden',
+  },
+  reviewAvatarImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
   reviewInfo: {
     flex: 1,

@@ -31,11 +31,41 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
   userToken,
   userId,
 }) => {
+  // Debug authentication information  
+  console.log('🔍 MarketplaceWebView: Component initialized with MOBILE AUTH', {
+    hasUserToken: !!userToken,
+    userId,
+    initialUrl,
+    authMode: 'MOBILE_DIRECT_INJECTION'
+  });
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
-  const [currentUrl, setCurrentUrl] = useState(initialUrl || MARKETPLACE_URLS[0]);
   const [canGoBack, setCanGoBack] = useState(false);
   const [urlIndex, setUrlIndex] = useState(0);
+  
+  // Generate authenticated URL with user ID for direct data injection
+  const generateAuthenticatedUrl = (baseUrl: string): string => {
+    console.log('🔧 generateAuthenticatedUrl called with:', { baseUrl, userId, hasUserId: !!userId });
+    
+    if (userId) {
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      const authenticatedUrl = `${baseUrl}${separator}mobileUserId=${userId}&authSource=mobile`;
+      console.log('🔑 Generated mobile authentication URL:', {
+        baseUrl,
+        userId,
+        authSource: 'mobile',
+        finalUrl: authenticatedUrl
+      });
+      return authenticatedUrl;
+    }
+    console.log('⚠️ No user ID available, using basic marketplace URL:', baseUrl);
+    return baseUrl;
+  };
+
+  const [currentUrl, setCurrentUrl] = useState(() => {
+    const baseUrl = initialUrl || MARKETPLACE_URLS[0];
+    return generateAuthenticatedUrl(baseUrl);
+  });
   
   // Animation for slide up effect
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
@@ -63,6 +93,13 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
         case 'error':
           Alert.alert('Error', data.message);
           break;
+        case 'debug':
+          // Display marketplace debug messages in mobile console with full details
+          console.log(`🌐 Marketplace ${data.source}: ${data.message}`);
+          if (data.data) {
+            console.log(`📊 Debug Data:`, data.data);
+          }
+          break;
         default:
           console.log('WebView message:', data);
       }
@@ -72,6 +109,23 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
   };
 
   const handleNavigationStateChange = (navState: any) => {
+    console.log('🧭 WebView Navigation State Changed:', {
+      url: navState.url,
+      title: navState.title,
+      loading: navState.loading,
+      canGoBack: navState.canGoBack,
+      canGoForward: navState.canGoForward
+    });
+    
+    // Track authentication redirects
+    if (navState.url.includes('/login')) {
+      console.log('🔐 WebView: Redirected to login page - authentication may have failed');
+    } else if (navState.url.includes('/onboarding')) {
+      console.log('📝 WebView: Redirected to onboarding - user needs to complete setup');
+    } else if (navState.url === currentUrl.split('?')[0] + '/' || navState.url === currentUrl.split('?')[0]) {
+      console.log('🏠 WebView: Redirected to dashboard - authentication successful');
+    }
+    
     setCurrentUrl(navState.url);
     setCanGoBack(navState.canGoBack);
   };
@@ -95,9 +149,11 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
     // Try next URL if available
     if (urlIndex < MARKETPLACE_URLS.length - 1) {
       const nextIndex = urlIndex + 1;
-      console.log(`Trying next URL (${nextIndex + 1}/${MARKETPLACE_URLS.length}):`, MARKETPLACE_URLS[nextIndex]);
+      const nextBaseUrl = MARKETPLACE_URLS[nextIndex];
+      const nextAuthUrl = generateAuthenticatedUrl(nextBaseUrl);
+      console.log(`Trying next URL (${nextIndex + 1}/${MARKETPLACE_URLS.length}):`, nextAuthUrl);
       setUrlIndex(nextIndex);
-      setCurrentUrl(MARKETPLACE_URLS[nextIndex]);
+      setCurrentUrl(nextAuthUrl);
       setLoading(true);
       return;
     }
@@ -110,7 +166,8 @@ export const MarketplaceWebView: React.FC<MarketplaceWebViewProps> = ({
         { text: 'Retry All', onPress: () => {
           console.log('Retrying all URLs from beginning');
           setUrlIndex(0);
-          setCurrentUrl(MARKETPLACE_URLS[0]);
+          const firstAuthUrl = generateAuthenticatedUrl(MARKETPLACE_URLS[0]);
+          setCurrentUrl(firstAuthUrl);
           setLoading(true);
           webViewRef.current?.reload();
         }},

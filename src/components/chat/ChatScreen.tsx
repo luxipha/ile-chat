@@ -7,12 +7,15 @@ import {
   Platform,
   Keyboard,
   TouchableOpacity,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MessageBubble, Message } from './MessageBubble';
 import { ChatHeader } from './ChatHeader';
-import { MessageComposer } from './MessageComposer';
+import { MessageComposer, MessageComposerRef } from './MessageComposer';
+import { TypingIndicator } from './TypingIndicator';
 import { PublicProfileScreen } from '../profile/PublicProfileScreen';
 import { SendMoneyModal } from '../wallet/SendMoneyModal';
 import { InChatTransferModal } from './InChatTransferModal';
@@ -49,10 +52,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onInfo,
   onNavigateToMoments,
 }) => {
+  const insets = useSafeAreaInsets();
+  const { height: screenHeight } = Dimensions.get('window');
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<{ id: string; name: string; avatar?: string }[]>([]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showPublicProfile, setShowPublicProfile] = useState(false);
   const [showSendMoney, setShowSendMoney] = useState(false);
@@ -67,7 +75,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [actionPanelMode, setActionPanelMode] = useState<'actions' | 'stickers'>('actions');
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
+  const [isUserBlocked, setIsUserBlocked] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const messageComposerRef = useRef<MessageComposerRef>(null);
 
   const scrollToBottom = () => {
     if (flatListRef.current && messages.length > 0) {
@@ -83,17 +93,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       timestamp: chatMessage.createdAt,
       isOwn: chatMessage.user._id === currentUserId,
       status: 'read', // Default status
-      senderName: chatMessage.user.name,
+      senderName: chatMessage.user._id, // Use Firebase UID for API calls
+      senderDisplayName: chatMessage.user.name, // Display name for UI
       senderAvatar: chatMessage.user.avatar,
-      type: chatMessage.type || 'text',
+      type: (chatMessage.type || 'text') as 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image',
+      imageUrl: chatMessage.imageUrl, // Add imageUrl for image messages
       paymentData: chatMessage.paymentData ? {
         amount: chatMessage.paymentData.amount,
         currency: chatMessage.paymentData.currency,
-        status: chatMessage.paymentData.status || 'pending',
+        status: chatMessage.paymentData.status as 'pending' | 'completed' | 'failed',
         note: chatMessage.paymentData.note,
-        senderName: chatMessage.user.name,
-        recipientName: undefined, // Will be resolved from chat context
-        transactionId: chatMessage.paymentData.transactionId,
       } : undefined,
       stickerData: chatMessage.stickerData,
     };
@@ -105,20 +114,23 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       try {
         console.log('📱 Loading messages for chatId:', chatId);
         setLoading(true);
-        const currentUser = await authService.getCachedUser();
-        console.log('👤 Loading messages - Current user:', currentUser ? { id: currentUser.id, name: currentUser.name } : 'null');
+        const user = await authService.getCachedUser();
+        console.log('👤 Loading messages - Current user:', user ? { id: user.id, name: user.name } : 'null');
         
-        if (!currentUser) {
+        if (!user) {
           console.log('❌ User not authenticated for loading messages');
           Alert.alert('Error', 'User not authenticated');
-          return;
+          return () => {};
         }
+
+        setCurrentUser(user);
 
         // Subscribe to real-time messages
         const unsubscribe = chatService.getMessages(chatId, (chatMessages: ChatMessage[]) => {
           const convertedMessages = chatMessages.map(msg => 
-            convertToLocalMessage(msg, currentUser.id)
+            convertToLocalMessage(msg, user.id)
           );
+          
           setMessages(convertedMessages);
           setLoading(false);
         });
@@ -128,10 +140,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         console.error('Error loading messages:', error);
         setLoading(false);
         Alert.alert('Error', 'Failed to load messages. Please try again.');
+        return () => {};
       }
     };
 
-    const unsubscribe = loadMessages();
+    let unsubscribe: (() => void) | undefined;
+    
+    loadMessages().then((unsub) => {
+      unsubscribe = unsub;
+    });
     
     // Cleanup subscription on unmount
     return () => {
@@ -141,9 +158,58 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     };
   }, [chatId]);
 
+  // Subscribe to typing status
+  useEffect(() => {
+    if (!currentUser) return;
+
+    console.log('🔔 Setting up typing status subscription for:', { chatId, userId: currentUser.id });
+
+    const unsubscribe = chatService.subscribeToTypingStatus(
+      chatId, 
+      currentUser.id, 
+      (typingUsers: { userId: string; userName: string }[]) => {
+        console.log('📨 Received typing status update:', typingUsers);
+        
+        // Convert to the format expected by TypingIndicator
+        const formattedTypingUsers = typingUsers.map(user => ({
+          id: user.userId,
+          name: user.userName,
+        }));
+        
+        console.log('👥 Processed typing users:', formattedTypingUsers);
+        setTypingUsers(formattedTypingUsers);
+      }
+    );
+
+    return () => {
+      console.log('🔕 Cleaning up typing status subscription');
+      unsubscribe();
+    };
+  }, [chatId, currentUser]);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Check if user is blocked (only when actions menu is opened)
+  const checkBlockStatus = async () => {
+    if (isGroup) return; // Don't check for groups
+    
+    try {
+      const currentUser = await authService.getCachedUser();
+      if (!currentUser) return;
+      
+      const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+      const otherUserId = participantIds.find(id => id !== currentUser.id);
+      
+      if (otherUserId) {
+        const blocked = await chatService.isUserBlocked(otherUserId, currentUser.id);
+        setIsUserBlocked(blocked);
+      }
+    } catch (error) {
+      console.error('Failed to check block status:', error);
+    }
+  };
 
   useEffect(() => {
     const keyboardWillShowListener = Keyboard.addListener(
@@ -177,6 +243,33 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         console.log('❌ No current user found');
         Alert.alert('Error', 'Please sign in to send messages');
         return;
+      }
+
+      // Check if user is blocked before sending message
+      if (!isGroup) {
+        const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+        const otherUserId = participantIds.find(id => id !== currentUser.id);
+        
+        if (otherUserId) {
+          const blocked = await chatService.isUserBlocked(otherUserId, currentUser.id);
+          if (blocked) {
+            Alert.alert(
+              'Unable to Send Message',
+              'You have blocked this user. To send messages, you can unblock them in Settings > Blocked Users.'
+            );
+            return;
+          }
+
+          // Check if current user is blocked by the other user
+          const blockedByOther = await chatService.isUserBlocked(currentUser.id, otherUserId);
+          if (blockedByOther) {
+            Alert.alert(
+              'Message Not Delivered',
+              'Your message could not be delivered. This user may have blocked you or changed their privacy settings.'
+            );
+            return;
+          }
+        }
       }
 
       // Create optimistic message for immediate UI feedback
@@ -213,8 +306,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     } catch (error) {
       console.error('❌ Error sending message:', error);
       console.error('Error details:', {
-        name: error.name,
-        message: error.message,
+        name: (error as Error).name,
+        message: (error as Error).message,
         code: (error as any).code
       });
       
@@ -234,6 +327,32 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       if (!currentUser) {
         Alert.alert('Error', 'Please log in to send stickers.');
         return;
+      }
+
+      // Check if user is blocked before sending sticker
+      if (!isGroup) {
+        const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+        const otherUserId = participantIds.find(id => id !== currentUser.id);
+        
+        if (otherUserId) {
+          const blocked = await chatService.isUserBlocked(otherUserId, currentUser.id);
+          if (blocked) {
+            Alert.alert(
+              'Unable to Send Sticker',
+              'You have blocked this user. To send messages, you can unblock them in Settings > Blocked Users.'
+            );
+            return;
+          }
+
+          const blockedByOther = await chatService.isUserBlocked(currentUser.id, otherUserId);
+          if (blockedByOther) {
+            Alert.alert(
+              'Sticker Not Delivered',
+              'Your sticker could not be delivered. This user may have blocked you or changed their privacy settings.'
+            );
+            return;
+          }
+        }
       }
 
       const sender = {
@@ -314,6 +433,53 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }, 1500);
   };
 
+  const handleHeaderAvatarPress = async () => {
+    if (isGroup) {
+      // For group chats, show group info instead
+      handleGroupInfo();
+      return;
+    }
+    
+    try {
+      // Extract the other user's ID from the chatId
+      // chatId format: "userId1_userId2"
+      const currentUser = await authService.getSession();
+      if (!currentUser.success || !currentUser.user?.id) {
+        Alert.alert('Error', 'Unable to get current user information');
+        return;
+      }
+      
+      const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+      const otherUserId = participantIds.find(id => id !== currentUser.user!.id);
+      
+      if (!otherUserId) {
+        console.error('Unable to identify other user from chatId:', chatId);
+        Alert.alert('Error', 'Unable to identify user');
+        return;
+      }
+      
+      console.log('👤 Getting profile for user ID:', otherUserId);
+      
+      // Get user profile using the correct Firebase UID
+      const profileResult = await profileService.getUserProfile(otherUserId);
+      
+      if (profileResult.success && profileResult.profile) {
+        setSelectedUser({
+          name: profileResult.profile.name,
+          avatar: profileResult.profile.avatar || chatAvatar,
+          id: otherUserId,
+          aptosAddress: profileResult.profile.aptosAddress,
+        });
+        setShowPublicProfile(true);
+      } else {
+        Alert.alert('Error', 'Unable to get user information');
+      }
+    } catch (error) {
+      console.error('Failed to get user profile:', error);
+      Alert.alert('Error', 'Unable to get user information');
+    }
+  };
+
   const handleAvatarPress = async (message: Message) => {
     if (!message.isOwn && message.senderName) {
       // The senderName should contain the user's Firebase UID for proper lookup
@@ -371,7 +537,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       }
 
       // Execute transaction directly with crypto amounts
-      if (walletId === 'usdc_aptos' || walletId === 'usdc_crossmint') {
+      if (walletId === 'usdc_aptos' || walletId === 'usdc_') {
         transactionResult = await aptosService.sendUSDC(recipientAddress, cryptoAmount);
         currency = 'USDC';
       } else if (walletId === 'apt_native') {
@@ -400,7 +566,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             {
               _id: currentUser.user.id,
               name: currentUser.user.name || 'You',
-              avatar: currentUser.user.avatar || null
+              avatar: currentUser.user.avatar || undefined
             },
             selectedUser.id,
             'payment',
@@ -411,7 +577,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                 status: 'completed',
                 note: transferNote,
                 transactionId: transactionResult.hash,
-                senderName: currentUser.user.name,
+                senderName: chatName,
                 recipientName: selectedUser.name,
               }
             }
@@ -517,27 +683,157 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const handleChatOptions = () => {
+    if (!showChatOptions) {
+      checkBlockStatus(); // Only check when opening the menu
+    }
     setShowChatOptions(!showChatOptions);
   };
 
-  const handleMuteChat = () => {
-    setShowChatOptions(false);
-    console.log('Mute chat:', chatName);
+  const handleMuteChat = (isMuted: boolean) => {
+    console.log('🔇 Chat muted:', isMuted, 'for:', chatName);
+    // TODO: Implement actual mute functionality
   };
 
-  const handleClearChat = () => {
+  const handleClearChat = async () => {
     setShowChatOptions(false);
-    console.log('Clear chat:', chatName);
+    
+    try {
+      console.log('🗑️ Clearing chat:', chatName, 'ID:', chatId);
+      
+      // Show loading state
+      setLoading(true);
+      
+      // Clear all messages from Firebase
+      await chatService.clearMessages(chatId);
+      
+      console.log('✅ Chat cleared successfully');
+      
+    } catch (error) {
+      console.error('❌ Failed to clear chat:', error);
+      Alert.alert(
+        'Error', 
+        'Failed to clear chat messages. Please try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleBlockUser = () => {
-    setShowChatOptions(false);
-    console.log('Block user:', chatName);
+  const handleBlockUser = async () => {
+    try {
+      console.log('🚫 Block user:', chatName, 'chatId:', chatId);
+      
+      // Get current user
+      const currentUser = await authService.getCachedUser();
+      if (!currentUser) {
+        Alert.alert('Error', 'Please log in to block users.');
+        return;
+      }
+      
+      // Extract the other user's ID from the chat ID
+      const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+      const otherUserId = participantIds.find(id => id !== currentUser.id);
+      
+      if (!otherUserId) {
+        Alert.alert('Error', 'Unable to identify user to block.');
+        return;
+      }
+      
+      if (isUserBlocked) {
+        // Unblock the user
+        await chatService.unblockUser(otherUserId, currentUser.id);
+        setIsUserBlocked(false);
+        
+        Alert.alert(
+          'User Unblocked',
+          `${chatName} has been unblocked. You can now receive messages from them.`
+        );
+      } else {
+        // Block the user
+        await chatService.blockUser(otherUserId, currentUser.id);
+        setIsUserBlocked(true);
+        
+        Alert.alert(
+          'User Blocked',
+          `${chatName} has been blocked. They will no longer be able to send you messages.`
+        );
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to block user:', error);
+      Alert.alert('Error', 'Failed to block user. Please try again.');
+    }
   };
 
-  const handleReportUser = () => {
-    setShowChatOptions(false);
-    console.log('Report user:', chatName);
+  const handleReportUser = async () => {
+    try {
+      console.log('🚨 Report user:', chatName, 'chatId:', chatId);
+      
+      // Get current user
+      const currentUser = await authService.getCachedUser();
+      if (!currentUser) {
+        Alert.alert('Error', 'Please log in to report users.');
+        return;
+      }
+      
+      // Extract the other user's ID from the chat ID
+      const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
+      const otherUserId = participantIds.find(id => id !== currentUser.id);
+      
+      if (!otherUserId) {
+        Alert.alert('Error', 'Unable to identify user to report.');
+        return;
+      }
+      
+      // Show reason selection dialog
+      Alert.alert(
+        'Report User',
+        `Why are you reporting ${chatName}?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Spam',
+            onPress: () => submitReport(otherUserId, currentUser.id, 'spam'),
+          },
+          {
+            text: 'Harassment',
+            onPress: () => submitReport(otherUserId, currentUser.id, 'harassment'),
+          },
+          {
+            text: 'Inappropriate Content',
+            onPress: () => submitReport(otherUserId, currentUser.id, 'inappropriate_content'),
+          },
+          {
+            text: 'Other',
+            onPress: () => submitReport(otherUserId, currentUser.id, 'other'),
+          },
+        ],
+        { cancelable: true }
+      );
+      
+    } catch (error) {
+      console.error('❌ Failed to report user:', error);
+      Alert.alert('Error', 'Failed to report user. Please try again.');
+    }
+  };
+
+  const submitReport = async (userId: string, currentUserId: string, reason: string) => {
+    try {
+      await chatService.reportUser(userId, currentUserId, reason);
+      
+      Alert.alert(
+        'Report Submitted',
+        'Thank you for your report. We will review it and take appropriate action.',
+        [{ text: 'OK' }]
+      );
+      
+    } catch (error) {
+      console.error('❌ Failed to submit report:', error);
+      Alert.alert('Error', 'Failed to submit report. Please try again.');
+    }
   };
 
   const handleGroupInfo = () => {
@@ -561,20 +857,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const renderTypingIndicator = () => {
-    if (!isTyping) return null;
+    if (typingUsers.length === 0) return null;
     
     return (
       <View style={styles.typingContainer}>
-        <MessageBubble
-          message={{
-            id: 'typing',
-            text: '•••',
-            timestamp: new Date(),
-            isOwn: false,
-            senderName: chatName,
-          }}
-          showSenderName={false}
-        />
+        <TypingIndicator typingUsers={typingUsers} />
       </View>
     );
   };
@@ -612,12 +899,27 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     );
   }
 
+  // Calculate responsive keyboard offset based on device and safe area
+  const getKeyboardOffset = () => {
+    const baseOffset = Platform.OS === 'ios' ? 0 : 0;
+    const safeAreaOffset = insets.bottom;
+    
+    // For devices with home indicator (iPhone X and newer), we need less offset
+    // For devices without home indicator, we need more offset
+    if (Platform.OS === 'ios') {
+      return safeAreaOffset > 20 ? baseOffset : baseOffset + 20;
+    } else {
+      // Android: adjust based on screen height and safe area
+      return baseOffset + Math.max(0, 20 - safeAreaOffset);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <KeyboardAvoidingView 
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 35}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={getKeyboardOffset()}
       >
         <ChatHeader
           name={chatName}
@@ -628,6 +930,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           onBack={onBack}
           onOptions={() => setShowChatActions(true)}
           onGroupInfo={handleGroupInfo}
+          onAvatarPress={handleHeaderAvatarPress}
         />
         
         <View style={styles.messagesContainer}>
@@ -669,20 +972,31 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         </View>
         
         <MessageComposer 
+          ref={messageComposerRef}
           onSendMessage={handleSendMessage}
           onSendPayment={handleSendPayment}
           onSendAttachment={handleSendAttachment}
+          showActions={showComposerActions} // Pass the action panel state
           onActionsToggle={(show, mode) => {
+            console.log('🎛️ Actions toggle:', { show, mode, current: { showComposerActions, actionPanelMode } });
             setShowComposerActions(show);
             setActionPanelMode(mode);
           }}
+          chatId={chatId}
+          currentUser={currentUser}
         />
 
         {/* Message Composer Actions - Below text input like WeChat */}
         <MessageComposerActions
           visible={showComposerActions}
           mode={actionPanelMode}
-          onClose={() => setShowComposerActions(false)}
+          onClose={() => {
+            setShowComposerActions(false);
+            // Refocus the input when action panel closes
+            setTimeout(() => {
+              messageComposerRef.current?.refocusInput();
+            }, 100);
+          }}
           onSendMoney={async () => {
             setShowComposerActions(false);
             
@@ -702,7 +1016,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               const participantIds = chatId.includes('_') ? chatId.split('_') : [chatId];
               console.log('💬 Participant IDs:', participantIds);
               
-              const recipientId = participantIds.find(id => id !== currentUser.user.id);
+              const recipientId = participantIds.find(id => id !== currentUser.user?.id);
               
               if (!recipientId) {
                 console.error('💬 Unable to identify recipient from:', { chatId, currentUserId: currentUser.user.id, participantIds });
@@ -731,9 +1045,48 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               Alert.alert('Error', 'Network error. Please try again.');
             }
           }}
-          onSendImage={(imageUri) => {
+          onSendImage={async (imageUri) => {
             console.log('📷 Send image:', imageUri);
-            // TODO: Implement image message sending
+            
+            try {
+              // Get current user for sender info
+              const currentUser = await authService.getSession();
+              if (!currentUser.success || !currentUser.user) {
+                Alert.alert('Error', 'Please log in to send images.');
+                return;
+              }
+
+              const user = currentUser.user; // Extract user for type safety
+              const sender = {
+                _id: user.id,
+                name: user.name,
+                // Only include avatar if it exists, otherwise omit the field entirely
+                ...(user.avatar && { avatar: user.avatar }),
+              };
+
+              // Extract recipient ID from chatId if possible
+              const recipientId = chatId.includes('_') 
+                ? chatId.split('_').find(id => id !== user.id)
+                : undefined;
+
+              console.log('📤 Sending image message...', { chatId, imageUri, sender, recipientId });
+              
+              // Send the image message
+              const result = await chatService.sendImageMessage(chatId, imageUri, sender, recipientId);
+              
+              if (result.success) {
+                console.log('✅ Image message sent successfully:', result.messageId);
+                // Close the action panel
+                setShowComposerActions(false);
+              } else {
+                console.error('❌ Failed to send image message:', result.error);
+                Alert.alert('Error', result.error || 'Failed to send image. Please try again.');
+              }
+              
+            } catch (error) {
+              console.error('❌ Error sending image message:', error);
+              Alert.alert('Error', 'Failed to send image. Please try again.');
+            }
           }}
           onSendDocument={(documentUri) => {
             console.log('📎 Send document:', documentUri);
@@ -741,6 +1094,14 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           }}
           onSendSticker={async (sticker) => {
             console.log('🎭 Send sticker:', sticker);
+            console.log('🎭 Sticker details:', {
+              id: sticker.id,
+              name: sticker.name,
+              url: sticker.url,
+              title: sticker.title,
+              hasUrl: !!sticker.url,
+              fullSticker: JSON.stringify(sticker, null, 2)
+            });
             
             try {
               // Get current user for sender info
@@ -776,10 +1137,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         chatId={chatId}
         chatName={chatName}
         isGroup={isGroup}
-        onMuteToggle={(isMuted) => console.log('🔇 Chat muted:', isMuted)}
-        onClearChat={() => console.log('🗑️ Clear chat requested')}
-        onBlockUser={() => console.log('🚫 Block user requested')}
-        onReportUser={() => console.log('🚨 Report user requested')}
+        isUserBlocked={isUserBlocked}
+        onMuteToggle={handleMuteChat}
+        onClearChat={handleClearChat}
+        onBlockUser={handleBlockUser}
+        onReportUser={handleReportUser}
       />
 
       {/* Send Money Modal */}

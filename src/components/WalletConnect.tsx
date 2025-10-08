@@ -3,7 +3,7 @@ import { Layout, Text, Button, Card, Modal, Input } from '@ui-kitten/components'
 import { StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import crossmintService from '../services/crossmintService';
+import Service from '../services/Service';
 
 interface WalletConnectProps {
   onConnect?: (address: string) => void;
@@ -24,9 +24,9 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
 
   const checkWalletConnection = async () => {
     try {
-      const connected = await crossmintService.isWalletConnected();
+      const connected = await Service.isWalletConnected();
       if (connected) {
-        const data = await crossmintService.getLocalWalletData();
+        const data = await Service.getLocalWalletData();
         if (data) {
           setIsConnected(true);
           setWalletData(data);
@@ -47,8 +47,8 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
     setIsLoading(true);
     
     try {
-      // Connect via CrossMint service (backend handles the actual CrossMint integration)
-      const result = await crossmintService.connectWallet();
+      // Connect via  service (backend handles the actual  integration)
+      const result = await Service.connectWallet();
       
       if (result.success && result.wallet) {
         setIsConnected(true);
@@ -77,7 +77,7 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
 
   const handleDisconnect = async () => {
     try {
-      const result = await crossmintService.disconnectWallet();
+      const result = await Service.disconnectWallet();
       
       if (result.success) {
         setWalletAddress('');
@@ -97,7 +97,7 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
   };
 
   const formatAddress = (address: string) => {
-    return crossmintService.formatAddress(address);
+    return Service.formatAddress(address);
   };
 
   if (isConnected) {
@@ -129,7 +129,7 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({ onConnect, onDisco
         <MaterialIcons name="account-balance-wallet" size={48} color="#8F9BB3" />
         <Text category='h6' style={styles.connectTitle}>Connect Your Wallet</Text>
         <Text category='s1' appearance='hint' style={styles.connectDescription}>
-          Connect your CrossMint wallet to start investing in real estate
+          Connect your  wallet to start investing in real estate
         </Text>
         <Button 
           style={styles.connectButton}

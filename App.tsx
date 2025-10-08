@@ -30,6 +30,7 @@ import { CreateFXOffer } from './src/components/fx/CreateFXOffer';
 import { ChangePasswordScreen } from './src/components/settings/ChangePasswordScreen';
 import { WalletSettingsScreen } from './src/components/settings/WalletSettingsScreen';
 import { PrivacySettingsScreen } from './src/components/settings/PrivacySettingsScreen';
+import { BlockedUsersScreen } from './src/components/settings/BlockedUsersScreen';
 import { SendFeedbackScreen } from './src/components/settings/SendFeedbackScreen';
 import { AboutScreen } from './src/components/settings/AboutScreen';
 import { QRCodeScreen } from './src/components/profile/QRCodeScreen';
@@ -38,6 +39,7 @@ import { CreateGroupModal } from './src/components/chat/CreateGroupModal';
 import { GroupChatDebugPanel } from './src/components/debug/GroupChatDebugPanel';
 import { GroupCreationErrorHandler, useGroupCreationErrorHandler } from './src/components/chat/GroupCreationErrorHandler';
 import { LoginScreen } from './src/components/auth/LoginScreen';
+import { OnboardingModal } from './src/components/auth/OnboardingModal';
 import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView';
 import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
 import { QRScannerModal } from './src/components/scanner/QRScannerModal';
@@ -46,6 +48,7 @@ import { FriendRequestsScreen } from './src/components/friends/FriendRequestsScr
 import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
 import { LoadingOverlay } from './src/components/ui/LoadingOverlay';
 import { SkeletonContactItem, SkeletonCard } from './src/components/ui/SkeletonLoader';
+import Toast from 'react-native-toast-message';
 import { ErrorBoundary } from './src/components/ui/ErrorBoundary';
 import { ErrorMessage, NetworkError, ValidationError, PaymentError } from './src/components/ui/ErrorMessage';
 import { ErrorScreen, NoInternetScreen, ServerErrorScreen } from './src/components/ui/ErrorScreen';
@@ -62,22 +65,18 @@ import chatService from './src/services/chatService';
 import fxService from './src/services/fxService';
 import aptosService from './src/services/aptosService';
 import friendService from './src/services/friendService';
+import emailAuthService from './src/services/emailAuthService';
 import { apiService } from './src/services/api';
 import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
 import { signInWithCustomToken } from 'firebase/auth'; // Import from Firebase SDK
 import { auth as firebaseAuth } from './src/services/firebaseConfig'; // Assuming you have a firebaseConfig.ts
-// crossmintService removed - now using frontend SDK
-import { CrossmintProviders } from './src/providers/CrossmintProviders';
-import { useBalance } from './src/hooks/useBalance';
-import { useWallet } from '@crossmint/client-sdk-react-native-ui';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import crossmintService from './src/services/crossmintService';
 import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
 
 import { FXOffer, FXTrade } from './src/types/fx';
 
 type TabName = 'chat' | 'contact' | 'wallet' | 'moments' | 'me';
-type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'sendFeedback' | 'about' | 'qrCode';
+type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'blockedUsers' | 'sendFeedback' | 'about' | 'qrCode';
 type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings';
 type FXScreen = 'marketplace' | 'offer_detail' | 'trade_room';
 
@@ -114,21 +113,13 @@ const queryClient = new QueryClient({
   },
 });
 
-// Main App component that uses CrossMint hooks (must be inside providers)
-function AppWithCrossmint() {
-  // CrossMint hooks (now safely inside providers) - temporarily disabled due to SecureStore web compatibility
-  // const { balances: crossmintBalances, displayableBalance, isLoading: isCrossmintLoading, refetch: refetchCrossmint } = useBalance();
-  // const { wallet } = useWallet();
-  
-  // Temporary fallback values while CrossMint is disabled
-  const crossmintBalances = null;
-  const displayableBalance = null;
-  const isCrossmintLoading = false;
-  const refetchCrossmint = () => {};
-  const wallet = null;
+// Main App component
+function App() {
+  //  functionality removed - focusing on Aptos wallet only
   
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: '',
     email: '',
@@ -139,7 +130,7 @@ function AppWithCrossmint() {
     gender: '',
   });
   
-  // Dual wallet state (CrossMint + Aptos)
+  // Wallet state (Aptos only)
   const [hasWallet, setHasWallet] = useState(false);
   const [hasAptosWallet, setHasAptosWallet] = useState(false);
   // REMOVED: isCreatingWallet state - no longer needed since wallet creation removed from main screen
@@ -191,6 +182,12 @@ function AppWithCrossmint() {
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [contactFilter, setContactFilter] = useState<'all' | 'friends'>('all');
+  
+  // Onboarding flow state
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginInitialEmail, setLoginInitialEmail] = useState<string | undefined>(undefined);
+  const [loginInitialStep, setLoginInitialStep] = useState<'email' | 'verification' | 'complete'>('email');
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isLoadingMoments, setIsLoadingMoments] = useState(false);
   const [refreshingMoments, setRefreshingMoments] = useState(false);
@@ -202,6 +199,7 @@ function AppWithCrossmint() {
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [momentsError, setMomentsError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // const [hiddenConversations, setHiddenConversations] = useState<string[]>([]); // TODO: Implement hide feature later
   
   // Device contacts discovery state
   const [deviceContactsResult, setDeviceContactsResult] = useState<ContactDiscoveryResult | null>(null);
@@ -305,6 +303,11 @@ function AppWithCrossmint() {
     setMomentsError(null);
     
     try {
+      // Add a small delay to prevent rapid consecutive fetch calls
+      if (retryCount === 0) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
       console.log('🔄 Calling communityService.getPosts(1, 20)...');
       const response = await communityService.getPosts(1, 20);
       console.log('📥 getPosts response received:', {
@@ -315,7 +318,7 @@ function AppWithCrossmint() {
       
       if (response.success) {
         console.log('✅ Posts loaded successfully, formatting for UI...');
-        const formattedPosts = response.data.posts.map(post => 
+        const formattedPosts = (response.data?.posts || []).map(post => 
           communityService.formatPostForUI(post, currentUser?.id)
         );
         console.log('📝 Formatted posts:', {
@@ -333,24 +336,37 @@ function AppWithCrossmint() {
           return;
         }
         
-        setMomentsError(response.error || 'Failed to load posts');
+        // Don't show error message when refreshing, just silently fail
+        if (!refresh) {
+          setMomentsError(response.error || 'Failed to load posts');
+        }
       }
     } catch (error: any) {
       console.error('❌ Exception in loadPosts:', error);
+      
+      // Create a safe error object to prevent issues with non-Error objects
+      const safeError = error instanceof Error ? error : new Error(String(error));
+      
       console.error('❌ Exception details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
+        message: safeError.message,
+        name: safeError.name
       });
       
       // Retry once for network errors
-      if (retryCount === 0 && (error.message?.includes('network') || error.message?.includes('fetch') || error.message?.includes('Failed to fetch'))) {
+      if (retryCount === 0 && (
+        safeError.message?.includes('network') || 
+        safeError.message?.includes('fetch') || 
+        safeError.message?.includes('Failed to fetch')
+      )) {
         console.log('🔄 Retrying due to network error...');
         setTimeout(() => loadPosts(refresh, retryCount + 1), 1000);
         return;
       }
       
-      setMomentsError('Failed to load posts. Please try again.');
+      // Don't show error message when refreshing, just silently fail
+      if (!refresh) {
+        setMomentsError('Failed to load posts. Pull down to refresh.');
+      }
     } finally {
       console.log('🏁 loadPosts cleanup - setting loading states to false');
       setIsLoadingMoments(false);
@@ -435,28 +451,30 @@ function AppWithCrossmint() {
     setShowDeleteMenu(showDeleteMenu === momentId ? null : momentId);
   };
 
-  // Check if user has CrossMint wallet and fetch balance
+  // Check if user has  wallet and fetch balance
   const checkWalletStatus = async () => {
     try {
       console.log('🔍 Checking wallet status...');
       
-      // CrossMint wallet status check - using SDK hook
-      console.log('📱 CrossMint wallet hook status:', { hasWallet: !!wallet, hasAddress: !!wallet?.address });
-      const crossmintConnected = !!(wallet && wallet.address);
-      console.log('🔗 CrossMint connected:', crossmintConnected);
+      //  wallet status check removed
       
       // Check Aptos wallet - prioritize database over AsyncStorage
       console.log('🟣 Checking Aptos wallet status...');
       
       // First check database for existing Aptos wallet
-      let backendAptosWallet;
-      try {
-        backendAptosWallet = await crossmintService.getWalletFromBackend('aptos-testnet', 'aptos');
-        console.log('🏦 Backend Aptos wallet check:', backendAptosWallet);
-      } catch (error) {
-        console.log('⚠️ Error checking backend Aptos wallet:', error);
-        backendAptosWallet = { success: false };
+      // Define proper type for Aptos wallet response
+      interface AptosWalletWithData {
+        success: boolean;
+        wallet?: {
+          address: string;
+          privateKey?: string;
+        };
+        error?: string;
       }
+      
+      let backendAptosWallet: AptosWalletWithData;
+      //  service removed - skip backend wallet check
+      backendAptosWallet = { success: false };
       
       let aptosConnected = false;
       
@@ -504,27 +522,12 @@ function AppWithCrossmint() {
             console.log('⚠️ Found Aptos wallet in AsyncStorage but not in database:', aptosWallet.address);
             console.log('🔄 Saving existing wallet to database...');
             
-            // Save the existing wallet to database
-            try {
-              const saveResult = await crossmintService.saveWalletToBackend({
-                address: aptosWallet.address,
-                chain: 'aptos-testnet',
-                type: 'aptos',
-                privateKey: aptosWallet.privateKey
-              });
-              
-              if (saveResult.success) {
-                console.log('✅ Successfully saved Aptos wallet to database');
-                setAptosAddress(aptosWallet.address);
-                aptosConnected = true;
-              } else {
-                console.error('❌ Failed to save wallet to database:', saveResult.error);
-                aptosConnected = false;
-              }
-            } catch (saveError) {
-              console.error('❌ Error saving wallet to database:', saveError);
-              aptosConnected = false;
-            }
+            //  service removed - skip saving wallet to backend
+            console.log('⚠️  service not available - skipping wallet save to backend');
+            // Simulate successful save for local workflow
+            console.log('✅ Aptos wallet available locally (backend save skipped)');
+            setAptosAddress(aptosWallet.address);
+            aptosConnected = true;
           }
         } else {
           console.log('ℹ️ No Aptos wallet found. User needs to create one from the main screen.');
@@ -533,23 +536,22 @@ function AppWithCrossmint() {
       }
       
       console.log('🎯 Final wallet status:', {
-        crossmint: crossmintConnected,
         aptos: aptosConnected
       });
       
-      setHasWallet(crossmintConnected);
+      setHasWallet(aptosConnected);
       setHasAptosWallet(aptosConnected);
       
       console.log('🔧 State will be updated to:', {
-        hasWallet: crossmintConnected,
+        hasWallet: aptosConnected,
         hasAptosWallet: aptosConnected,
         aptosAddress: aptosAddress // This might not reflect the latest value due to async state
       });
       
       // Fetch balances for connected wallets - force check to ensure it runs
-      console.log('🔄 Balance fetch conditions:', { crossmintConnected, aptosConnected });
+      console.log('🔄 Balance fetch conditions:', { aptosConnected });
       
-      if (crossmintConnected || aptosConnected) {
+      if (aptosConnected) {
         console.log('✅ Triggering balance fetch...');
         // Pass the detected states directly to avoid async state issues
         await fetchCombinedBalances();
@@ -568,7 +570,7 @@ function AppWithCrossmint() {
     }
   };
 
-  // Fetch wallet balance from both Aptos and EVM (CrossMint)
+  // Fetch wallet balance from both Aptos and EVM ()
   const fetchWalletBalance = async (forceCheck = false) => {
     // Skip if no wallets at all
     if (!forceCheck && !hasAptosWallet && !hasWallet) {
@@ -597,13 +599,7 @@ function AppWithCrossmint() {
         balanceFetches.push(aptosPromise);
       }
       
-      // 2. Add CrossMint balance fetch promise for staging test address
-      const crossmintPromise = (async () => {
-        console.log('🔷 Fetching CrossMint balance for test address...');
-        const crossmintBalance = await crossmintService.getWalletBalance();
-        return { type: 'evm' as const, balances: crossmintBalance };
-      })();
-      balanceFetches.push(crossmintPromise);
+      // 2.  balance fetch removed - focusing on Aptos only
       
       // 3. Execute all promises in parallel and wait for completion
       if (balanceFetches.length === 0) {
@@ -626,18 +622,18 @@ function AppWithCrossmint() {
           
           if (type === 'aptos' && balances.success && balances.balances) {
             console.log('✅ Processing Aptos balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance) || 0;
+            Object.entries(balances.balances).forEach(([token, balance]: [string, unknown]) => {
+              const balanceNum = parseFloat(balance as string) || 0;
               
               // Only include USDC from Aptos in portfolio calculation
-              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
+              if ((token as string).includes('USDC') || (token as string).toUpperCase() === 'USDC') {
                 flattenedBalances['USDC (Aptos)'] = balanceNum;
                 totalUSDCValue += balanceNum;
                 console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
               }
               
               // Also include APT for display but not in USDC total
-              if (token.includes('APT') || token.toUpperCase() === 'APT') {
+              if ((token as string).includes('APT') || (token as string).toUpperCase() === 'APT') {
                 flattenedBalances['APT (Aptos)'] = balanceNum;
                 console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
               }
@@ -647,13 +643,13 @@ function AppWithCrossmint() {
           if (type === 'evm' && balances.success && balances.balances) {
             console.log('✅ Processing EVM balances:', balances.balances);
             Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance) || 0;
+              const balanceNum = parseFloat(balance as string) || 0;
               
-              // Handle USDC from testnets or CrossMint
-              if (token.includes('USDC')) {
-                const chainName = token.includes('Ethereum') ? 'Ethereum Sepolia' : 
-                                 token.includes('Polygon') ? 'Polygon Amoy' : 
-                                 token.toUpperCase() === 'USDC' ? 'EVM' : token;
+              // Handle USDC from testnets or 
+              if ((token as string).includes('USDC')) {
+                const chainName = (token as string).includes('Ethereum') ? 'Ethereum Sepolia' : 
+                                 (token as string).includes('Polygon') ? 'Polygon Amoy' : 
+                                 (token as string).toUpperCase() === 'USDC' ? 'EVM' : token;
                 flattenedBalances[`USDC (${chainName})`] = balanceNum;
                 totalUSDCValue += balanceNum;
                 console.log(`💰 Added USDC from ${chainName}: ${balanceNum}`);
@@ -686,6 +682,53 @@ function AppWithCrossmint() {
     }
   };
 
+  // Handle signup button press in preview mode
+  const handleSignupPress = () => {
+    setShowOnboardingModal(true);
+  };
+
+  // Handle onboarding flow actions
+  const handleOnboardingSignup = async (email?: string) => {
+    setShowOnboardingModal(false);
+
+    if (!email) {
+      setLoginInitialEmail(undefined);
+      setLoginInitialStep('email');
+      setShowLoginModal(true);
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    setLoginInitialEmail(normalizedEmail);
+    setGeneralLoadingMessage('Sending verification code...');
+    setIsLoadingGeneral(true);
+
+    try {
+      const result = await emailAuthService.sendVerificationCode(normalizedEmail);
+
+      if (result.success) {
+        setLoginInitialStep('verification');
+      } else {
+        Alert.alert('Verification Failed', result.error || 'We could not send a verification code. Please try again.');
+        setLoginInitialStep('email');
+      }
+    } catch (error) {
+      console.error('Onboarding verification error:', error);
+      Alert.alert('Network Error', 'We could not reach the server. Please try again.');
+      setLoginInitialStep('email');
+    } finally {
+      setIsLoadingGeneral(false);
+      setShowLoginModal(true);
+    }
+  };
+
+  const handleOnboardingLogin = () => {
+    setShowOnboardingModal(false);
+    setLoginInitialEmail(undefined);
+    setLoginInitialStep('email');
+    setShowLoginModal(true);
+  };
+
   // Fetch wallet balance using provided wallet states (bypasses async React state issues)
   const fetchWalletBalanceWithStates = async (evmConnected: any, aptosConnected: boolean) => {
     setIsLoadingWallet(true);
@@ -708,13 +751,7 @@ function AppWithCrossmint() {
         balanceFetches.push(aptosPromise);
       }
       
-      // 2. Add CrossMint balance fetch promise for staging test address
-      const crossmintPromise = (async () => {
-        console.log('🔷 Fetching CrossMint balance for test address...');
-        const crossmintBalance = await crossmintService.getWalletBalance();
-        return { type: 'evm' as const, balances: crossmintBalance };
-      })();
-      balanceFetches.push(crossmintPromise);
+      // 2.  balance fetch removed - focusing on Aptos only
       
       // 3. Execute all promises in parallel and wait for completion
       if (balanceFetches.length === 0) {
@@ -738,17 +775,17 @@ function AppWithCrossmint() {
           if (type === 'aptos' && balances.success && balances.balances) {
             console.log('✅ Processing Aptos balances:', balances.balances);
             Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance) || 0;
+              const balanceNum = parseFloat(balance as string) || 0;
               
               // Only include USDC from Aptos in portfolio calculation
-              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
+              if ((token as string).includes('USDC') || (token as string).toUpperCase() === 'USDC') {
                 flattenedBalances['USDC (Aptos)'] = balanceNum;
                 totalUSDCValue += balanceNum;
                 console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
               }
               
               // Also include APT for display but not in USDC total
-              if (token.includes('APT') || token.toUpperCase() === 'APT') {
+              if ((token as string).includes('APT') || (token as string).toUpperCase() === 'APT') {
                 flattenedBalances['APT (Aptos)'] = balanceNum;
                 console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
               }
@@ -757,13 +794,13 @@ function AppWithCrossmint() {
           
           if (type === 'evm' && balances.success && balances.balances) {
             console.log('✅ Processing EVM balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance) || 0;
+            Object.entries(balances.balances).forEach(([token, balance]: [string, unknown]) => {
+              const balanceNum = parseFloat(balance as string) || 0;
               
-              // Handle USDC from testnets or CrossMint
+              // Handle USDC from testnets or 
               if (token.includes('USDC')) {
                 const chainName = token.includes('Ethereum') ? 'Ethereum Sepolia' : 
-                                 token.includes('Polygon') ? 'Polygon Amoy' : 
+                                token.includes('Polygon') ? 'Polygon Amoy' : 
                                  token.toUpperCase() === 'USDC' ? 'EVM' : token;
                 flattenedBalances[`USDC (${chainName})`] = balanceNum;
                 totalUSDCValue += balanceNum;
@@ -796,7 +833,7 @@ function AppWithCrossmint() {
     }
   };
 
-  // Combined balance fetching using CrossMint + Aptos in parallel
+  // Combined balance fetching using  + Aptos in parallel
   const fetchCombinedBalances = async () => {
     if (isLoadingWallet) {
       console.log('⚠️ Balance fetch already in progress, skipping...');
@@ -805,17 +842,13 @@ function AppWithCrossmint() {
     
     setIsLoadingWallet(true);
     try {
-      console.log('🔄 Fetching combined CrossMint + Aptos balances in parallel...');
+      console.log('🔄 Fetching combined  + Aptos balances in parallel...');
       
       // Create promises for parallel execution
       const balancePromises: Promise<{type: string, data: any}>[] = [];
       
-      // 1. CrossMint disabled - focus on Aptos only
-      // const crossmintPromise = crossmintService.getWalletBalance().then(result => ({
-      //   type: 'crossmint',
-      //   data: result
-      // }));
-      // balancePromises.push(crossmintPromise);
+      // 1.  removed - focus on Aptos only
+      // balancePromises.push(Promise);
       
       // 2. Add Aptos promise if wallet exists
       if (hasAptosWallet) {
@@ -841,27 +874,7 @@ function AppWithCrossmint() {
         if (result.status === 'fulfilled') {
           const { type, data } = result.value;
           
-          if (type === 'crossmint' && data.success && data.balances) {
-            console.log('✅ Processing CrossMint balances:', data.balances);
-            
-            Object.entries(data.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Handle USDC from CrossMint - only Ethereum
-              if (token.includes('USDC') && token.includes('Ethereum')) {
-                combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from CrossMint: ${balanceNum}`);
-              }
-              
-              // Handle native tokens (ETH, MATIC)
-              if ((token.includes('ETH') || token.includes('MATIC')) && balanceNum > 0) {
-                const tokenSymbol = token.includes('MATIC') ? 'MATIC' : 'ETH';
-                combinedBalances[tokenSymbol] = balanceNum;
-                console.log(`🔷 Added ${tokenSymbol}: ${balanceNum}`);
-              }
-            });
-          }
+          //  balance processing removed
           
           if (type === 'aptos' && data.success && data.balances) {
             console.log('✅ Processing Aptos balances:', data.balances);
@@ -903,12 +916,12 @@ function AppWithCrossmint() {
     }
   };
 
-  // Auto-refresh combined balances when CrossMint balances change
+  // Auto-refresh combined balances when Aptos wallet changes
   useEffect(() => {
-    if (isAuthenticated && (crossmintBalances || hasAptosWallet)) {
+    if (isAuthenticated && hasAptosWallet) {
       fetchCombinedBalances();
     }
-  }, [crossmintBalances, hasAptosWallet, isAuthenticated]);
+  }, [hasAptosWallet, isAuthenticated]);
 
   // REMOVED: handleCreateWallet function - wallet creation now happens at chain level during deposit
   // This prevents creating multiple wallets and ensures consistency with database wallets
@@ -922,15 +935,14 @@ function AppWithCrossmint() {
 
   // Periodic balance refresh when wallet is connected
   useEffect(() => {
-    if ((hasWallet || crossmintBalances) && isAuthenticated) {
+    if (hasWallet && isAuthenticated) {
       const interval = setInterval(() => {
-        refetchCrossmint(); // Refetch CrossMint balances
         fetchCombinedBalances(); // Refetch combined balances
       }, 60000); // Refresh every 60 seconds (less frequent since we have real-time updates)
 
       return () => clearInterval(interval);
     }
-  }, [hasWallet, crossmintBalances, isAuthenticated]);
+  }, [hasWallet, isAuthenticated]);
 
   const checkAuthStatus = async () => {
     try {
@@ -942,6 +954,15 @@ function AppWithCrossmint() {
         if (sessionResult.success && sessionResult.user) {
           setCurrentUser(sessionResult.user);
           setIsAuthenticated(true);
+          
+          // Get and store the auth token for marketplace integration
+          const token = authService.getToken();
+          console.log('🔑 checkAuthStatus: Setting auth token', {
+            hasToken: !!token,
+            tokenLength: token?.length,
+            tokenPrefix: token?.substring(0, 30) + '...'
+          });
+          setAuthToken(token);
           
           // Update profile data from user
           setUserProfile(prev => ({
@@ -961,6 +982,15 @@ function AppWithCrossmint() {
   const handleLoginSuccess = (userData: User) => {
     setCurrentUser(userData);
     setIsAuthenticated(true);
+    
+    // Get and store the auth token for marketplace integration
+    const token = authService.getToken();
+    console.log('🔑 handleLoginSuccess: Setting auth token', {
+      hasToken: !!token,
+      tokenLength: token?.length,
+      tokenPrefix: token?.substring(0, 30) + '...'
+    });
+    setAuthToken(token);
     
     // Update profile data from user
     setUserProfile(prev => ({
@@ -992,6 +1022,7 @@ function AppWithCrossmint() {
       // Clear user data
       setCurrentUser(null);
       setIsAuthenticated(false);
+      setAuthToken(null);
       setUserProfile({
         name: '',
         email: '',
@@ -1341,7 +1372,7 @@ function AppWithCrossmint() {
     }
   };
 
-  const renderWallet = () => {
+  const renderWallet = (previewMode = false) => {
     // Handle sub-screens
     switch (currentWalletScreen) {
       case 'notifications':
@@ -1540,10 +1571,20 @@ function AppWithCrossmint() {
         }
 
       case 'webview':
+        // Debug authentication state before opening marketplace
+        console.log('🔍 Opening MarketplaceWebView with auth state:', {
+          isAuthenticated,
+          hasCurrentUser: !!currentUser,
+          currentUserId: currentUser?.id,
+          hasAuthToken: !!authToken,
+          authTokenLength: authToken?.length,
+          authTokenPrefix: authToken?.substring(0, 30) + '...'
+        });
+        
         return (
           <MarketplaceWebView
             onBack={() => setCurrentWalletScreen('main')}
-            userToken={currentUser?.id} // Pass user token for authentication
+            userToken={authToken || undefined} // Pass JWT token for seamless authentication
             userId={currentUser?.id}
           />
         );
@@ -1558,16 +1599,27 @@ function AppWithCrossmint() {
                 <Typography variant="h3">My Wallet</Typography>
                 {/* <Typography variant="body1" color="textSecondary">Financial hub & services</Typography> */}
               </View>
-              <TouchableOpacity 
-                style={styles.notificationButton}
-                onPress={() => {
-                  setCurrentWalletScreen('notifications');
-                }}
-              >
-                <MaterialIcons name="notifications" size={24} color={Colors.gray600} />
-                {/* Small dot for unread notifications */}
-                <View style={styles.notificationDot} />
-              </TouchableOpacity>
+              {previewMode ? (
+                <TouchableOpacity 
+                  style={styles.signupButton}
+                  onPress={handleSignupPress}
+                >
+                  <Typography variant="h6" style={styles.signupButtonText}>
+                    Sign up
+                  </Typography>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.notificationButton}
+                  onPress={() => {
+                    setCurrentWalletScreen('notifications');
+                  }}
+                >
+                  <MaterialIcons name="notifications" size={24} color={Colors.gray600} />
+                  {/* Small dot for unread notifications */}
+                  <View style={styles.notificationDot} />
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Balance Card */}
@@ -1592,11 +1644,10 @@ function AppWithCrossmint() {
               <Card style={styles.balanceCard}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
                   <Typography variant="caption" color="textSecondary">Total Portfolio</Typography>
-                  {(hasWallet || hasAptosWallet) && (
+                  {!previewMode && (hasWallet || hasAptosWallet) && (
                     <TouchableOpacity onPress={() => {
-                      refetchCrossmint(); // Refetch CrossMint balances
                       fetchCombinedBalances(); // Refetch combined balances
-                    }} disabled={isLoadingWallet || isCrossmintLoading}>
+                    }} disabled={isLoadingWallet}>
                       <MaterialIcons 
                         name="refresh" 
                         size={16} 
@@ -1606,14 +1657,14 @@ function AppWithCrossmint() {
                   )}
                 </View>
                 <Typography variant="h1" align="center" style={{ marginVertical: Spacing.sm }}>
-                  {profileService.formatBalance(totalPortfolioValue)}
+                  {previewMode ? '₦0.00' : profileService.formatBalance(totalPortfolioValue)}
                 </Typography>
                 <Typography variant="body2" color="textSecondary" align="center">
                   Total USDC Balance
                 </Typography>
                 
                 {/* Show empty state only when no balance */}
-                {!(hasWallet || hasAptosWallet) || Object.keys(walletBalance).length === 0 ? (
+                {!previewMode && (!(hasWallet || hasAptosWallet) || Object.keys(walletBalance).length === 0) ? (
                   <View style={{ marginTop: Spacing.lg, alignItems: 'center' }}>
                     <Typography variant="body2" color="textSecondary" align="center" style={{ marginBottom: Spacing.sm }}>
                       {(hasWallet || hasAptosWallet) ? 'Your wallet is empty' : 'Create a wallet to get started'}
@@ -1631,7 +1682,7 @@ function AppWithCrossmint() {
               <Button 
                 title="Deposit" 
                 icon="add" 
-                onPress={() => {
+                onPress={previewMode ? handleSignupPress : () => {
                   if (simulateError('payment', 'Deposit service temporarily unavailable')) {
                     return;
                   }
@@ -1639,43 +1690,49 @@ function AppWithCrossmint() {
                   setTimeout(() => setShowDepositFlow(true), 1500);
                 }}
                 style={{ flex: 1 }}
+                disabled={previewMode}
               />
               <Button 
                 title="Send" 
                 icon="send" 
                 variant="outline"
-                onPress={() => {
+                onPress={previewMode ? handleSignupPress : () => {
                   simulateLoading(setIsLoadingGeneral, 1000, 'Loading contacts...');
                   setTimeout(() => setShowP2PSend(true), 1000);
                 }} 
                 style={{ flex: 1 }}
+                disabled={previewMode}
               />
               <Button 
                 title="Scan" 
                 icon="qr-code-scanner" 
                 variant="outline"
-                onPress={() => setShowQRScanner(true)} 
+                onPress={previewMode ? handleSignupPress : () => setShowQRScanner(true)} 
                 style={{ flex: 1 }}
+                disabled={previewMode}
               />
             </View>
+
 
             {/* Portfolio Quick Access */}
             <View style={styles.portfolioSection}>
               <Typography variant="h6" style={{ marginBottom: Spacing.md }}>Portfolio</Typography>
               <View style={styles.portfolioGrid}>
                 <TouchableOpacity 
-                  style={styles.portfolioItem}
-                  onPress={() => setCurrentWalletScreen('tokens')}
+                  style={[styles.portfolioItem, previewMode && styles.disabledItem]}
+                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('tokens')}
+                  disabled={previewMode}
                 >
-                  <MaterialIcons name="toll" size={24} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.portfolioLabel}>Tokens</Typography>
+                  <MaterialIcons name="toll" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
+                  <Typography variant="caption" style={[styles.portfolioLabel, previewMode && { color: Colors.gray400 }]}>Tokens</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.portfolioItem}
-                  onPress={() => setCurrentWalletScreen('webview')}
+                  style={[styles.portfolioItem, previewMode && styles.disabledItem]}
+                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('webview')}
+                  disabled={previewMode}
                 >
-                  <MaterialIcons name="home" size={24} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.portfolioLabel}>Properties</Typography>
+                  <MaterialIcons name="home" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
+                  <Typography variant="caption" style={[styles.portfolioLabel, previewMode && { color: Colors.gray400 }]}>Properties</Typography>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1685,29 +1742,36 @@ function AppWithCrossmint() {
               <Typography variant="h6" style={{ marginBottom: Spacing.md }}>Financial Services</Typography>
               <View style={styles.servicesGrid}>
                 <TouchableOpacity style={styles.serviceItem} disabled>
-                  <MaterialIcons name="currency-exchange" size={24} color={Colors.gray400} />
-                  <Typography variant="caption" color="textSecondary">Swap/FX</Typography>
+                  <MaterialIcons name="trending-up" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Stake</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.serviceItem}
-                  onPress={() => setCurrentWalletScreen('lending')}
+                  style={[styles.serviceItem, previewMode && styles.disabledItem]}
+                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('lending')}
+                  disabled={previewMode}
                 >
-                  <MaterialIcons name="handshake" size={24} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.serviceLabel}>Lending</Typography>
+                  <MaterialIcons name="handshake" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
+                  <Typography variant="caption" style={[styles.serviceLabel, previewMode && { color: Colors.gray400 }]}>Lending</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.serviceItem}
-                  onPress={() => setCurrentWalletScreen('marketplace')}
+                  style={[styles.serviceItem, previewMode && styles.disabledItem]}
+                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('marketplace')}
+                  disabled={previewMode}
                 >
-                  <MaterialIcons name="currency-exchange" size={24} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.serviceLabel}>FX Market</Typography>
+                  <MaterialIcons name="currency-exchange" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
+                  <Typography variant="caption" style={[styles.serviceLabel, previewMode && { color: Colors.gray400 }]}>FX Market</Typography>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.serviceItem}
-                  onPress={() => setCurrentWalletScreen('webview')}
-                >
-                  <MaterialIcons name="home-work" size={24} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.serviceLabel}>Properties</Typography>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="credit-card" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Cards</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="flight" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Flight</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="whatshot" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Fire test</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.serviceItem} disabled>
                   <MaterialIcons name="savings" size={24} color={Colors.gray400} />
@@ -1747,6 +1811,22 @@ function AppWithCrossmint() {
                 <TouchableOpacity style={styles.serviceItem} disabled>
                   <MaterialIcons name="payment" size={24} color={Colors.gray400} />
                   <Typography variant="caption" color="textSecondary">Bill Pay</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="restaurant" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Food</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="favorite" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Charity</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="travel-explore" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Travel</Typography>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.serviceItem} disabled>
+                  <MaterialIcons name="hotel" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" color="textSecondary">Hotels</Typography>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2037,10 +2117,6 @@ function AppWithCrossmint() {
                   setSelectedContact({
                     id: request.sender._id,
                     name: request.sender.name,
-                    status: 'online',
-                    lastMessage: '',
-                    timestamp: '',
-                    unreadCount: 0,
                     avatar: undefined,
                     friendRequestId: request._id,
                     isFriendRequest: true
@@ -2192,7 +2268,7 @@ function AppWithCrossmint() {
                     <Button
                       title="Invite"
                       variant="outline"
-                      size="small"
+                      size="sm"
                       onPress={() => handleInviteContact(contact)}
                       style={styles.inviteButton}
                     />
@@ -2314,10 +2390,10 @@ function AppWithCrossmint() {
         // Debug the complete response structure
         console.log('🔍 Complete response structure:', JSON.stringify(response, null, 2));
         
-        // Backend returns { message, post }, so we need response.data.post
-        const postData = response.data?.post || response.data;
+        // Backend returns { message, post } or just the post directly
+        const postData = response.data;
         console.log('📝 Raw post data from backend:', {
-          hasPost: !!response.data?.post,
+          hasPost: !!response.data,
           postData: postData,
           postKeys: postData ? Object.keys(postData) : null,
           authorName: postData?.author?.name || postData?.authorName,
@@ -2437,10 +2513,6 @@ function AppWithCrossmint() {
               setSelectedContact({
                 id: userId,
                 name: userName,
-                status: 'online', // Default status
-                lastMessage: '',
-                timestamp: '',
-                unreadCount: 0,
                 avatar: undefined
               });
               setShowContactProfile(true);
@@ -2571,25 +2643,39 @@ function AppWithCrossmint() {
               onRefresh={() => loadPosts(true)}
               colors={[Colors.primary]}
               tintColor={Colors.primary}
+              progressViewOffset={10}
+              progressBackgroundColor={Colors.surface}
+              title="Pull to refresh"
+              titleColor={Colors.secondary}
             />
           }
         >
           <View style={styles.header}>
             <Typography variant="h2">Moments</Typography>
+            {!isLoadingMoments && !refreshingMoments && (
+              <Typography variant="caption" color="textSecondary" style={styles.refreshHint}>
+                Pull down to refresh
+              </Typography>
+            )}
           </View>
           
           {momentsError ? (
-            <ErrorMessage
-              title="Failed to load moments"
-              message={momentsError}
-              actionLabel="Retry"
-              onAction={() => {
-                setMomentsError(null);
-                loadPosts();
-              }}
-              onDismiss={() => setMomentsError(null)}
-            />
-          ) : isLoadingMoments ? (
+            <View style={styles.errorContainer}>
+              <ErrorMessage
+                title="Failed to load moments"
+                message={momentsError}
+                actionLabel="Retry"
+                onAction={() => {
+                  setMomentsError(null);
+                  loadPosts();
+                }}
+                onDismiss={() => setMomentsError(null)}
+              />
+              <Typography variant="caption" color="textSecondary" style={styles.pullToRefreshText}>
+                Pull down to refresh instead
+              </Typography>
+            </View>
+          ) : isLoadingMoments && !refreshingMoments ? (
             <View>
               {[1, 2, 3].map((i) => (
                 <SkeletonCard key={i} />
@@ -2669,6 +2755,7 @@ function AppWithCrossmint() {
             onSetPin={() => setCurrentMeScreen('setPin')}
             onWalletSettings={() => setCurrentMeScreen('walletSettings')}
             onPrivacySettings={() => setCurrentMeScreen('privacySettings')}
+            onBlockedUsers={() => setCurrentMeScreen('blockedUsers')}
             onSendFeedback={() => setCurrentMeScreen('sendFeedback')}
             onAbout={() => setCurrentMeScreen('about')}
             onLogout={handleLogout}
@@ -2710,6 +2797,13 @@ function AppWithCrossmint() {
       case 'privacySettings':
         return (
           <PrivacySettingsScreen
+            onBack={() => setCurrentMeScreen('settings')}
+          />
+        );
+      
+      case 'blockedUsers':
+        return (
+          <BlockedUsersScreen
             onBack={() => setCurrentMeScreen('settings')}
           />
         );
@@ -2757,6 +2851,7 @@ function AppWithCrossmint() {
               trustLevel={4}
               showQRIcon={true}
               onQRPress={() => setCurrentMeScreen('qrCode')}
+              style={{ marginTop: -5 }}
             />
 
             <View style={styles.section}>
@@ -2846,17 +2941,97 @@ function AppWithCrossmint() {
             });
             setSelectedChat(conversation);
           }}
+          onAvatarPress={async (conversation) => {
+            console.log('👤 User clicked avatar for conversation:', conversation.name);
+            
+            // For group chats, we don't show individual profiles
+            if (conversation.isGroup) {
+              console.log('Group chat avatar clicked - no profile to show');
+              return;
+            }
+            
+            try {
+              setIsLoadingGeneral(true);
+              
+              // Extract the other user's ID from the conversation ID
+              // Conversation ID format: "userId1_userId2"
+              const participantIds = conversation.id.includes('_') ? conversation.id.split('_') : [conversation.id];
+              const currentUserId = currentUser?.id || '';
+              const otherUserId = participantIds.find(id => id !== currentUserId);
+              
+              if (!otherUserId) {
+                console.error('Unable to identify other user from conversation ID:', conversation.id);
+                return;
+              }
+              
+              console.log('👤 Getting profile for user ID:', otherUserId);
+              
+              // Get user profile using the correct Firebase UID
+              const userProfileResult = await profileService.getUserProfile(otherUserId);
+              
+              if (userProfileResult.success && userProfileResult.profile) {
+                setSelectedContact({
+                  name: userProfileResult.profile.name,
+                  id: userProfileResult.profile.id,
+                  avatar: userProfileResult.profile.avatar
+                });
+                setShowContactProfile(true);
+              } else {
+                console.log('No profile found for user ID:', otherUserId);
+              }
+            } catch (error) {
+              console.error('Error fetching user profile:', error);
+            } finally {
+              setIsLoadingGeneral(false);
+            }
+          }}
           onPin={(conversationId) => {
             console.log('Pin conversation:', conversationId);
             // Update conversation pin status
           }}
           onHide={(conversationId) => {
-            console.log('Hide conversation:', conversationId);
+            // TODO: Implement hide feature later
+            // console.log('Hide conversation:', conversationId);
             // Hide conversation
           }}
           onDelete={(conversationId) => {
-            console.log('Delete conversation:', conversationId);
-            // Delete conversation
+            Alert.alert(
+              "Delete Conversation",
+              "Are you sure you want to delete this conversation? This action cannot be undone.",
+              [
+                {
+                  text: "Cancel",
+                  style: "cancel"
+                },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      setIsLoadingGeneral(true);
+                      await chatService.deleteConversation(conversationId);
+                      // Remove the conversation from the local state
+                      setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+                      Toast.show({
+                        type: 'success',
+                        text1: 'Conversation deleted successfully',
+                        position: 'bottom'
+                      });
+                    } catch (error) {
+                      console.error('Failed to delete conversation:', error);
+                      Toast.show({
+                        type: 'error',
+                        text1: 'Failed to delete conversation',
+                        text2: 'Please try again later',
+                        position: 'bottom'
+                      });
+                    } finally {
+                      setIsLoadingGeneral(false);
+                    }
+                  }
+                }
+              ]
+            );
           }}
           onCreateGroup={() => setShowCreateGroup(true)}
           onAddContact={() => {
@@ -2864,7 +3039,7 @@ function AppWithCrossmint() {
             setActiveTab('contact');
             setCurrentContactScreen('add');
           }}
-          userBricksCount={currentUser?.bricks || 0}
+          userBricksCount={0}
         />
       </View>
     );
@@ -3057,7 +3232,6 @@ function AppWithCrossmint() {
           chatName={selectedChat.name}
           chatAvatar={selectedChat.avatar}
           isOnline={selectedChat.isOnline}
-          currentUser={currentUser}
           isGroup={selectedChat.isGroup}
           onBack={() => {
             console.log('🔙 User navigating back from chat:', selectedChat.name);
@@ -3128,23 +3302,57 @@ function AppWithCrossmint() {
             Loading...
           </Typography>
         </SafeAreaView>
+        <Toast />
       </SafeAreaProvider>
     );
   }
 
-  // Show login screen if not authenticated
+  // Show wallet preview if not authenticated
   if (!isAuthenticated) {
     return (
-      <SafeAreaProvider>
-        <LoginScreen onLoginSuccess={handleLoginSuccess} />
-      </SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <NotificationProvider>
+          <SafeAreaProvider>
+            <SafeAreaView style={styles.container}>
+              {/* Render wallet in preview mode */}
+              {renderWallet(true)}
+              
+              {/* Onboarding Modal */}
+              <OnboardingModal
+                visible={showOnboardingModal}
+                onClose={() => setShowOnboardingModal(false)}
+                onSignup={handleOnboardingSignup}
+                onLogin={handleOnboardingLogin}
+                onAppleSignup={() => {
+                  // Apple sign-in logic would go here
+                  console.log('Apple sign-in pressed');
+                  handleOnboardingSignup();
+                }}
+                onGoogleSignup={() => {
+                  // Google sign-in logic would go here
+                  console.log('Google sign-in pressed');
+                }}
+              />
+              
+              {/* Login Modal (slide-in) */}
+              <LoginScreen 
+                visible={showLoginModal}
+                onClose={() => {
+                  setShowLoginModal(false);
+                  setLoginInitialStep('email');
+                }}
+                onLoginSuccess={handleLoginSuccess}
+                initialEmail={loginInitialEmail}
+              />
+            </SafeAreaView>
+          </SafeAreaProvider>
+        </NotificationProvider>
+      </QueryClientProvider>
     );
   }
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Temporarily disable CrossmintProviders due to SecureStore web compatibility issues */}
-      {/* <CrossmintProviders> */}
         <NotificationProvider>
         <ErrorBoundary
           onError={(error, errorInfo) => {
@@ -3310,6 +3518,7 @@ function AppWithCrossmint() {
                 name: group.name,
                 description: group.description,
                 privacy: group.privacy,
+                hasAvatar: !!group.avatar
               });
 
               // Create group conversation in Firebase
@@ -3317,7 +3526,8 @@ function AppWithCrossmint() {
                 participantIds,
                 true, // isGroup
                 group.name,
-                group.description
+                group.description,
+                group.avatar // Pass the avatar to Firebase
               );
 
               console.log('✅ Group created successfully with ID:', groupId);
@@ -3330,7 +3540,7 @@ function AppWithCrossmint() {
                   {
                     _id: currentUserSession.user.id,
                     name: currentUserSession.user.name || 'Admin',
-                    avatar: currentUserSession.user.avatar || null,
+                    avatar: currentUserSession.user.avatar || undefined,
                   },
                   undefined, // no specific recipient for group messages
                   'text'
@@ -3349,7 +3559,7 @@ function AppWithCrossmint() {
                 timestamp: new Date(),
                 unreadCount: 0,
                 isGroup: true,
-                avatar: undefined, // Groups don't have avatars by default
+                avatar: group.avatar, // Use the group avatar
                 isOnline: false,
                 isPinned: false,
               };
@@ -3481,16 +3691,15 @@ function AppWithCrossmint() {
     </SafeAreaProvider>
     </ErrorBoundary>
   </NotificationProvider>
-  {/* </CrossmintProviders> */}
   </QueryClientProvider>
   );
 }
 
-// Main App wrapper with providers
-export default function App() {
+// Export the main App component with providers
+export default function AppWrapper() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppWithCrossmint />
+      <App />
     </QueryClientProvider>
   );
 }
@@ -3503,6 +3712,11 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: Spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: Spacing.sm,
   },
   
   // Header
@@ -3537,6 +3751,21 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.error,
+  },
+  signupButton: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signupButtonText: {
+    color: Colors.background,
+    fontWeight: '600',
+  },
+  disabledItem: {
+    opacity: 0.5,
   },
   
   // Cards
@@ -4065,19 +4294,23 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: Spacing.lg,
   },
+  refreshHint: {
+    marginTop: Spacing.xs,
+    textAlign: 'center',
+  },
+  errorContainer: {
+    marginBottom: Spacing.md,
+  },
+  pullToRefreshText: {
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+  },
   
   // Tab Bar
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.background,
     paddingVertical: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray200,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
   },
   tabItem: {
     flex: 1,

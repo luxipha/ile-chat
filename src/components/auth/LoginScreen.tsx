@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
+  Modal,
   ScrollView,
   TextInput,
   StyleSheet,
@@ -8,44 +9,52 @@ import {
   Keyboard,
   Alert,
   Animated,
+  Dimensions,
+  Easing,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
-import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { Button } from '../ui/Button';
 import { ValidationError } from '../ui/ErrorMessage';
 import { Colors, Spacing, BorderRadius } from '../../theme';
-import { validateEmail, validatePassword } from '../../utils/validation';
+import { validateEmail } from '../../utils/validation';
 import emailAuthService from '../../services/emailAuthService';
 import { User } from '../../services/authService';
 
 interface LoginScreenProps {
   onLoginSuccess: (userData: User) => void;
+  onClose?: () => void;
+  visible?: boolean;
+  initialEmail?: string;
 }
 
 type LoginStep = 'email' | 'verification' | 'complete';
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
-  const [step, setStep] = useState<LoginStep>('email');
+export const LoginScreen: React.FC<LoginScreenProps> = ({ 
+  onLoginSuccess, 
+  onClose,
+  visible = true,
+  initialEmail,
+}) => {
+  const [step, setStep] = useState<LoginStep>('verification');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [verificationCode, setVerificationCode] = useState(['', '', '', '', '', '']);
   const [emailError, setEmailError] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isResending, setIsResending] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [isNewUser, setIsNewUser] = useState<boolean | null>(null);
   const [countdown, setCountdown] = useState(0);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
   
   const emailInputRef = useRef<TextInput>(null);
-  const passwordInputRef = useRef<TextInput>(null);
-  const nameInputRef = useRef<TextInput>(null);
   const codeInputRefs = useRef<(TextInput | null)[]>([]);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const modalSlideAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (countdown > 0) {
@@ -54,11 +63,61 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
   }, [countdown]);
 
+  // Handle modal slide-in animation
+  useEffect(() => {
+    if (visible) {
+      modalSlideAnim.setValue(0);
+      Animated.timing(modalSlideAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    if (initialEmail) {
+      const normalized = initialEmail.trim().toLowerCase();
+      setEmail(normalized);
+      setEmailError(null);
+    }
+
+    if (step !== 'verification') {
+      animateStepTransition();
+      setStep('verification');
+    }
+    setCountdown(60);
+    setTimeout(() => {
+      codeInputRefs.current[0]?.focus();
+    }, 300);
+  }, [visible, initialEmail]);
+
+
   const animateStepTransition = () => {
+    // Smoother animation with better timing
     Animated.sequence([
-      Animated.timing(fadeAnim, { duration: 150, toValue: 0, useNativeDriver: true }),
-      Animated.timing(slideAnim, { duration: 200, toValue: 1, useNativeDriver: true }),
-      Animated.timing(fadeAnim, { duration: 150, toValue: 1, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { 
+        duration: 200, 
+        toValue: 0, 
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease)
+      }),
+      Animated.timing(slideAnim, { 
+        duration: 250, 
+        toValue: 1, 
+        useNativeDriver: true,
+        easing: Easing.inOut(Easing.ease)
+      }),
+      Animated.timing(fadeAnim, { 
+        duration: 200, 
+        toValue: 1, 
+        useNativeDriver: true,
+        easing: Easing.in(Easing.ease)
+      }),
     ]).start(() => {
       slideAnim.setValue(0);
     });
@@ -75,18 +134,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setEmailError(null);
     setIsLoading(true);
     
+    // Start transition immediately to improve perceived performance
+    animateStepTransition();
+    setStep('verification');
+    
     try {
+      // Focus first code input immediately
+      codeInputRefs.current[0]?.focus();
+      
+      // Send verification code in parallel with animation
       const result = await emailAuthService.sendVerificationCode(email.trim().toLowerCase());
       
       if (result.success) {
-        animateStepTransition();
-        setStep('verification');
         setCountdown(60);
-        
-        // Focus first code input
-        setTimeout(() => {
-          codeInputRefs.current[0]?.focus();
-        }, 300);
       } else {
         setEmailError(result.error || 'Failed to send verification code');
       }
@@ -108,7 +168,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
+    // Dismiss keyboard to improve user experience
+    Keyboard.dismiss();
     setIsLoading(true);
+    
     try {
       const result = await emailAuthService.verifyCodeAndAuth(codeString);
       
@@ -118,17 +181,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         animateStepTransition();
         setStep('complete');
         
+        // Reduce the delay for a smoother experience
         setTimeout(() => {
           onLoginSuccess(result.user!);
-        }, 2000);
+        }, 1000);
       } else {
-        Alert.alert('Verification Failed', result.error || 'Invalid verification code.');
+        // More specific error message
+        const errorMessage = result.error || 'Invalid verification code. Please check your email and try again.';
+        Alert.alert('Verification Failed', errorMessage);
+        
+        // Clear code and refocus first input for better UX
         setVerificationCode(['', '', '', '', '', '']);
-        codeInputRefs.current[0]?.focus();
+        setTimeout(() => {
+          codeInputRefs.current[0]?.focus();
+        }, 100);
       }
     } catch (error) {
       console.error('Verification error:', error);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      Alert.alert(
+        'Connection Error', 
+        'We couldn\'t connect to our servers. Please check your internet connection and try again.'
+      );
+      // Don't clear the code on network errors so user can retry
     } finally {
       setIsLoading(false);
     }
@@ -136,6 +210,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
 
   const handleCodeChange = (value: string, index: number) => {
+    // Only accept digits
+    if (value && !/^\d+$/.test(value)) {
+      return;
+    }
+    
     const newCode = [...verificationCode];
     newCode[index] = value;
     setVerificationCode(newCode);
@@ -147,7 +226,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     // Auto-submit when all digits are entered
     if (value && index === 5 && newCode.every(digit => digit !== '')) {
-      handleVerificationSubmit(newCode);
+      // Add a small delay to allow UI to update before submission
+      setTimeout(() => {
+        handleVerificationSubmit(newCode);
+      }, 300);
     }
   };
 
@@ -160,7 +242,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const handleResendCode = async () => {
     if (countdown > 0) return;
     
-    setIsResending(true);
     try {
       const result = await emailAuthService.resendVerificationCode();
       if (result.success) {
@@ -172,21 +253,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     } catch (error) {
       console.error('Resend error:', error);
       Alert.alert('Error', 'Failed to resend code. Please try again.');
-    } finally {
-      setIsResending(false);
     }
   };
 
   const handleBackToEmail = () => {
     emailAuthService.clearSession();
-    animateStepTransition();
-    setStep('email');
-    setVerificationCode(['', '', '', '', '', '']);
-    setEmailError(null);
-    setCountdown(0);
-    setTimeout(() => {
-      emailInputRef.current?.focus();
-    }, 300);
+    
+    // Animate slide down first, then change step
+    Animated.timing(modalSlideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+      easing: Easing.inOut(Easing.ease)
+    }).start(() => {
+      // After animation completes, change step
+      setStep('email');
+      setVerificationCode(['', '', '', '', '', '']);
+      setEmailError(null);
+      setCountdown(0);
+      
+      // Then slide back up with the email step
+      modalSlideAnim.setValue(0);
+      Animated.timing(modalSlideAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+        easing: Easing.inOut(Easing.ease)
+      }).start(() => {
+        emailInputRef.current?.focus();
+      });
+    });
   };
 
   const handleGoogleSignIn = async () => {
@@ -284,7 +380,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   );
 
   const renderVerificationStep = () => (
-    <View style={styles.stepContainer}>
+    <ScrollView 
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={[styles.scrollContent, styles.verificationContent]}
+    >
       <TouchableOpacity style={styles.backButton} onPress={handleBackToEmail}>
         <MaterialIcons name="arrow-back" size={24} color={Colors.gray700} />
       </TouchableOpacity>
@@ -310,10 +409,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           {verificationCode.map((digit, index) => (
             <TextInput
               key={index}
-              ref={(ref) => (codeInputRefs.current[index] = ref)}
+              ref={(ref: TextInput | null) => {
+                if (ref) codeInputRefs.current[index] = ref;
+              }}
               style={[
                 styles.codeInput,
-                digit && styles.codeInputFilled
+                digit ? styles.codeInputFilled : null
               ]}
               value={digit}
               onChangeText={(value) => handleCodeChange(value.slice(-1), index)}
@@ -333,7 +434,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       <TouchableOpacity
         style={styles.resendButton}
         onPress={handleResendCode}
-        disabled={countdown > 0 || isResending}
+        disabled={countdown > 0}
       >
         <Typography 
           variant="body2" 
@@ -342,20 +443,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         >
           {countdown > 0 
             ? `Resend code in ${countdown}s` 
-            : isResending 
-              ? "Sending..." 
-              : "Didn't receive code? Resend"
+            : "Didn't receive code? Resend"
           }
         </Typography>
       </TouchableOpacity>
 
       <Button
-        title={isLoading ? "Verifying..." : "Verify"}
+        title={isLoading ? "Verifying..." : "Verify Code"}
         onPress={() => handleVerificationSubmit()}
-        disabled={verificationCode.some(digit => digit === '') || isLoading}
+        disabled={verificationCode.some(digit => !digit) || isLoading}
         style={styles.verifyButton}
+        loading={isLoading}
       />
-    </View>
+    </ScrollView>
   );
 
   const renderCompleteStep = () => (
@@ -382,43 +482,102 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   const renderCurrentStep = () => {
     switch (step) {
-      case 'email': return renderEmailStep();
       case 'verification': return renderVerificationStep();
       case 'complete': return renderCompleteStep();
-      default: return renderEmailStep();
+      default: return renderVerificationStep();
     }
   };
 
+  const { height } = Dimensions.get('window');
+
   return (
-    <View style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+    <Modal
+      visible={visible}
+      animationType="none"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <Animated.View 
+        style={[
+          styles.modalContainer,
+          {
+            transform: [{
+              translateY: modalSlideAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [height, 0],
+              })
+            }]
+          }
+        ]}
       >
-        <Animated.View 
-          style={[
-            styles.content,
-            {
-              opacity: fadeAnim,
-              transform: [{
-                translateX: slideAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, -20],
-                })
-              }]
-            }
-          ]}
-        >
-          {renderCurrentStep()}
-        </Animated.View>
-      </ScrollView>
-    </View>
+        {/* Close button */}
+        {onClose && (
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <MaterialIcons name="close" size={24} color={Colors.gray700} />
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.container}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Animated.View 
+              style={[
+                styles.content,
+                {
+                  opacity: fadeAnim,
+                  transform: [{
+                    translateX: slideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -20],
+                    })
+                  }]
+                }
+              ]}
+            >
+              {renderCurrentStep()}
+            </Animated.View>
+          </ScrollView>
+        </View>
+      </Animated.View>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  modalContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    marginTop: 60, // Leave space at top
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xl,
+  },
+  verificationContent: {
+    paddingTop: 0, // Remove top padding completely
+    paddingBottom: 200, // Add bottom padding to push content up
+    justifyContent: 'flex-start',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: Spacing.lg,
+    right: Spacing.lg,
+    zIndex: 1,
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,

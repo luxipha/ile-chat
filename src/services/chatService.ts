@@ -13,10 +13,13 @@ import {
   getDocs,
   getDoc,
   startAfter,
+  writeBatch,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Conversation } from '../components/chat/ConversationList';
 import { apiClient } from './api';
+import { API_BASE_URL } from '../config/apiConfig';
 import profileService from './profileService';
 import { StickerData } from '../types/sticker';
 
@@ -42,6 +45,7 @@ export interface ChatMessage {
     avatar?: string;
   };
   type?: string;
+  imageUrl?: string; // Add imageUrl for image messages
   paymentData?: {
     amount: number;
     currency: string;
@@ -286,7 +290,7 @@ const chatService = {
     });
 
     const messageData = {
-      text: sticker.emoji || sticker.title || sticker.name, // Use emoji, title, or name as fallback
+      text: sticker.title || sticker.name || '🎭 Sticker', // Use title, name, or fallback text
       createdAt: serverTimestamp(),
       user: sender,
       type: 'sticker',
@@ -308,7 +312,7 @@ const chatService = {
     try {
       await updateDoc(conversationRef, {
         lastMessage: {
-          text: `${sticker.emoji} Sticker`, // Show "🎉 Sticker" in conversation list
+          text: '[sticker]', // Show generic sticker text in conversation list
           createdAt: serverTimestamp(),
           senderId: sender._id,
         },
@@ -331,7 +335,7 @@ const chatService = {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           lastMessage: {
-            text: `${sticker.emoji} Sticker`,
+            text: '[sticker]',
             createdAt: serverTimestamp(),
             senderId: sender._id,
           },
@@ -360,6 +364,7 @@ const chatService = {
           createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
           user: data.user,
           type: data.type || 'text', // Include message type
+          imageUrl: data.imageUrl, // Include imageUrl for image messages
           paymentData: data.paymentData ? {
             ...data.paymentData,
             // Ensure all required fields are present
@@ -376,6 +381,12 @@ const chatService = {
             emoji: data.stickerData.emoji,
             name: data.stickerData.name,
             category: data.stickerData.category,
+            // GIPHY sticker fields
+            url: data.stickerData.url,
+            previewUrl: data.stickerData.previewUrl,
+            width: data.stickerData.width,
+            height: data.stickerData.height,
+            title: data.stickerData.title,
           } : undefined,
         };
       });
@@ -390,13 +401,16 @@ const chatService = {
    * @param participants Array of user IDs to include in the conversation
    * @param isGroup Whether this is a group conversation
    * @param name Optional name for the conversation (required for groups)
+   * @param description Optional description for the conversation
+   * @param avatar Optional avatar URL for the conversation
    */
-  createConversation: async (participants: string[], isGroup: boolean = false, name?: string, description?: string) => {
+  createConversation: async (participants: string[], isGroup: boolean = false, name?: string, description?: string, avatar?: string) => {
     console.log('🔄 ChatService: Creating conversation...', {
       participantCount: participants.length,
       isGroup,
       name,
-      hasDescription: !!description
+      hasDescription: !!description,
+      hasAvatar: !!avatar
     });
     
     const conversationData = {
@@ -404,6 +418,7 @@ const chatService = {
       type: isGroup ? 'group' : 'direct', // Use 'type' to match existing structure
       name: name || '',
       description: description || '',
+      avatar: avatar || undefined, // Add avatar field
       createdBy: participants[0], // Store the creator
       admins: isGroup ? [participants[0]] : [], // Creator is initial admin for groups
       createdAt: serverTimestamp(),
@@ -1218,6 +1233,570 @@ const chatService = {
     } catch (error) {
       console.error('❌ Failed to invite users to group:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Clears all messages from a conversation
+   * @param conversationId The ID of the conversation to clear
+   * @returns Promise that resolves when all messages are cleared
+   */
+  clearMessages: async (conversationId: string): Promise<void> => {
+    try {
+      console.log('🗑️ ChatService: Clearing all messages for conversation:', conversationId);
+      
+      // Get all messages in the conversation
+      const messagesRef = messagesCollection(conversationId);
+      const snapshot = await getDocs(messagesRef);
+      
+      if (snapshot.empty) {
+        console.log('ℹ️ No messages to clear for conversation:', conversationId);
+        return;
+      }
+      
+      console.log(`🗑️ Found ${snapshot.size} messages to delete`);
+      
+      // Delete all messages in batches (Firestore has a limit of 500 operations per batch)
+      const batchSize = 500;
+      const batches: any[] = [];
+      let currentBatch = writeBatch(db);
+      let currentBatchSize = 0;
+      
+      snapshot.docs.forEach((messageDoc) => {
+        currentBatch.delete(messageDoc.ref);
+        currentBatchSize++;
+        
+        if (currentBatchSize === batchSize) {
+          batches.push(currentBatch);
+          currentBatch = writeBatch(db);
+          currentBatchSize = 0;
+        }
+      });
+      
+      // Add the remaining batch if it has any operations
+      if (currentBatchSize > 0) {
+        batches.push(currentBatch);
+      }
+      
+      // Execute all batches
+      for (const batch of batches) {
+        await batch.commit();
+      }
+      
+      // Update the conversation's last message to indicate it was cleared
+      const conversationRef = doc(db, 'conversations', conversationId);
+      await updateDoc(conversationRef, {
+        lastMessage: {
+          text: 'Messages cleared',
+          createdAt: serverTimestamp(),
+          senderId: 'system',
+        },
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log('✅ ChatService: Successfully cleared all messages from conversation:', conversationId);
+      
+    } catch (error) {
+      console.error('❌ Failed to clear messages:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Deletes a conversation and all its messages
+   * @param conversationId The ID of the conversation to delete
+   * @returns Promise that resolves when the conversation is deleted
+   */
+  deleteConversation: async (conversationId: string): Promise<void> => {
+    try {
+      console.log('🗑️ ChatService: Deleting conversation:', conversationId);
+      
+      // First, delete all messages in the conversation
+      const messagesRef = messagesCollection(conversationId);
+      const snapshot = await getDocs(messagesRef);
+      
+      if (!snapshot.empty) {
+        console.log(`🗑️ Deleting ${snapshot.size} messages`);
+        
+        // Delete messages in batches (Firestore has a limit of 500 operations per batch)
+        const batchSize = 500;
+        const batches: any[] = [];
+        let currentBatch = writeBatch(db);
+        let currentBatchSize = 0;
+        
+        snapshot.docs.forEach((messageDoc) => {
+          currentBatch.delete(messageDoc.ref);
+          currentBatchSize++;
+          
+          if (currentBatchSize === batchSize) {
+            batches.push(currentBatch);
+            currentBatch = writeBatch(db);
+            currentBatchSize = 0;
+          }
+        });
+        
+        // Add the remaining batch if it has any operations
+        if (currentBatchSize > 0) {
+          batches.push(currentBatch);
+        }
+        
+        // Execute all batches
+        for (const batch of batches) {
+          await batch.commit();
+        }
+      }
+      
+      // Then delete the conversation document itself
+      const conversationRef = doc(db, 'conversations', conversationId);
+      await deleteDoc(conversationRef);
+      
+      console.log('✅ ChatService: Successfully deleted conversation:', conversationId);
+      
+    } catch (error) {
+      console.error('❌ Failed to delete conversation:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Blocks a user
+   * @param userId The ID of the user to block
+   * @param currentUserId The ID of the current user doing the blocking
+   * @returns Promise that resolves when user is blocked
+   */
+  blockUser: async (userId: string, currentUserId: string): Promise<void> => {
+    try {
+      console.log('🚫 ChatService: Blocking user:', userId, 'by:', currentUserId);
+      
+      // Create or update a blocked users collection for the current user
+      const blockedUsersRef = collection(db, 'users', currentUserId, 'blockedUsers');
+      const blockDoc = doc(blockedUsersRef, userId);
+      
+      await setDoc(blockDoc, {
+        userId: userId,
+        blockedAt: serverTimestamp(),
+        blockedBy: currentUserId,
+      });
+      
+      // Also block them in the conversations - prevent new messages
+      const conversationId = createConversationId(currentUserId, userId);
+      const conversationRef = doc(db, 'conversations', conversationId);
+      
+      // Check if conversation exists
+      const conversationDoc = await getDoc(conversationRef);
+      if (conversationDoc.exists()) {
+        await updateDoc(conversationRef, {
+          [`blockedBy.${currentUserId}`]: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      
+      console.log('✅ ChatService: Successfully blocked user:', userId);
+      
+    } catch (error) {
+      console.error('❌ Failed to block user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Reports a user for inappropriate behavior
+   * @param userId The ID of the user to report
+   * @param currentUserId The ID of the current user making the report
+   * @param reason The reason for reporting
+   * @param additionalInfo Optional additional information
+   * @returns Promise that resolves when report is submitted
+   */
+  reportUser: async (userId: string, currentUserId: string, reason: string, additionalInfo?: string): Promise<void> => {
+    try {
+      console.log('🚨 ChatService: Reporting user:', userId, 'by:', currentUserId, 'reason:', reason);
+      
+      // Create a report in the reports collection
+      const reportsRef = collection(db, 'reports');
+      
+      await addDoc(reportsRef, {
+        reportedUserId: userId,
+        reporterUserId: currentUserId,
+        reason: reason,
+        additionalInfo: additionalInfo || '',
+        status: 'pending',
+        type: 'user_report',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log('✅ ChatService: Successfully reported user:', userId);
+      
+    } catch (error) {
+      console.error('❌ Failed to report user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Checks if a user is blocked
+   * @param userId The ID of the user to check
+   * @param currentUserId The ID of the current user
+   * @returns Promise that resolves to true if user is blocked
+   */
+  isUserBlocked: async (userId: string, currentUserId: string): Promise<boolean> => {
+    try {
+      const blockDoc = doc(db, 'users', currentUserId, 'blockedUsers', userId);
+      const docSnapshot = await getDoc(blockDoc);
+      return docSnapshot.exists();
+    } catch (error) {
+      console.error('❌ Failed to check if user is blocked:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Unblocks a user
+   * @param userId The ID of the user to unblock
+   * @param currentUserId The ID of the current user doing the unblocking
+   * @returns Promise that resolves when user is unblocked
+   */
+  unblockUser: async (userId: string, currentUserId: string): Promise<void> => {
+    try {
+      console.log('✅ ChatService: Unblocking user:', userId, 'by:', currentUserId);
+      
+      // Remove from blocked users collection
+      const blockDoc = doc(db, 'users', currentUserId, 'blockedUsers', userId);
+      await deleteDoc(blockDoc);
+      
+      // Remove block from conversation
+      const conversationId = createConversationId(currentUserId, userId);
+      const conversationRef = doc(db, 'conversations', conversationId);
+      
+      const conversationDoc = await getDoc(conversationRef);
+      if (conversationDoc.exists()) {
+        await updateDoc(conversationRef, {
+          [`blockedBy.${currentUserId}`]: null,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      
+      console.log('✅ ChatService: Successfully unblocked user:', userId);
+      
+    } catch (error) {
+      console.error('❌ Failed to unblock user:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets all blocked users for a current user
+   * @param currentUserId The ID of the current user
+   * @returns Promise that resolves to array of blocked users
+   */
+  getBlockedUsers: async (currentUserId: string): Promise<Array<{ userId: string; blockedAt: Date }>> => {
+    try {
+      console.log('📋 ChatService: Getting blocked users for:', currentUserId);
+      
+      const blockedUsersRef = collection(db, 'users', currentUserId, 'blockedUsers');
+      const snapshot = await getDocs(blockedUsersRef);
+      
+      const blockedUsers = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          userId: data.userId,
+          blockedAt: data.blockedAt?.toDate() || new Date(),
+        };
+      });
+      
+      console.log(`✅ Found ${blockedUsers.length} blocked users`);
+      return blockedUsers;
+      
+    } catch (error) {
+      console.error('❌ Failed to get blocked users:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Upload an image and send it as a message
+   * @param conversationId - The conversation ID
+   * @param imageUri - The local image URI
+   * @param sender - The sender information
+   * @param recipientId - The recipient ID (for direct messages)
+   * @returns Promise with upload and message result
+   */
+  sendImageMessage: async (
+    conversationId: string,
+    imageUri: string,
+    sender: { _id: string; name: string; avatar?: string },
+    recipientId?: string
+  ): Promise<{ success: boolean; messageId?: string; imageUrl?: string; error?: string }> => {
+    try {
+      console.log('📷 Starting image upload and message send...', { conversationId, imageUri });
+
+      // Create FormData for image upload
+      const formData = new FormData();
+      formData.append('image', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `chat_image_${Date.now()}.jpg`,
+      } as any);
+
+      // Get auth token for the request
+      const getAuthToken = async (): Promise<string | undefined> => {
+        try {
+          const AsyncStorage = await import('@react-native-async-storage/async-storage');
+          const token = await AsyncStorage.default.getItem('authToken');
+          return token || undefined;
+        } catch (error) {
+          console.error('Error getting auth token:', error);
+          return undefined;
+        }
+      };
+
+      const token = await getAuthToken();
+      if (!token) {
+        console.error('❌ No auth token available for image upload');
+        return {
+          success: false,
+          error: 'Authentication required for image upload',
+        };
+      }
+
+      // Upload image to backend using direct fetch to handle FormData properly
+      console.log('📤 Uploading image to backend...');
+      const uploadUrl = `${API_BASE_URL}/api/firebase-auth/upload-image`;
+      
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // Don't set Content-Type header - let the browser set it with boundary for FormData
+        },
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('❌ Image upload failed:', {
+          status: uploadResponse.status,
+          statusText: uploadResponse.statusText,
+          error: errorText
+        });
+        return {
+          success: false,
+          error: `Failed to upload image: ${uploadResponse.status} ${uploadResponse.statusText}`,
+        };
+      }
+
+      const uploadData = await uploadResponse.json();
+      
+      if (!uploadData.success) {
+        console.error('❌ Image upload failed:', uploadData.error);
+        return {
+          success: false,
+          error: uploadData.error || 'Failed to upload image',
+        };
+      }
+
+      const imageUrl = uploadData.imageUrl || uploadData.url;
+      if (!imageUrl) {
+        console.error('❌ No image URL returned from upload');
+        return {
+          success: false,
+          error: 'No image URL returned from upload',
+        };
+      }
+
+      console.log('✅ Image uploaded successfully:', imageUrl);
+
+      // Send the image message
+      const messageData = {
+        _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        text: '', // Empty text for image messages
+        createdAt: serverTimestamp(),
+        user: sender,
+        type: 'image',
+        imageUrl: imageUrl,
+        metadata: {
+          originalUri: imageUri,
+          uploadedAt: new Date().toISOString(),
+        }
+      };
+
+      const messagesRef = messagesCollection(conversationId);
+      const docRef = await addDoc(messagesRef, messageData);
+      
+      console.log('✅ Image message sent successfully:', docRef.id);
+
+      // Update conversation's last message
+      const conversationRef = doc(conversationsCollection, conversationId);
+      await updateDoc(conversationRef, {
+        lastMessage: {
+          text: '📷 Image',
+          createdAt: serverTimestamp(),
+          senderId: sender._id,
+        },
+        updatedAt: serverTimestamp(),
+      });
+
+      // If it's a direct message, ensure both participants have the conversation
+      if (recipientId && !conversationId.includes('group_')) {
+        const participants = [sender._id, recipientId];
+        
+        for (const participantId of participants) {
+          const userConversationRef = doc(db, `users/${participantId}/conversations`, conversationId);
+          await setDoc(userConversationRef, {
+            conversationId,
+            participants,
+            lastMessage: {
+              text: '📷 Image',
+              createdAt: serverTimestamp(),
+              senderId: sender._id,
+            },
+            updatedAt: serverTimestamp(),
+            isGroup: false,
+          }, { merge: true });
+        }
+      }
+
+      return {
+        success: true,
+        messageId: docRef.id,
+        imageUrl: imageUrl,
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to send image message:', error);
+      
+      // Fallback for development - create a mock image message
+      if (__DEV__) {
+        console.log('🔧 Development fallback: creating mock image message');
+        try {
+          const messageData = {
+            _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            text: '',
+            createdAt: serverTimestamp(),
+            user: sender,
+            type: 'image',
+            imageUrl: imageUri, // Use local URI as fallback
+            metadata: {
+              originalUri: imageUri,
+              uploadedAt: new Date().toISOString(),
+              isMockUpload: true,
+            }
+          };
+
+          const messagesRef = messagesCollection(conversationId);
+          const docRef = await addDoc(messagesRef, messageData);
+          
+          // Update conversation's last message
+          const conversationRef = doc(conversationsCollection, conversationId);
+          await updateDoc(conversationRef, {
+            lastMessage: {
+              text: '📷 Image (Dev)',
+              createdAt: serverTimestamp(),
+              senderId: sender._id,
+            },
+            updatedAt: serverTimestamp(),
+          });
+
+          console.log('✅ Mock image message created:', docRef.id);
+          return {
+            success: true,
+            messageId: docRef.id,
+            imageUrl: imageUri,
+          };
+        } catch (fallbackError) {
+          console.error('❌ Even fallback failed:', fallbackError);
+        }
+      }
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send image message',
+      };
+    }
+  },
+
+  /**
+   * Sets typing status for a user in a conversation
+   * @param conversationId The ID of the conversation
+   * @param userId The ID of the user who is typing
+   * @param userName The name of the user who is typing
+   * @param isTyping Whether the user is typing or not
+   */
+  setTypingStatus: async (conversationId: string, userId: string, userName: string, isTyping: boolean) => {
+    try {
+      console.log('🔥 Setting typing status:', { conversationId, userId, userName, isTyping });
+      
+      const typingRef = doc(db, 'conversations', conversationId, 'typing', userId);
+      
+      if (isTyping) {
+        await setDoc(typingRef, {
+          userId,
+          userName,
+          isTyping: true,
+          timestamp: serverTimestamp(),
+        });
+        console.log('✅ Typing status set to true in Firebase');
+      } else {
+        await deleteDoc(typingRef);
+        console.log('✅ Typing status cleared from Firebase');
+      }
+    } catch (error) {
+      console.error('❌ Failed to set typing status:', error);
+    }
+  },
+
+  /**
+   * Listens for typing status updates in a conversation
+   * @param conversationId The ID of the conversation
+   * @param currentUserId The current user's ID (to exclude from typing indicators)
+   * @param callback Function called with array of typing users
+   * @returns Unsubscribe function
+   */
+  subscribeToTypingStatus: (
+    conversationId: string, 
+    currentUserId: string, 
+    callback: (typingUsers: { userId: string; userName: string }[]) => void
+  ) => {
+    console.log('🎧 Subscribing to typing status:', { conversationId, currentUserId });
+    const typingRef = collection(db, 'conversations', conversationId, 'typing');
+    
+    const unsubscribe = onSnapshot(typingRef, (snapshot) => {
+      console.log('📡 Typing status snapshot received, docs count:', snapshot.docs.length);
+      const typingUsers: { userId: string; userName: string }[] = [];
+      
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        console.log('📄 Typing doc data:', { docId: doc.id, data });
+        
+        // Only include other users, not the current user
+        if (data.userId !== currentUserId && data.isTyping) {
+          typingUsers.push({
+            userId: data.userId,
+            userName: data.userName,
+          });
+        }
+      });
+      
+      console.log('🎯 Final typing users to callback:', typingUsers);
+      callback(typingUsers);
+    });
+    
+    return unsubscribe;
+  },
+
+  /**
+   * Clears typing status for a user (useful for cleanup)
+   * @param conversationId The ID of the conversation
+   * @param userId The ID of the user
+   */
+  clearTypingStatus: async (conversationId: string, userId: string) => {
+    try {
+      console.log('🧹 Clearing typing status:', { conversationId, userId });
+      const typingRef = doc(db, 'conversations', conversationId, 'typing', userId);
+      await deleteDoc(typingRef);
+      console.log('✅ Typing status cleared from Firebase');
+    } catch (error) {
+      console.error('❌ Failed to clear typing status:', error);
     }
   },
 };

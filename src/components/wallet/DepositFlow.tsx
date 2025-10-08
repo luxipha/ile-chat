@@ -14,7 +14,7 @@ import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import QRCode from 'react-native-qrcode-svg';
-import crossmintService from '../../services/crossmintService';
+import Service from '../../services/Service';
 import aptosService from '../../services/aptosService';
 
 interface DepositFlowProps {
@@ -42,7 +42,7 @@ const USDC_NETWORKS = [
     icon: 'account-balance-wallet',
     chain: 'ethereum',
     description: 'USDC on Ethereum Sepolia testnet',
-    type: 'crossmint' as const
+    type: '' as const
   },
 ];
 
@@ -79,10 +79,10 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
     if (networkData) {
       setIsLoadingAddress(true);
       try {
-        if (networkData.type === 'crossmint') {
+        if (networkData.type === '') {
           // Use the test wallet address for staging environment
-          const testAddress = crossmintService.getTestWalletAddress();
-          console.log(`✅ Using CrossMint test wallet address for staging: ${testAddress}`);
+          const testAddress = Service.getTestWalletAddress();
+          console.log(`✅ Using  test wallet address for staging: ${testAddress}`);
           setWalletAddresses(prev => ({
             ...prev,
             [networkData.chain]: testAddress
@@ -93,8 +93,8 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
           console.log('🔍 Looking for wallet type: aptos');
           let backendWallet;
           try {
-            console.log('🔍 Calling crossmintService.getWalletFromBackend...');
-            backendWallet = await crossmintService.getWalletFromBackend(networkData.chain, 'aptos');
+            console.log('🔍 Calling Service.getWalletFromBackend...');
+            backendWallet = await Service.getWalletFromBackend(networkData.chain, 'aptos');
             console.log('🔍 Backend wallet response:', {
               success: backendWallet?.success,
               hasWallet: !!backendWallet?.wallet,
@@ -147,7 +147,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                 if (localPrivateKey) {
                   console.log('🔄 Attempting to save AsyncStorage wallet to database...');
                   try {
-                    await crossmintService.saveWalletToBackend({
+                    await Service.saveWalletToBackend({
                       address: localAddress,
                       chain: 'aptos-testnet',
                       type: 'aptos',
@@ -173,7 +173,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                   // Save to database for future use
                   if (walletResult.privateKey) {
                     try {
-                      await crossmintService.saveWalletToBackend({
+                      await Service.saveWalletToBackend({
                         address: walletResult.address,
                         chain: 'aptos-testnet',
                         type: 'aptos',
@@ -295,7 +295,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             </Typography>
             <View style={styles.methodBadge}>
               <Typography variant="caption" style={styles.methodBadgeText}>
-                {network.type === 'aptos' ? 'Aptos' : 'CrossMint'}
+                {network.type === 'aptos' ? 'Aptos' : ''}
               </Typography>
             </View>
           </TouchableOpacity>
@@ -317,7 +317,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             <Typography variant="body2" color="textSecondary" style={styles.loadingSubtext}>
               {selectedNetworkData.type === 'aptos' 
                 ? 'Loading your existing Aptos wallet from database...' 
-                : 'Loading your existing CrossMint wallet...'
+                : 'Loading your existing  wallet...'
               }
             </Typography>
           </View>
@@ -361,7 +361,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                 Network: {selectedNetworkData.name}
               </Typography>
               <Typography variant="caption" style={styles.networkBadgeText}>
-                Wallet: {selectedNetworkData.type === 'aptos' ? 'Aptos' : 'CrossMint'}
+                Wallet: {selectedNetworkData.type === 'aptos' ? 'Aptos' : ''}
               </Typography>
             </View>
             
@@ -371,7 +371,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                 Only send USDC on {selectedNetworkData.name} to this address. 
                 {selectedNetworkData.type === 'aptos' 
                   ? ' This is an Aptos testnet address.' 
-                  : ' This is a CrossMint-managed address for EVM testnets.'
+                  : ' This is a -managed address for EVM testnets.'
                 } Sending other tokens or using wrong network may result in permanent loss.
               </Typography>
             </View>

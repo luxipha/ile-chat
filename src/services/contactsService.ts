@@ -1,6 +1,7 @@
 import * as Contacts from 'expo-contacts';
 import * as Crypto from 'expo-crypto';
 import { Alert } from 'react-native';
+import { API_BASE_URL } from '../config/apiConfig';
 
 export interface Contact {
   id: string;
@@ -70,7 +71,7 @@ class ContactsService {
           phoneNumbers: contact.phoneNumbers?.map(phone => 
             this.normalizePhoneNumber(phone.number || '')
           ).filter(phone => phone.length > 0),
-          emails: contact.emails?.map(email => email.email).filter(Boolean),
+          emails: contact.emails?.map(email => email.email || '').filter(email => email !== '') as string[],
         }))
         .filter(contact => contact.phoneNumbers && contact.phoneNumbers.length > 0);
 
@@ -282,12 +283,7 @@ class ContactsService {
   }
 
   private getApiUrl(): string {
-    // Use the same environment detection as other services
-    if (typeof window !== 'undefined') {
-      return 'http://localhost:3000';
-    } else {
-      return 'http://192.168.31.102:3000';
-    }
+    return API_BASE_URL;
   }
 }
 

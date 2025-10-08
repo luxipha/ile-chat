@@ -81,9 +81,9 @@ export interface TopContributor {
 }
 
 class CommunityService {
-  async getPosts(page = 1, limit = 10, search?: string): Promise<CommunityResponse<PostsResponse>> {
+  async getPosts(page = 1, limit = 20, search?: string, retryCount = 0): Promise<CommunityResponse<PostsResponse>> {
     try {
-      console.log('🔄 CommunityService.getPosts() called with:', { page, limit, search });
+      console.log(`📱 CommunityService.getPosts(page=${page}, limit=${limit}, search=${search}, retry=${retryCount})`);
       
       const params = new URLSearchParams({
         page: page.toString(),
@@ -91,29 +91,42 @@ class CommunityService {
         ...(search && { search })
       });
       
-      const url = `/api/community/posts?${params}`;
-      console.log('🌐 Making API request to:', url);
+      const response = await apiClient.get(`/api/community/posts?${params}`);
       
-      const response = await apiClient.get(url);
-      console.log('✅ API response received:', { 
-        success: response.success, 
-        dataLength: response.data?.posts?.length || 0,
-        error: response.error 
-      });
+      if (!response.success && response.error && typeof response.error === 'object' && response.error !== null && 'isTimeout' in response.error && (response.error as any).isTimeout && retryCount < 2) {
+        // Implement exponential backoff for retries
+        const delay = (retryCount + 1) * 1000; // 1s, then 2s
+        console.log(`⏱️ Timeout detected, retrying in ${delay}ms (attempt ${retryCount + 1}/2)...`);
+        
+        return new Promise(resolve => {
+          setTimeout(() => {
+            resolve(this.getPosts(page, limit, search, retryCount + 1));
+          }, delay);
+        });
+      }
       
-      // Don't log full response as it might contain large image data
-      console.log('🔍 Response structure keys:', response.data ? Object.keys(response.data) : 'no data');
-      return response;
+      return {
+        success: response.success,
+        data: response.data ?? { 
+          posts: [], 
+          total: 0, 
+          page: 1, 
+          pages: 0, 
+          hasNext: false 
+        },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('❌ Failed to get posts:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
       return {
         success: false,
-        data: { posts: [], total: 0, page: 1, pages: 0, hasNext: false },
+        data: { 
+          posts: [], 
+          total: 0, 
+          page: 1, 
+          pages: 0, 
+          hasNext: false 
+        },
         error: error.message || 'Failed to get posts'
       };
     }
@@ -156,7 +169,31 @@ class CommunityService {
         error: response.error,
         hasData: !!response.data
       });
-      return response;
+      
+      return {
+        success: response.success,
+        data: response.data ?? {
+          _id: '',
+          id: '',
+          author: {
+            _id: '',
+            name: '',
+            email: ''
+          },
+          authorId: '',
+          authorName: '',
+          content: '',
+          hashtags: [],
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          likedBy: [],
+          trending: false,
+          createdAt: '',
+          updatedAt: ''
+        },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('❌ Failed to create post:', error);
       console.error('❌ Create post error details:', {
@@ -166,7 +203,26 @@ class CommunityService {
       });
       return {
         success: false,
-        data: {} as CommunityPost,
+        data: {
+          _id: '',
+          id: '',
+          author: {
+            _id: '',
+            name: '',
+            email: ''
+          },
+          authorId: '',
+          authorName: '',
+          content: '',
+          hashtags: [],
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          likedBy: [],
+          trending: false,
+          createdAt: '',
+          updatedAt: ''
+        },
         error: error.message || 'Failed to create post'
       };
     }
@@ -181,7 +237,14 @@ class CommunityService {
         error: response.error,
         hasData: !!response.data
       });
-      return response;
+      return {
+        success: response.success,
+        data: response.data ?? {
+          isLiked: false,
+          likes: 0
+        },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('❌ Failed to like post:', error);
       return {
@@ -201,7 +264,13 @@ class CommunityService {
         error: response.error,
         hasData: !!response.data
       });
-      return response;
+      return {
+        success: response.success,
+        data: response.data ?? {
+          shares: 0
+        },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('❌ Failed to share post:', error);
       return {
@@ -220,7 +289,11 @@ class CommunityService {
       });
       
       const response = await apiClient.get(`/api/community/posts/${postId}/comments?${params}`);
-      return response.data;
+      return {
+        success: response.success,
+        data: response.data ?? { comments: [], total: 0, page: 1, pages: 0 },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('Failed to get comments:', error);
       return {
@@ -231,19 +304,46 @@ class CommunityService {
     }
   }
 
-  async addComment(postId: string, content: string, parentCommentId?: string): Promise<CommunityResponse<Comment>> {
+  async createComment(postId: string, content: string): Promise<CommunityResponse<Comment>> {
     try {
-      const response = await apiClient.post(`/api/community/posts/${postId}/comments`, {
-        content,
-        parentCommentId
-      });
-      return response.data;
+      const response = await apiClient.post(`/api/community/posts/${postId}/comments`, { content });
+      return {
+        success: response.success,
+        data: response.data ?? {
+          _id: '',
+          author: {
+            _id: '',
+            name: '',
+            email: ''
+          },
+          content: '',
+          likes: 0,
+          likedBy: [],
+          replies: [],
+          createdAt: '',
+          updatedAt: ''
+        },
+        error: response.error
+      };
     } catch (error: any) {
-      console.error('Failed to add comment:', error);
+      console.error('Failed to create comment:', error);
       return {
         success: false,
-        data: {} as Comment,
-        error: error.message || 'Failed to add comment'
+        data: {
+          _id: '',
+          author: {
+            _id: '',
+            name: '',
+            email: ''
+          },
+          content: '',
+          likes: 0,
+          likedBy: [],
+          replies: [],
+          createdAt: '',
+          updatedAt: ''
+        },
+        error: error.message || 'Failed to create comment'
       };
     }
   }
@@ -251,7 +351,11 @@ class CommunityService {
   async getTrendingTopics(): Promise<CommunityResponse<TrendingTopic[]>> {
     try {
       const response = await apiClient.get('/api/community/topics/trending');
-      return response.data;
+      return {
+        success: response.success,
+        data: response.data ?? [],
+        error: response.error
+      };
     } catch (error: any) {
       console.error('Failed to get trending topics:', error);
       return {
@@ -265,7 +369,11 @@ class CommunityService {
   async getTopContributors(): Promise<CommunityResponse<TopContributor[]>> {
     try {
       const response = await apiClient.get('/api/community/contributors/top');
-      return response.data;
+      return {
+        success: response.success,
+        data: response.data ?? [],
+        error: response.error
+      };
     } catch (error: any) {
       console.error('Failed to get top contributors:', error);
       return {
@@ -285,7 +393,11 @@ class CommunityService {
         error: response.error,
         hasData: !!response.data
       });
-      return response;
+      return {
+        success: response.success,
+        data: response.data ?? { deleted: true },
+        error: response.error
+      };
     } catch (error: any) {
       console.error('❌ Failed to delete post:', error);
       console.error('❌ Delete error details:', {
@@ -310,32 +422,32 @@ class CommunityService {
       const response = await apiClient.get(`/api/community/posts/user/${userId}`, {
         params: { page, limit }
       });
+      
       console.log('📥 User posts API response:', {
         success: response.success,
-        postsCount: response.data?.data?.posts?.length || 0,
-        hasData: !!response.data,
-        responseStructure: response.data ? Object.keys(response.data) : null
+        hasData: !!response.data
       });
       
       // Handle the nested data structure from backend
-      const responseData = response.data?.data || response.data;
+      const responseData = response.data?.data || response.data || {};
       
       // Transform the data to match our expected format
-      const posts = responseData?.posts?.map((post: any) => ({
+      const posts = (responseData.posts || []).map((post: any) => ({
         ...post,
         id: post._id,
         authorId: post.author?._id || post.authorId,
         authorName: post.author?.name || post.authorName,
         time: post.createdAt ? new Date(post.createdAt).toLocaleDateString() : 'Unknown'
-      })) || [];
+      }));
 
       return {
         success: response.success,
         data: {
-          posts,
-          total: responseData?.total || 0,
-          page: responseData?.page || 1,
-          pages: responseData?.pages || 1
+          posts: posts,
+          total: responseData.total ?? 0,
+          page: responseData.page ?? page,
+          pages: responseData.pages ?? 1,
+          hasNext: responseData.hasNext ?? false
         },
         error: response.error
       };
@@ -344,7 +456,7 @@ class CommunityService {
       return {
         success: false,
         error: error.message || 'Failed to fetch user posts',
-        data: { posts: [], total: 0, page: 1, pages: 0 }
+        data: { posts: [], total: 0, page: 1, pages: 0, hasNext: false }
       };
     }
   }

@@ -92,11 +92,11 @@ class AptosService {
 
   async getWallet(): Promise<AptosWalletResponse> {
     try {
-      // First try to get from database (if crossmintService is available)
+      // First try to get from database (if Service is available)
       try {
-        // Check if we can import crossmintService dynamically
-        const crossmintService = await import('../services/crossmintService');
-        const backendWallet = await crossmintService.default.getWalletFromBackend('aptos-testnet', 'aptos');
+        // Check if we can import Service dynamically
+        const Service = await import('../services/Service');
+        const backendWallet = await Service.default.getWalletFromBackend('aptos-testnet', 'aptos');
         
         if (backendWallet && backendWallet.success && backendWallet.wallet) {
           console.log('✅ Aptos wallet retrieved from database');
@@ -131,8 +131,8 @@ class AptosService {
     try {
       // First check database
       try {
-        const crossmintService = await import('../services/crossmintService');
-        const backendWallet = await crossmintService.default.getWalletFromBackend('aptos-testnet', 'aptos');
+        const Service = await import('../services/Service');
+        const backendWallet = await Service.default.getWalletFromBackend('aptos-testnet', 'aptos');
         
         if (backendWallet && backendWallet.success && backendWallet.wallet) {
           console.log('✅ Database has Aptos wallet');

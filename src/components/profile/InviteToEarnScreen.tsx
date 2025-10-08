@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -7,12 +7,15 @@ import {
   Share,
   Alert,
   Clipboard,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import referralService from '../../services/referralService';
 
 interface InviteToEarnScreenProps {
   onBack: () => void;
@@ -21,16 +24,54 @@ interface InviteToEarnScreenProps {
 export const InviteToEarnScreen: React.FC<InviteToEarnScreenProps> = ({
   onBack,
 }) => {
-  const [referralCode] = useState('ILE_REF_JD9847');
-  const [totalEarned] = useState(1250);
-  const [friendsReferred] = useState(8);
-  const [pendingRewards] = useState(350);
+  const [referralCode, setReferralCode] = useState('');
+  const [totalEarned, setTotalEarned] = useState(0);
+  const [friendsReferred, setFriendsReferred] = useState(0);
+  const [pendingRewards, setPendingRewards] = useState(0);
+  const [referralLink, setReferralLink] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [referrals, setReferrals] = useState<any[]>([]);
 
-  const referralLink = `https://ilepay.app/invite/${referralCode}`;
+  useEffect(() => {
+    loadReferralData();
+  }, []);
+
+  const loadReferralData = async () => {
+    try {
+      setLoading(true);
+      const result = await referralService.getUserReferralInfo();
+      
+      if (result.success && result.data) {
+        setReferralCode(result.data.referralCode);
+        setTotalEarned(result.data.bricksEarned);
+        setFriendsReferred(result.data.friendsReferred);
+        setPendingRewards(result.data.pendingRewards);
+        setReferralLink(result.data.referralLink);
+        setReferrals(result.data.referrals || []);
+      } else {
+        Alert.alert('Error', result.error || 'Failed to load referral information');
+      }
+    } catch (error) {
+      console.error('Failed to load referral data:', error);
+      Alert.alert('Error', 'Failed to load referral information');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadReferralData();
+    setRefreshing(false);
+  };
 
   const handleShare = async () => {
     try {
-      const message = `🏠 Join me on ilePay - the revolutionary real estate investment platform!\n\n💰 Invest in premium properties with as little as $100\n🎁 Use my referral code: ${referralCode}\n📱 Download: ${referralLink}\n\n#RealEstate #Investment #ilePay`;
+      // Record the share action for analytics
+      await referralService.recordReferralClick('mobile_share');
+      
+      const message = referralService.generateShareMessage(referralCode, referralLink);
       
       await Share.share({
         message,
@@ -39,17 +80,22 @@ export const InviteToEarnScreen: React.FC<InviteToEarnScreenProps> = ({
       });
     } catch (error) {
       console.error('Error sharing:', error);
+      Alert.alert('Error', 'Failed to share referral. Please try again.');
     }
   };
 
-  const handleCopyCode = () => {
-    Clipboard.setString(referralCode);
-    Alert.alert('Copied!', 'Referral code copied to clipboard');
-  };
 
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
+    if (!referralLink) {
+      Alert.alert('Error', 'Referral link not available');
+      return;
+    }
+    
     Clipboard.setString(referralLink);
     Alert.alert('Copied!', 'Referral link copied to clipboard');
+    
+    // Record the copy action for analytics
+    await referralService.recordReferralClick('mobile_copy_link');
   };
 
   const renderStatsSection = () => (
@@ -152,27 +198,13 @@ export const InviteToEarnScreen: React.FC<InviteToEarnScreenProps> = ({
       <Typography variant="h5" style={styles.sectionTitle}>Share & Earn</Typography>
       
       <Card style={styles.referralCard}>
-        <View style={styles.codeContainer}>
-          <Typography variant="body1" color="textSecondary" style={styles.codeLabel}>
-            Your Referral Code
-          </Typography>
-          <View style={styles.codeRow}>
-            <Typography variant="h5" style={styles.codeText}>
-              {referralCode}
-            </Typography>
-            <TouchableOpacity onPress={handleCopyCode} style={styles.copyButton}>
-              <MaterialIcons name="content-copy" size={20} color={Colors.primary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
         <View style={styles.linkContainer}>
           <Typography variant="body1" color="textSecondary" style={styles.linkLabel}>
-            Referral Link
+            Your Referral Link
           </Typography>
           <View style={styles.linkRow}>
             <Typography variant="body2" style={styles.linkText} numberOfLines={1}>
-              {referralLink}
+              {referralLink || 'Loading...'}
             </Typography>
             <TouchableOpacity onPress={handleCopyLink} style={styles.copyButton}>
               <MaterialIcons name="content-copy" size={20} color={Colors.primary} />
@@ -213,6 +245,28 @@ export const InviteToEarnScreen: React.FC<InviteToEarnScreenProps> = ({
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <Typography variant="h3">Invite to Earn</Typography>
+          <View style={styles.headerSpacer} />
+        </View>
+
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Typography variant="body1" style={styles.loadingText}>
+            Loading your referral information...
+          </Typography>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -224,11 +278,54 @@ export const InviteToEarnScreen: React.FC<InviteToEarnScreenProps> = ({
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
         {renderStatsSection()}
         {renderHowItWorksSection()}
         {renderReferralSection()}
         {renderSocialButtons()}
+        
+        {/* Referral List Section */}
+        {referrals.length > 0 && (
+          <View style={styles.section}>
+            <Typography variant="h5" style={styles.sectionTitle}>Your Referrals</Typography>
+            {referrals.map((referral, index) => (
+              <Card key={referral.id || index} style={styles.referralItem}>
+                <View style={styles.referralInfo}>
+                  <View style={styles.referralLeft}>
+                    <MaterialIcons name="person" size={24} color={Colors.primary} />
+                    <View style={styles.referralDetails}>
+                      <Typography variant="h6">{referral.name}</Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Joined {new Date(referral.joinedAt).toLocaleDateString()}
+                      </Typography>
+                    </View>
+                  </View>
+                  <View style={styles.referralRight}>
+                    <Typography variant="body1" style={styles.referralBricks}>
+                      +{referral.bricksAwarded} Bricks
+                    </Typography>
+                    <View style={[styles.statusBadge, styles[`status${referral.status}`]]}>
+                      <Typography variant="caption" style={styles.statusText}>
+                        {referral.status === 'verified' ? 'Verified' : 'Pending'}
+                      </Typography>
+                    </View>
+                  </View>
+                </View>
+              </Card>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -396,5 +493,56 @@ const styles = StyleSheet.create({
   socialText: {
     marginTop: Spacing.sm,
     fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Spacing.xl * 2,
+  },
+  loadingText: {
+    marginTop: Spacing.md,
+    color: Colors.textSecondary,
+  },
+  referralItem: {
+    marginBottom: Spacing.md,
+  },
+  referralInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  referralLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  referralDetails: {
+    marginLeft: Spacing.md,
+    flex: 1,
+  },
+  referralRight: {
+    alignItems: 'flex-end',
+  },
+  referralBricks: {
+    fontWeight: '600',
+    color: Colors.success,
+    marginBottom: Spacing.xs,
+  },
+  statusBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs / 2,
+    borderRadius: BorderRadius.sm,
+  },
+  statusverified: {
+    backgroundColor: Colors.success + '20',
+  },
+  statuspending: {
+    backgroundColor: Colors.warning + '20',
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
 });

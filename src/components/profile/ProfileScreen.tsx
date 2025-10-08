@@ -1,21 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Image,
-  Modal,
   Alert,
+  Modal,
+  TextInput,
+  SafeAreaView,
+  Animated,
+  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-// import QRCode from 'react-native-qrcode-svg';
 import { Typography } from '../ui/Typography';
-import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { ProfileCard } from '../ui/ProfileCard';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import authService from '../../services/authService';
+import profileService from '../../services/profileService';
 
 interface ProfileScreenProps {
   onBack: () => void;
@@ -23,177 +24,268 @@ interface ProfileScreenProps {
 }
 
 interface UserProfile {
+  id: string;
   name: string;
-  gender: 'Male' | 'Female' | 'Other';
-  region: string;
-  phone: string;
-  userId: string;
-  profilePicture?: string;
-  bricksCount: number;
+  email?: string;
+  phone?: string;
+  gender?: 'Male' | 'Female' | 'Other';
+  dateOfBirth?: string;
+  region?: string;
+  address?: string;
+  bio?: string;
+  avatar?: string;
+  bricks?: number;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onBack,
   onEditProfile,
 }) => {
-  const [showQRCode, setShowQRCode] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
   
-  // Mock user data - replace with actual user data
-  const userProfile: UserProfile = {
-    name: 'John Doe',
-    gender: 'Male',
-    region: 'Lagos, Nigeria',
-    phone: '+234 812 345 6789',
-    userId: 'ILE_JD_9847',
-    bricksCount: 7850,
-    profilePicture: undefined, // URL when available
+  // Edit modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editField, setEditField] = useState<string>('');
+  const [editValue, setEditValue] = useState<string>('');
+  const [updating, setUpdating] = useState(false);
+  const slideAnim = useState(new Animated.Value(0))[0];
+
+  useEffect(() => {
+    loadUserProfile();
+  }, []);
+
+  const loadUserProfile = async () => {
+    try {
+      const currentUser = await authService.getCachedUser();
+      if (currentUser) {
+        const profileResult = await profileService.getUserProfile(currentUser.id);
+        if (profileResult.success && profileResult.profile) {
+          setUserProfile({
+            id: currentUser.id,
+            name: profileResult.profile.name || currentUser.name || '',
+            email: profileResult.profile.email || currentUser.email,
+            phone: profileResult.profile.phone,
+            gender: profileResult.profile.gender,
+            dateOfBirth: profileResult.profile.dateOfBirth,
+            region: profileResult.profile.region,
+            address: profileResult.profile.address,
+            bio: profileResult.profile.bio,
+            avatar: profileResult.profile.avatar,
+            bricks: currentUser.bricks || 0,
+          });
+        } else {
+          // Fallback to basic user data
+          setUserProfile({
+            id: currentUser.id,
+            name: currentUser.name || '',
+            email: currentUser.email,
+            bricks: currentUser.bricks || 0,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load user profile:', error);
+      Alert.alert('Error', 'Failed to load profile information');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleShareProfile = () => {
-    Alert.alert(
-      'Share Profile',
-      'Choose how you want to share your profile',
-      [
-        { text: 'Copy User ID', onPress: () => copyToClipboard(userProfile.userId) },
-        { text: 'Show QR Code', onPress: () => setShowQRCode(true) },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+  const handleEditField = (field: string, currentValue?: string) => {
+    setEditField(field);
+    setEditValue(currentValue || '');
+    setShowEditModal(true);
+    
+    // Animate slide in
+    Animated.timing(slideAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
   };
 
-  const copyToClipboard = (text: string) => {
-    // Implementation would use Clipboard API
-    Alert.alert('Copied!', `${text} copied to clipboard`);
+  const handleCloseModal = () => {
+    // Animate slide out
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowEditModal(false);
+      setEditField('');
+      setEditValue('');
+    });
   };
 
-  const renderProfilePicture = () => {
-    return (
-      <View style={styles.avatarContainer}>
-        {userProfile.profilePicture ? (
-          <Image source={{ uri: userProfile.profilePicture }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatar}>
-            <Typography variant="h2" style={styles.avatarText}>
-              {userProfile.name.split(' ').map(n => n[0]).join('')}
-            </Typography>
-          </View>
-        )}
-        <TouchableOpacity style={styles.editAvatarButton} onPress={onEditProfile}>
-          <MaterialIcons name="camera-alt" size={16} color={Colors.background} />
-        </TouchableOpacity>
-      </View>
-    );
-  };
+  const handleSaveField = async () => {
+    if (!userProfile || !editField) return;
+    
+    setUpdating(true);
+    try {
+      // Map field names to profile update format
+      const fieldMap: { [key: string]: string } = {
+        'Name': 'name',
+        'Email': 'email',
+        'Phone Number': 'phone',
+        'Gender': 'gender',
+        'Date of Birth': 'dateOfBirth',
+        'Region': 'region',
+        'Address': 'address',
+        'Bio': 'bio',
+      };
 
-  const renderProfileInfo = () => (
-    <Card style={styles.profileCard}>
-      <View style={styles.profileHeader}>
-        {renderProfilePicture()}
-        <View style={styles.profileActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={onEditProfile}>
-            <MaterialIcons name="edit" size={20} color={Colors.primary} />
-            <Text style={styles.actionButtonText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={handleShareProfile}>
-            <MaterialIcons name="share" size={20} color={Colors.primary} />
-            <Text style={styles.actionButtonText}>Share</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      const updateField = fieldMap[editField];
+      if (!updateField) {
+        throw new Error('Invalid field');
+      }
+
+      // Update profile via service
+      const updateData = { [updateField]: editValue };
+      const result = await profileService.updateProfile(updateData);
       
-      <View style={styles.profileDetails}>
-        <Typography variant="h4" style={styles.userName}>{userProfile.name}</Typography>
-        <Typography variant="body1" color="textSecondary" style={styles.userId}>
-          ID: {userProfile.userId}
-        </Typography>
-        
-        <View style={styles.bricksContainer}>
-          <MaterialIcons name="grain" size={20} color={Colors.secondary} />
-          <Typography variant="h6" style={styles.bricksText}>
-            {userProfile.bricksCount.toLocaleString()} Bricks
-          </Typography>
-        </View>
-      </View>
-    </Card>
-  );
+      if (result.success) {
+        // Update local state
+        setUserProfile(prev => prev ? { ...prev, [updateField]: editValue } : null);
+        handleCloseModal();
+        Alert.alert('Success', `${editField} updated successfully`);
+      } else {
+        throw new Error(result.error || 'Update failed');
+      }
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
+    } finally {
+      setUpdating(false);
+    }
+  };
 
-  const renderInfoSection = () => (
-    <View style={styles.section}>
-      <Typography variant="h5" style={styles.sectionTitle}>Personal Information</Typography>
+  const handleSpecialFieldEdit = (field: string) => {
+    if (field === 'Profile Picture') {
+      setEditField(field);
+      setEditValue('');
+      setShowEditModal(true);
       
-      <Card style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <MaterialIcons name="person" size={24} color={Colors.primary} />
-          <View style={styles.infoContent}>
-            <Typography variant="body2" color="textSecondary">Gender</Typography>
-            <Typography variant="body1">{userProfile.gender}</Typography>
-          </View>
-        </View>
-      </Card>
+      // Animate slide in
+      Animated.timing(slideAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else if (field === 'Bricks') {
+      Alert.alert('Bricks', `You have ${userProfile?.bricks || 0} bricks.\n\nView earning history and manage your rewards.`);
+    } else {
+      handleEditField(field, getFieldValue(field));
+    }
+  };
 
-      <Card style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <MaterialIcons name="location-on" size={24} color={Colors.primary} />
-          <View style={styles.infoContent}>
-            <Typography variant="body2" color="textSecondary">Region</Typography>
-            <Typography variant="body1">{userProfile.region}</Typography>
-          </View>
-        </View>
-      </Card>
+  const handleImagePicker = (type: 'camera' | 'gallery') => {
+    // TODO: Implement actual image picker functionality
+    console.log(`Selected ${type} for profile picture`);
+    Alert.alert('Image Picker', `${type} functionality will be implemented here`);
+  };
 
-      <Card style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <MaterialIcons name="phone" size={24} color={Colors.primary} />
-          <View style={styles.infoContent}>
-            <Typography variant="body2" color="textSecondary">Phone Number</Typography>
-            <Typography variant="body1">{userProfile.phone}</Typography>
-          </View>
-        </View>
-      </Card>
-    </View>
-  );
+  const getFieldValue = (field: string): string => {
+    if (!userProfile) return '';
+    
+    switch (field) {
+      case 'Name': return userProfile.name;
+      case 'Email': return userProfile.email || '';
+      case 'Phone Number': return userProfile.phone || '';
+      case 'Gender': return userProfile.gender || '';
+      case 'Date of Birth': return userProfile.dateOfBirth || '';
+      case 'Region': return userProfile.region || '';
+      case 'Address': return userProfile.address || '';
+      case 'Bio': return userProfile.bio || '';
+      default: return '';
+    }
+  };
 
-  const renderQRCodeModal = () => (
-    <Modal
-      visible={showQRCode}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setShowQRCode(false)}
+  const getFieldType = (field: string): 'text' | 'email' | 'phone' | 'multiline' => {
+    switch (field) {
+      case 'Email': return 'email';
+      case 'Phone Number': return 'phone';
+      case 'Bio': return 'multiline';
+      default: return 'text';
+    }
+  };
+
+  const renderProfileItem = (
+    icon: string,
+    title: string,
+    value?: string,
+    onPress?: () => void,
+    showVerificationStatus: boolean = false,
+    isVerified: boolean = false,
+    isRequired: boolean = false
+  ) => (
+    <TouchableOpacity 
+      style={styles.profileItem} 
+      onPress={onPress || (() => handleSpecialFieldEdit(title))}
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.qrModalContent}>
-          <View style={styles.qrHeader}>
-            <Typography variant="h5">My QR Code</Typography>
-            <TouchableOpacity onPress={() => setShowQRCode(false)}>
-              <MaterialIcons name="close" size={24} color={Colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.qrContainer}>
-            <View style={styles.qrPlaceholder}>
-              <MaterialIcons name="qr-code" size={120} color={Colors.primary} />
-              <Typography variant="body2" color="textSecondary" style={styles.qrPlaceholderText}>
-                QR Code for {userProfile.userId}
-              </Typography>
-            </View>
-          </View>
-          
-          <Typography variant="body1" color="textSecondary" style={styles.qrText}>
-            Scan this code to connect with me on ilePay
-          </Typography>
-          
-          <Button
-            title="Share QR Code"
-            onPress={() => {
-              // Implementation for sharing QR code
-              Alert.alert('Share', 'QR Code sharing functionality');
-            }}
-            style={styles.shareButton}
-          />
+      <MaterialIcons name={icon as any} size={24} color={Colors.primary} />
+      <View style={styles.profileContent}>
+        <Typography variant="h6" style={styles.profileTitle}>
+          {title}
+        </Typography>
+        <Typography 
+          variant="body2" 
+          color={value ? "textPrimary" : "textSecondary"}
+          style={styles.profileValue}
+        >
+          {value || 'Not set'}
+        </Typography>
+      </View>
+      
+      {showVerificationStatus && (
+        <View style={styles.verificationStatus}>
+          {isVerified ? (
+            <MaterialIcons name="check-circle" size={16} color={Colors.success} />
+          ) : isRequired ? (
+            <MaterialIcons name="error" size={16} color={Colors.error} />
+          ) : (
+            <MaterialIcons name="schedule" size={16} color={Colors.warning} />
+          )}
+        </View>
+      )}
+      
+      <MaterialIcons name="chevron-right" size={24} color={Colors.gray400} />
+    </TouchableOpacity>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <Typography variant="h3">Profile</Typography>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <Typography variant="body1" color="textSecondary">Loading profile...</Typography>
         </View>
       </View>
-    </Modal>
-  );
+    );
+  }
+
+  if (!userProfile) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <Typography variant="h3">Profile</Typography>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <Typography variant="body1" color="textSecondary">Profile not found</Typography>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -207,11 +299,274 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {renderProfileInfo()}
-        {renderInfoSection()}
+        {/* Profile Picture */}
+        {renderProfileItem(
+          'account-circle',
+          'Profile Picture',
+          userProfile.avatar ? 'Set' : undefined
+        )}
+
+        {/* Username */}
+        {renderProfileItem(
+          'person',
+          'Name',
+          userProfile.name
+        )}
+
+        {/* Email */}
+        {renderProfileItem(
+          'email',
+          'Email',
+          userProfile.email,
+          undefined,
+          true,
+          !!userProfile.email,
+          false
+        )}
+
+        {/* Phone */}
+        {renderProfileItem(
+          'phone',
+          'Phone Number',
+          userProfile.phone,
+          undefined,
+          true,
+          !!userProfile.phone,
+          false
+        )}
+
+        {/* Gender */}
+        {renderProfileItem(
+          'wc',
+          'Gender',
+          userProfile.gender
+        )}
+
+        {/* Date of Birth */}
+        {renderProfileItem(
+          'cake',
+          'Date of Birth',
+          userProfile.dateOfBirth,
+          undefined,
+          true,
+          !!userProfile.dateOfBirth,
+          true
+        )}
+
+        {/* Region */}
+        {renderProfileItem(
+          'location-on',
+          'Region',
+          userProfile.region
+        )}
+
+        {/* Address */}
+        {renderProfileItem(
+          'home',
+          'Address',
+          userProfile.address,
+          undefined,
+          true,
+          !!userProfile.address,
+          true
+        )}
+
+        {/* Bio */}
+        {renderProfileItem(
+          'description',
+          'Bio',
+          userProfile.bio
+        )}
+
+        {/* Bricks */}
+        {renderProfileItem(
+          'grain',
+          'Bricks',
+          userProfile.bricks ? `${userProfile.bricks.toLocaleString()} Bricks` : '0 Bricks'
+        )}
       </ScrollView>
 
-      {renderQRCodeModal()}
+      {/* Edit Modal */}
+      <Modal
+        visible={showEditModal}
+        transparent={true}
+        animationType="none"
+        onRequestClose={handleCloseModal}
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View 
+            style={[
+              styles.editModal,
+              {
+                transform: [
+                  {
+                    translateY: slideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [600, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <SafeAreaView style={styles.editModalContent}>
+              {/* Header */}
+              <View style={styles.editModalHeader}>
+                <TouchableOpacity onPress={handleCloseModal}>
+                  <Typography variant="h6" style={styles.cancelText}>Cancel</Typography>
+                </TouchableOpacity>
+                <Typography variant="h5" style={styles.editModalTitle}>
+                  Edit {editField}
+                </Typography>
+                <TouchableOpacity onPress={handleSaveField} disabled={updating}>
+                  <Typography 
+                    variant="h6" 
+                    style={[styles.saveText, updating && styles.disabledText]}
+                  >
+                    {updating ? 'Saving...' : 'Save'}
+                  </Typography>
+                </TouchableOpacity>
+              </View>
+
+              {/* Content */}
+              <View style={styles.editModalBody}>
+                {editField === 'Profile Picture' ? (
+                  // Profile Picture Upload Interface
+                  <>
+                    <Typography variant="body1" style={styles.fieldLabel}>
+                      Profile Picture
+                    </Typography>
+                    
+                    {/* Current Avatar Preview */}
+                    <View style={styles.avatarPreviewContainer}>
+                      <View style={styles.avatarPreview}>
+                        {userProfile?.avatar ? (
+                          <Image source={{ uri: userProfile.avatar }} style={styles.avatarPreviewImage} />
+                        ) : (
+                          <View style={styles.avatarPlaceholder}>
+                            <MaterialIcons name="account-circle" size={80} color={Colors.gray400} />
+                          </View>
+                        )}
+                      </View>
+                      <Typography variant="body2" color="textSecondary" style={styles.avatarPreviewText}>
+                        {userProfile?.avatar ? 'Current profile picture' : 'No profile picture set'}
+                      </Typography>
+                    </View>
+
+                    {/* Upload Options */}
+                    <View style={styles.uploadOptions}>
+                      <TouchableOpacity 
+                        style={styles.uploadOption} 
+                        onPress={() => handleImagePicker('camera')}
+                      >
+                        <MaterialIcons name="camera-alt" size={24} color={Colors.primary} />
+                        <View style={styles.uploadOptionContent}>
+                          <Typography variant="h6" style={styles.uploadOptionText}>
+                            Take Photo
+                          </Typography>
+                          <Typography variant="body2" color="textSecondary" style={styles.uploadOptionSubtext}>
+                            Use camera to take a new photo
+                          </Typography>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={styles.uploadOption} 
+                        onPress={() => handleImagePicker('gallery')}
+                      >
+                        <MaterialIcons name="photo-library" size={24} color={Colors.primary} />
+                        <View style={styles.uploadOptionContent}>
+                          <Typography variant="h6" style={styles.uploadOptionText}>
+                            Choose from Gallery
+                          </Typography>
+                          <Typography variant="body2" color="textSecondary" style={styles.uploadOptionSubtext}>
+                            Select an existing photo
+                          </Typography>
+                        </View>
+                      </TouchableOpacity>
+
+                      {userProfile?.avatar && (
+                        <TouchableOpacity 
+                          style={[styles.uploadOption, styles.removeOption]} 
+                          onPress={() => {
+                            Alert.alert(
+                              'Remove Photo',
+                              'Are you sure you want to remove your profile picture?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Remove', style: 'destructive', onPress: () => console.log('Remove photo') }
+                              ]
+                            );
+                          }}
+                        >
+                          <MaterialIcons name="delete" size={24} color={Colors.error} />
+                          <View style={styles.uploadOptionContent}>
+                            <Typography variant="h6" style={[styles.uploadOptionText, { color: Colors.error }]}>
+                              Remove Photo
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary" style={styles.uploadOptionSubtext}>
+                              Delete current profile picture
+                            </Typography>
+                          </View>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </>
+                ) : (
+                  // Regular Text Input Interface
+                  <>
+                    <Typography variant="body1" style={styles.fieldLabel}>
+                      {editField}
+                    </Typography>
+                    <TextInput
+                      style={[
+                        styles.textInput,
+                        getFieldType(editField) === 'multiline' && styles.multilineInput
+                      ]}
+                      value={editValue}
+                      onChangeText={setEditValue}
+                      placeholder={`Enter your ${editField.toLowerCase()}`}
+                      placeholderTextColor={Colors.gray400}
+                      keyboardType={
+                        getFieldType(editField) === 'email' ? 'email-address' :
+                        getFieldType(editField) === 'phone' ? 'phone-pad' : 'default'
+                      }
+                      multiline={getFieldType(editField) === 'multiline'}
+                      numberOfLines={getFieldType(editField) === 'multiline' ? 4 : 1}
+                      autoFocus={true}
+                    />
+                    
+                    {editField === 'Gender' && (
+                      <View style={styles.genderOptions}>
+                        {['Male', 'Female', 'Other'].map((gender) => (
+                          <TouchableOpacity
+                            key={gender}
+                            style={[
+                              styles.genderOption,
+                              editValue === gender && styles.selectedGenderOption
+                            ]}
+                            onPress={() => setEditValue(gender)}
+                          >
+                            <Typography 
+                              variant="body1" 
+                              style={[
+                                styles.genderOptionText,
+                                editValue === gender && styles.selectedGenderOptionText
+                              ]}
+                            >
+                              {gender}
+                            </Typography>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            </SafeAreaView>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -240,145 +595,173 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: Spacing.lg,
   },
-  profileCard: {
-    marginBottom: Spacing.lg,
-  },
-  profileHeader: {
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: Spacing.md,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  editAvatarButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.primary,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.background,
   },
-  profileActions: {
+  profileItem: {
     flexDirection: 'row',
-    gap: Spacing.lg,
-  },
-  actionButton: {
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray100,
   },
-  actionButtonText: {
-    fontSize: 12,
-    color: Colors.primary,
-    marginTop: Spacing.xs / 2,
+  profileContent: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  profileTitle: {
     fontWeight: '500',
+    marginBottom: 2,
   },
-  profileDetails: {
-    alignItems: 'center',
-  },
-  userName: {
-    marginBottom: Spacing.xs,
-    fontWeight: '600',
-  },
-  userId: {
-    marginBottom: Spacing.md,
+  profileValue: {
     fontSize: 14,
   },
-  bricksContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.gray100,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-  },
-  bricksText: {
-    marginLeft: Spacing.sm,
-    color: Colors.secondary,
-    fontWeight: '600',
-  },
-  section: {
-    marginBottom: Spacing.lg,
-  },
-  sectionTitle: {
-    marginBottom: Spacing.md,
-    fontWeight: '600',
-  },
-  infoCard: {
-    marginBottom: Spacing.md,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  infoContent: {
-    marginLeft: Spacing.md,
-    flex: 1,
+  verificationStatus: {
+    marginRight: Spacing.sm,
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
   },
-  qrModalContent: {
+  editModal: {
     backgroundColor: Colors.background,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    margin: Spacing.lg,
-    alignItems: 'center',
-    minWidth: 300,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    minHeight: 480,
+    maxHeight: '90%',
   },
-  qrHeader: {
+  editModalContent: {
+    flex: 1,
+  },
+  editModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    width: '100%',
-    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray100,
   },
-  qrContainer: {
-    padding: Spacing.lg,
+  editModalTitle: {
+    fontWeight: '600',
+  },
+  cancelText: {
+    color: Colors.gray600,
+  },
+  saveText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  disabledText: {
+    color: Colors.gray400,
+  },
+  editModalBody: {
+    flex: 1,
+    padding: Spacing.xl,
+    paddingTop: Spacing.xl * 1.5,
+  },
+  fieldLabel: {
+    marginBottom: Spacing.lg,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+    fontSize: 16,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: Colors.gray300,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    fontSize: 18,
+    color: Colors.textPrimary,
     backgroundColor: Colors.background,
+    minHeight: 50,
+  },
+  multilineInput: {
+    height: 120,
+    textAlignVertical: 'top',
+  },
+  genderOptions: {
+    marginTop: Spacing.xl,
+  },
+  genderOption: {
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.gray300,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.background,
+    minHeight: 55,
+    justifyContent: 'center',
+  },
+  selectedGenderOption: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  genderOptionText: {
+    textAlign: 'center',
+  },
+  selectedGenderOptionText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  avatarPreviewContainer: {
+    alignItems: 'center',
+    marginBottom: Spacing.xl,
+  },
+  avatarPreview: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: Spacing.md,
+    overflow: 'hidden',
+    backgroundColor: Colors.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPreviewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 60,
+  },
+  avatarPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPreviewText: {
+    textAlign: 'center',
+  },
+  uploadOptions: {
+    marginTop: Spacing.lg,
+  },
+  uploadOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.gray300,
     borderRadius: BorderRadius.md,
     marginBottom: Spacing.md,
-    alignItems: 'center',
+    backgroundColor: Colors.background,
   },
-  qrPlaceholder: {
-    alignItems: 'center',
-    padding: Spacing.xl,
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.md,
-    borderWidth: 2,
-    borderColor: Colors.gray200,
-    borderStyle: 'dashed',
+  removeOption: {
+    borderColor: Colors.errorLight,
+    backgroundColor: Colors.errorLight + '20',
   },
-  qrPlaceholderText: {
-    marginTop: Spacing.md,
-    textAlign: 'center',
+  uploadOptionContent: {
+    flex: 1,
+    marginLeft: Spacing.md,
   },
-  qrText: {
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
+  uploadOptionText: {
+    fontWeight: '500',
+    marginBottom: 2,
   },
-  shareButton: {
-    width: '100%',
+  uploadOptionSubtext: {
+    fontSize: 12,
   },
 });

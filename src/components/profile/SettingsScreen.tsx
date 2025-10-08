@@ -19,6 +19,7 @@ interface SettingsScreenProps {
   onSetPin: () => void;
   onWalletSettings: () => void;
   onPrivacySettings: () => void;
+  onBlockedUsers: () => void;
   onSendFeedback: () => void;
   onAbout: () => void;
   onLogout: () => void;
@@ -31,6 +32,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onSetPin,
   onWalletSettings,
   onPrivacySettings,
+  onBlockedUsers,
   onSendFeedback,
   onAbout,
   onLogout,
@@ -210,6 +212,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         'Privacy Settings',
         onPrivacySettings,
         'Control your data and privacy'
+      )}
+      
+      {renderMenuItem(
+        'block',
+        'Blocked Users',
+        onBlockedUsers,
+        'Manage blocked users'
       )}
     </View>
   );

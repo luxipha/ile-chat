@@ -11,13 +11,14 @@ interface StickerMessageProps {
   onLongPress?: () => void;
 }
 
-export const StickerMessage: React.FC<StickerMessageProps> = ({
+export const StickerMessage: React.FC<StickerMessageProps> = React.memo(({
   sticker,
   isCurrentUser,
   onPress,
   onLongPress,
 }) => {
-  const scaleAnim = new Animated.Value(0);
+  const scaleAnim = React.useRef(new Animated.Value(0)).current;
+  
 
   React.useEffect(() => {
     // Animation effect when sticker appears
@@ -27,7 +28,7 @@ export const StickerMessage: React.FC<StickerMessageProps> = ({
       tension: 100,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, []); // Empty dependency array to run only once
 
   const handlePress = () => {
     // Small bounce animation on press
@@ -66,10 +67,16 @@ export const StickerMessage: React.FC<StickerMessageProps> = ({
             source={{ uri: sticker.url }}
             style={styles.stickerImage}
             resizeMode="contain"
+            onError={(error) => {
+              console.log('🎭 Error loading sticker:', sticker.id);
+            }}
           />
         ) : (
-          // Fallback for emoji stickers
-          <Text style={styles.stickerEmoji}>{sticker.emoji || '🎭'}</Text>
+          // Fallback for emoji stickers or when URL is missing
+          <View style={styles.fallbackContainer}>
+            <Text style={styles.stickerEmoji}>{sticker.emoji || '🎭'}</Text>
+            <Text style={styles.fallbackText}>{sticker.name || sticker.title || 'Sticker'}</Text>
+          </View>
         )}
       </TouchableOpacity>
       
@@ -79,7 +86,7 @@ export const StickerMessage: React.FC<StickerMessageProps> = ({
       </Text>
     </Animated.View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -116,6 +123,18 @@ const styles = StyleSheet.create({
     fontSize: 0, // Hidden but available for accessibility
     height: 0,
     opacity: 0,
+  },
+  fallbackContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+  },
+  fallbackText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
   },
 });
 

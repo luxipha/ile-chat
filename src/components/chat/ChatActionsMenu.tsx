@@ -14,6 +14,7 @@ interface ChatActionsMenuProps {
   onClearChat?: () => void;
   onBlockUser?: () => void;
   onReportUser?: () => void;
+  isUserBlocked?: boolean;
 }
 
 export const ChatActionsMenu: React.FC<ChatActionsMenuProps> = ({
@@ -26,6 +27,7 @@ export const ChatActionsMenu: React.FC<ChatActionsMenuProps> = ({
   onClearChat,
   onBlockUser,
   onReportUser,
+  isUserBlocked = false,
 }) => {
   const [isMuted, setIsMuted] = React.useState(false);
 
@@ -153,15 +155,22 @@ export const ChatActionsMenu: React.FC<ChatActionsMenuProps> = ({
           </Typography>
         </TouchableOpacity>
 
-        {/* Block User Option (only for direct chats) */}
+        {/* Block/Unblock User Option (only for direct chats) */}
         {!isGroup && (
           <TouchableOpacity 
             onPress={handleBlockUser} 
             style={styles.menuItem}
           >
-            <MaterialIcons name="block" size={20} color={Colors.error} />
-            <Typography variant="body1" style={[styles.menuText, { color: Colors.error }]}>
-              Block User
+            <MaterialIcons 
+              name={isUserBlocked ? "check-circle" : "block"} 
+              size={20} 
+              color={isUserBlocked ? Colors.success : Colors.error} 
+            />
+            <Typography 
+              variant="body1" 
+              style={[styles.menuText, { color: isUserBlocked ? Colors.success : Colors.error }]}
+            >
+              {isUserBlocked ? 'Unblock User' : 'Block User'}
             </Typography>
           </TouchableOpacity>
         )}

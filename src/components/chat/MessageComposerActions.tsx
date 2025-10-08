@@ -145,18 +145,28 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   };
 
 
-  if (!visible && opacityAnim._value === 0) {
+  // Add header with close button for sticker mode
+  const renderStickerHeader = () => (
+    <View style={styles.header}>
+         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+           <MaterialIcons name="close" size={24} color={Colors.gray600} />
+         </TouchableOpacity>
+       </View>
+  );
+
+  if (!visible) {
     return null;
   }
 
   const translateY = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [100, 0], // Slide up from 100px below
+    outputRange: [20, 0], // Slide up from 20px below - more subtle
   });
 
   // Render GIPHY sticker grid mode
   const renderStickerGrid = () => (
     <View style={styles.stickerContainer}>
+      {renderStickerHeader()}
       <GiphyStickerGrid
         onStickerSelect={(sticker) => {
           console.log('GIPHY sticker selected:', sticker);
@@ -170,6 +180,13 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   // Render action buttons mode
   const renderActionButtons = () => (
     <>
+      {/* Header with close button */}
+       <View style={styles.header}>
+         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+           <MaterialIcons name="close" size={24} color={Colors.gray600} />
+         </TouchableOpacity>
+       </View>
+      
       {/* First Row */}
       <View style={styles.row}>
         {/* Camera Option */}
@@ -316,12 +333,20 @@ const styles = StyleSheet.create({
   },
   actionText: {
     textAlign: 'center',
-    color: Colors.textSecondary || '#666',
+    color: Colors.gray600,
     fontSize: 12,
   },
   // Sticker styles
   stickerContainer: {
     height: 200, // Further reduced to better match action buttons height
     backgroundColor: Colors.surface,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingBottom: Spacing.sm,
+  },
+  closeButton: {
+    padding: Spacing.xs,
   },
 });

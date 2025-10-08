@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -6,6 +6,8 @@ import { Avatar } from './Avatar';
 import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
 import StickerMessage from './StickerMessage';
 import { StickerData } from '../../types/sticker';
+import { ImageMessage } from './ImageMessage';
+import { getRelativeTime, formatTime, formatFullDateTime } from '../../utils/timeUtils';
 
 export interface Message {
   id: string;
@@ -13,9 +15,11 @@ export interface Message {
   timestamp: Date;
   isOwn: boolean;
   status?: 'sending' | 'sent' | 'delivered' | 'read';
-  senderName?: string;
+  senderName?: string; // Firebase UID for API calls
+  senderDisplayName?: string; // Display name for UI
   senderAvatar?: string;
-  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker';
+  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image';
+  imageUrl?: string; // For image messages
   paymentData?: {
     amount: number;
     currency: string;
@@ -55,12 +59,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   showSenderName = false,
   onAvatarPress,
 }) => {
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
+  const [showFullTimestamp, setShowFullTimestamp] = useState(false);
+
+  const handleTimestampPress = () => {
+    setShowFullTimestamp(!showFullTimestamp);
+  };
+
+  const getDisplayTime = () => {
+    if (showFullTimestamp) {
+      return formatFullDateTime(message.timestamp);
+    }
+    return getRelativeTime(message.timestamp);
   };
 
   const getStatusIcon = () => {
@@ -108,6 +117,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           />
         );
       
+      case 'image':
+        if (!message.imageUrl) return null;
+        
+        return (
+          <ImageMessage
+            imageUrl={message.imageUrl}
+            isOwn={message.isOwn}
+          />
+        );
+      
       case 'attachment':
         return (
           <View style={styles.attachmentContainer}>
@@ -117,7 +136,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 message.attachmentData?.type === 'gallery' ? 'photo' : 'attach-file'
               } 
               size={20} 
-              color={ChatTheme.primary} 
+              color={ChatTheme.borderActive} 
             />
             <Text style={[
               styles.attachmentText,
@@ -133,7 +152,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         return (
           <View style={styles.loanContainer}>
             <View style={styles.loanHeader}>
-              <MaterialIcons name="handshake" size={20} color={ChatTheme.warning} />
+              <MaterialIcons name="handshake" size={20} color={ChatTheme.accent} />
               <Text style={[
                 styles.loanTitle,
                 message.isOwn ? styles.ownText : styles.otherText
@@ -199,7 +218,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         return (
           <View style={styles.loanContainer}>
             <View style={styles.loanHeader}>
-              <MaterialIcons name="local-offer" size={20} color={ChatTheme.primary} />
+              <MaterialIcons name="local-offer" size={20} color={ChatTheme.borderActive} />
               <Text style={[
                 styles.loanTitle,
                 message.isOwn ? styles.ownText : styles.otherText
@@ -262,7 +281,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         );
       
       case 'sticker':
-        if (!message.stickerData) return null;
+        if (!message.stickerData) {
+          console.log('❌ No sticker data found in message');
+          return null;
+        }
         
         return (
           <StickerMessage
@@ -310,6 +332,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     );
   }
 
+  // Image messages are rendered as standalone components
+  if (message.type === 'image') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
+
   return (
     <View style={[
       styles.container,
@@ -323,7 +357,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             style={styles.avatarContainer}
           >
             <Avatar
-              name={message.senderName || 'User'}
+              name={message.senderDisplayName || message.senderName || 'User'}
               imageUrl={message.senderAvatar}
               size="small"
             />
@@ -335,7 +369,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           message.isOwn ? styles.ownMessageContent : styles.otherMessageContent
         ]}>
           {showSenderName && !message.isOwn && (
-            <Text style={styles.senderName}>{message.senderName}</Text>
+            <Text style={styles.senderName}>{message.senderDisplayName || message.senderName}</Text>
           )}
           
           <View style={[
@@ -345,12 +379,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             {renderMessageContent()}
             
             <View style={styles.footer}>
-              <Text style={[
-                styles.timestamp,
-                message.isOwn ? styles.ownTimestamp : styles.otherTimestamp
-              ]}>
-                {formatTime(message.timestamp)}
-              </Text>
+              <TouchableOpacity onPress={handleTimestampPress}>
+                <Text style={[
+                  styles.timestamp,
+                  message.isOwn ? styles.ownTimestamp : styles.otherTimestamp
+                ]}>
+                  {getDisplayTime()}
+                </Text>
+              </TouchableOpacity>
               {getStatusIcon()}
             </View>
           </View>
@@ -363,7 +399,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 const styles = StyleSheet.create({
   container: {
     marginVertical: ChatSpacing.xs / 2,
-    paddingHorizontal: ChatSpacing.lg,
+    paddingHorizontal: ChatSpacing.xs, // Reduced from md (12px) to xs (4px) for tighter spacing
   },
   ownContainer: {
     alignItems: 'flex-end',
@@ -377,12 +413,12 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   avatarContainer: {
-    marginRight: ChatSpacing.sm,
-    marginBottom: ChatSpacing.xs,
+    marginRight: ChatSpacing.xs, // Reduced from sm (8px) to xs (4px)
+    marginBottom: ChatSpacing.xs / 2, // Reduced from xs (4px) to xs/2 (2px)
   },
   messageContent: {
     flex: 1,
-    maxWidth: '85%',
+    maxWidth: '92%', // Increased from 88% to 92% to use more space on the right side
   },
   ownMessageContent: {
     alignItems: 'flex-end',
@@ -394,7 +430,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: ChatTheme.textSecondary,
     marginBottom: ChatSpacing.xs / 2,
-    marginLeft: ChatSpacing.sm,
+    marginLeft: ChatSpacing.xs, // Reduced from sm (8px) to xs (4px)
   },
   bubble: {
     minWidth: 90,

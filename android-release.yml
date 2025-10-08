@@ -1,0 +1,73 @@
+# This is a GitHub Actions workflow to build and submit your Expo Android app.
+# It triggers when you push a tag that starts with 'v' (e.g., v1.0.0).
+
+name: Build and Submit Android App
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test-and-lint:
+    name: Run Tests and Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Your project's engines field in ts-sdk suggests >=20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linter
+        run: pnpm lint # Assumes you have a 'lint' script in your package.json
+
+      - name: Run unit tests
+        run: pnpm test # Assumes you have a 'test' script in your package.json
+
+  build-and-submit:
+    name: Build and Submit to Play Store
+    runs-on: ubuntu-latest
+    needs: test-and-lint # This job only runs if the 'test-and-lint' job succeeds
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          pnpm-cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Android App
+        # This runs 'eas build' for the 'production' profile on Android.
+        # '--non-interactive' is crucial for CI environments.
+        run: eas build --platform android --profile production --non-interactive
+
+      - name: Submit to Google Play Store
+        # This runs 'eas submit' to upload the latest build to the store.
+        run: eas submit --platform android --latest --non-interactive

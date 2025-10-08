@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, Image, StyleSheet, ViewStyle, TouchableOpacity } from 'react-native';
 import { ChatTheme } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 
@@ -9,6 +9,7 @@ interface AvatarProps {
   size?: 'small' | 'medium' | 'large';
   online?: boolean;
   style?: ViewStyle;
+  onPress?: () => void;
 }
 
 export const Avatar: React.FC<AvatarProps> = ({
@@ -17,6 +18,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   size = 'medium',
   online = false,
   style,
+  onPress,
 }) => {
   const avatarSizes = {
     small: 32,
@@ -41,7 +43,7 @@ export const Avatar: React.FC<AvatarProps> = ({
     style,
   ];
 
-  return (
+  const AvatarContent = () => (
     <View style={styles.wrapper}>
       <View style={avatarStyle}>
         {imageUrl ? (
@@ -73,6 +75,16 @@ export const Avatar: React.FC<AvatarProps> = ({
       )}
     </View>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress}>
+        <AvatarContent />
+      </TouchableOpacity>
+    );
+  }
+
+  return <AvatarContent />;
 };
 
 const styles = StyleSheet.create({

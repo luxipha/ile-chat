@@ -7,13 +7,16 @@ import {
   StyleSheet, 
   TextInput,
   Animated,
-  PanResponder,
-  Dimensions
+  Dimensions,
+  ViewStyle,
+  TextStyle
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { Avatar } from './Avatar';
 import { ChatActionMenu } from './ChatActionMenu';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
+import { Colors } from '../../theme';
 import { Typography } from '../ui/Typography';
 import { EmptyState, EmptyChat, EmptySearch } from '../ui/EmptyState';
 
@@ -39,6 +42,7 @@ interface ConversationListProps {
   onDelete?: (conversationId: string) => void;
   onCreateGroup?: () => void;
   onAddContact?: () => void;
+  onAvatarPress?: (conversation: Conversation) => void;
   userBricksCount?: number;
 }
 
@@ -83,6 +87,7 @@ interface ConversationRowProps {
   onPin: (id: string) => void;
   onHide: (id: string) => void;
   onDelete: (id: string) => void;
+  onAvatarPress?: (item: Conversation) => void;
   isSwiped: boolean;
   onSwipe: (id: string | null) => void;
 }
@@ -93,43 +98,17 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
   onPin,
   onHide,
   onDelete,
+  onAvatarPress,
   isSwiped,
   onSwipe,
 }) => {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const { width } = Dimensions.get('window');
-  const swipeThreshold = width * 0.25;
-  const swipeActionsWidth = 240; // 3 actions * 80px
-
+  const swipeableRef = useRef<Swipeable>(null);
+  
   useEffect(() => {
-    Animated.spring(translateX, {
-      toValue: isSwiped ? -swipeActionsWidth : 0,
-      useNativeDriver: true,
-    }).start();
-  }, [isSwiped, translateX]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only activate for horizontal swipes
-        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 10;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Restrict swipe to left direction
-        const newX = Math.min(0, gestureState.dx);
-        if (newX > -swipeActionsWidth - 20) { // Add a small buffer
-          translateX.setValue(newX);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -swipeThreshold) {
-          onSwipe(item.id);
-        } else {
-          onSwipe(null);
-        }
-      },
-    })
-  ).current;
+    if (!isSwiped && swipeableRef.current) {
+      swipeableRef.current.close();
+    }
+  }, [isSwiped]);
 
   const handlePress = () => {
     if (isSwiped) {
@@ -139,50 +118,84 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
     }
   };
 
-  const renderSwipeActions = () => (
-    <View style={styles.swipeActions}>
-      <TouchableOpacity style={[styles.swipeAction, styles.pinAction]} onPress={() => onPin(item.id)}>
-        <MaterialIcons name={item.isPinned ? "push-pin" : "push-pin"} size={20} color="white" />
-        <Text style={styles.swipeActionText}>{item.isPinned ? 'Unpin' : 'Pin'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.swipeAction, styles.hideAction]} onPress={() => onHide(item.id)}>
-        <MaterialIcons name="visibility-off" size={20} color="white" />
-        <Text style={styles.swipeActionText}>Hide</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.swipeAction, styles.deleteAction]} onPress={() => onDelete(item.id)}>
-        <MaterialIcons name="delete" size={20} color="white" />
-        <Text style={styles.swipeActionText}>Delete</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  const renderRightActions = () => {
+    return (
+      <View style={styles.swipeActions}>
+        {/* TODO: Implement pin feature later
+        <TouchableOpacity 
+          style={[styles.swipeAction, styles.pinAction]} 
+          onPress={() => {
+            onPin(item.id);
+            swipeableRef.current?.close();
+          }}
+        >
+          <MaterialIcons name={item.isPinned ? "push-pin" : "push-pin"} size={20} color="white" />
+          <Text style={styles.swipeActionText}>{item.isPinned ? 'Unpin' : 'Pin'}</Text>
+        </TouchableOpacity>
+        */}
+        {/* TODO: Implement hide feature later
+        <TouchableOpacity 
+          style={[styles.swipeAction, styles.hideAction]} 
+          onPress={() => {
+            onHide(item.id);
+            swipeableRef.current?.close();
+          }}
+        >
+          <MaterialIcons name="visibility-off" size={20} color="white" />
+          <Text style={styles.swipeActionText}>Hide</Text>
+        </TouchableOpacity>
+        */}
+        <TouchableOpacity 
+          style={[styles.swipeAction, styles.deleteAction]} 
+          onPress={() => {
+            onDelete(item.id);
+            swipeableRef.current?.close();
+          }}
+        >
+          <MaterialIcons name="delete" size={20} color="white" />
+          <Text style={styles.swipeActionText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   return (
-    <View style={styles.conversationWrapper}>
-      {renderSwipeActions()}
-      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
-        <TouchableOpacity
-          style={[styles.conversationItem, item.isPinned && styles.pinnedConversation]}
-          onPress={handlePress}
-          activeOpacity={0.7}
-        >
-          {item.isPinned && <View style={styles.pinIndicator}><MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} /></View>}
-          <Avatar name={item.name} imageUrl={item.avatar} online={item.isOnline} size="medium" />
-          <View style={styles.contentContainer}>
-            <View style={styles.headerRow}>
-              <View style={styles.nameContainer}>
-                <Typography variant="h6" style={[styles.name, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{item.name}</Typography>
-                {item.trustBadge && <MaterialIcons name={getTrustBadgeIcon(item.trustBadge) as any} size={16} color={getTrustBadgeColor(item.trustBadge)} style={styles.trustBadge} />}
-              </View>
-              <Text style={styles.timestamp}>{formatTimestamp(item.timestamp)}</Text>
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      friction={2}
+      overshootFriction={8}
+      onSwipeableOpen={() => onSwipe(item.id)}
+      onSwipeableClose={() => onSwipe(null)}
+    >
+      <TouchableOpacity
+        style={[styles.conversationItem, item.isPinned && styles.pinnedConversation]}
+        onPress={handlePress}
+        activeOpacity={0.7}
+      >
+        {item.isPinned && <View style={styles.pinIndicator}><MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} /></View>}
+        <Avatar 
+          name={item.name} 
+          imageUrl={item.avatar} 
+          online={item.isOnline} 
+          size="medium" 
+          onPress={onAvatarPress ? () => onAvatarPress(item) : undefined}
+        />
+        <View style={styles.contentContainer}>
+          <View style={styles.headerRow}>
+            <View style={styles.nameContainer}>
+              <Typography variant="h6" style={[styles.name, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{item.name}</Typography>
+              {item.trustBadge && <MaterialIcons name={getTrustBadgeIcon(item.trustBadge) as any} size={16} color={getTrustBadgeColor(item.trustBadge)} style={styles.trustBadge} />}
             </View>
-            <View style={styles.messageRow}>
-              <Typography variant="body2" color="textSecondary" style={[styles.lastMessage, item.unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>{item.lastMessage}</Typography>
-              {item.unreadCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text></View>}
-            </View>
+            <Text style={styles.timestamp}>{formatTimestamp(item.timestamp)}</Text>
           </View>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+          <View style={styles.messageRow}>
+            <Typography variant="body2" color="textSecondary" style={[styles.lastMessage, item.unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>{item.lastMessage}</Typography>
+            {item.unreadCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text></View>}
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Swipeable>
   );
 };
 
@@ -194,6 +207,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   onDelete = () => {},
   onCreateGroup = () => {},
   onAddContact = () => {},
+  onAvatarPress,
   userBricksCount = 0,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -224,6 +238,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         onPin={(id) => { onPin(id); setSwipedItemId(null); }}
         onHide={(id) => { onHide(id); setSwipedItemId(null); }}
         onDelete={(id) => { onDelete(id); setSwipedItemId(null); }}
+        onAvatarPress={onAvatarPress}
         isSwiped={swipedItemId === item.id}
         onSwipe={setSwipedItemId}
       />
@@ -252,7 +267,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             onPress={handleActionMenuPress} 
             style={styles.createGroupButton}
           >
-            <MaterialIcons name="add" size={24} color={ChatTheme.sendBubbleBackground} />
+            <MaterialIcons name="add" size={24} color={Colors.primary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -275,7 +290,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   );
 
   return (
-    <View style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
       {renderHeader()}
       <FlatList
         data={filteredConversations}
@@ -313,11 +328,52 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         }}
         anchorPosition={menuAnchorPosition}
       />
-    </View>
+    </GestureHandlerRootView>
   );
 };
 
-const styles = StyleSheet.create({
+// Define the styles type to include all our custom properties
+interface ConversationListStyles {
+  container: ViewStyle;
+  header: ViewStyle;
+  headerTop: ViewStyle;
+  headerTitle: ViewStyle;
+  headerActions: ViewStyle;
+  createGroupButton: ViewStyle;
+  headerBricksContainer: ViewStyle;
+  headerBricksText: TextStyle;
+  searchContainer: ViewStyle;
+  searchIcon: ViewStyle;
+  searchInput: TextStyle;
+  conversationWrapper: ViewStyle;
+  conversationAnimated: ViewStyle;
+  pinnedConversation: ViewStyle;
+  conversationItem: ViewStyle;
+  pinIndicator: ViewStyle;
+  swipeActions: ViewStyle;
+  swipeAction: ViewStyle;
+  pinAction: ViewStyle;
+  hideAction: ViewStyle;
+  deleteAction: ViewStyle;
+  swipeActionText: TextStyle;
+  contentContainer: ViewStyle;
+  headerRow: ViewStyle;
+  name: TextStyle;
+  unreadName: TextStyle;
+  trustBadge: ViewStyle;
+  timestamp: TextStyle;
+  nameContainer: ViewStyle;
+  bricksContainer: ViewStyle;
+  bricksText: TextStyle;
+  messageRow: ViewStyle;
+  lastMessage: TextStyle;
+  unreadMessage: TextStyle;
+  badge: ViewStyle;
+  badgeText: TextStyle;
+  separator: ViewStyle;
+}
+
+const styles = StyleSheet.create<ConversationListStyles>({
   container: {
     flex: 1,
     backgroundColor: ChatTheme.background1,
@@ -347,7 +403,16 @@ const styles = StyleSheet.create({
   createGroupButton: {
     padding: ChatSpacing.sm,
     borderRadius: 20,
-    backgroundColor: ChatTheme.background3,
+    backgroundColor: ChatTheme.accent,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   headerBricksContainer: {
     flexDirection: 'row',
@@ -361,7 +426,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: ChatTheme.accent,
     fontWeight: '600',
-    marginLeft: ChatSpacing.xs / 2,
+    marginLeft: 4, // Half of ChatSpacing.xs
   },
   searchContainer: {
     flexDirection: 'row',
@@ -408,19 +473,15 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   swipeActions: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
     flexDirection: 'row',
-    alignItems: 'center',
-    zIndex: 0,
+    width: 80, // 1 action * 80px (pin and hide actions commented out)
+    alignItems: 'stretch',
   },
   swipeAction: {
     width: 80,
     height: '100%',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: ChatSpacing.sm,
   },
   pinAction: {
@@ -436,22 +497,25 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '500',
-    marginTop: ChatSpacing.xs / 2,
+    marginTop: 4, // Half of ChatSpacing.xs
   },
   contentContainer: {
     flex: 1,
     marginLeft: ChatSpacing.md,
     justifyContent: 'center',
+    width: '80%', // Ensure content has a fixed width
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: ChatSpacing.xs / 2,
+    width: '100%', // Ensure full width
   },
   name: {
     fontWeight: '600',
     marginRight: ChatSpacing.xs,
+    flexShrink: 1, // Allow text to shrink
   },
   unreadName: {
     fontWeight: '700',
@@ -463,12 +527,15 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 12,
     color: ChatTheme.textSecondary,
+    flexShrink: 0, // Prevent timestamp from shrinking
   },
   nameContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: ChatSpacing.sm,
+    flexShrink: 1, // Allow container to shrink
+    overflow: 'hidden', // Hide overflow
   },
   bricksContainer: {
     flexDirection: 'row',
@@ -488,10 +555,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%', // Ensure full width
   },
   lastMessage: {
     flex: 1,
     marginRight: ChatSpacing.sm,
+    flexShrink: 1, // Allow text to shrink
   },
   unreadMessage: {
     fontWeight: '500',

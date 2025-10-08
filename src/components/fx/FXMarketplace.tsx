@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -9,6 +9,8 @@ import {
   Image,
   Alert,
   Modal,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
@@ -16,6 +18,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { FXOffer, FXFilter, Currency, PaymentMethod } from '../../types/fx';
+import fxService, { FXDebugUtils } from '../../services/fxService';
 
 interface FXMarketplaceProps {
   onOfferSelect: (offer: FXOffer) => void;
@@ -163,11 +166,91 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     onlineOnly: true,
   });
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
+  
+  // Real API data state
+  const [offers, setOffers] = useState<FXOffer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
 
   // Mock user data - this would come from user context/store in real app
   const mockUser = {
     balance: 800, // Less than $1000 to show eligibility gate
     isMerchant: false,
+  };
+
+  // Load data on component mount
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  // Load offers when filters change
+  useEffect(() => {
+    if (currencies.length > 0) { // Only load offers after currencies are loaded
+      loadOffers();
+    }
+  }, [filters]);
+
+  const loadInitialData = async () => {
+    console.log('🔄 FX Marketplace - Loading initial data...');
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Load currencies and payment methods
+      const loadedCurrencies = fxService.getCurrencies();
+      const loadedPaymentMethods = fxService.getPaymentMethods();
+
+      console.log('✅ FX Marketplace - Static data loaded:', {
+        currenciesCount: loadedCurrencies.length,
+        paymentMethodsCount: loadedPaymentMethods.length
+      });
+
+      setCurrencies(loadedCurrencies);
+      setPaymentMethods(loadedPaymentMethods);
+
+      // Load offers
+      await loadOffers();
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load marketplace data';
+      console.error('❌ FX Marketplace - Initial load error:', err);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadOffers = async () => {
+    console.log('🔄 FX Marketplace - Loading offers with filters:', filters);
+    try {
+      const response = await fxService.getOffers(filters);
+      
+      if (response.success) {
+        console.log('✅ FX Marketplace - Offers loaded successfully:', {
+          offersCount: response.offers.length,
+          isMockData: (response as any)._isMockData || false
+        });
+        setOffers(response.offers);
+        setError(null);
+      } else {
+        console.error('❌ FX Marketplace - Failed to load offers:', response.error);
+        setError(response.error || 'Failed to load offers');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load offers';
+      console.error('❌ FX Marketplace - Load offers error:', err);
+      setError(errorMessage);
+    }
+  };
+
+  const handleRefresh = async () => {
+    console.log('🔄 FX Marketplace - Manual refresh triggered');
+    setRefreshing(true);
+    await loadOffers();
+    setRefreshing(false);
   };
 
   const checkUserEligibility = () => {
@@ -184,11 +267,15 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   };
 
   const filteredOffers = useMemo(() => {
-    let offers = MOCK_OFFERS.filter(offer => {
+    console.log('🔄 FX Marketplace - Filtering offers:', {
+      totalOffers: offers.length,
+      searchQuery,
+      filters
+    });
+
+    let filteredResults = offers.filter(offer => {
       const matchesSearch = 
-        offer.maker.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        offer.sellCurrency.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        offer.buyCurrency.code.toLowerCase().includes(searchQuery.toLowerCase());
+        offer.maker.name.toLowerCase().includes(searchQuery.toLowerCase());
       
       const matchesOnlineFilter = !filters.onlineOnly || offer.maker.onlineStatus === 'online';
       const matchesCurrency = 
@@ -199,7 +286,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     });
 
     // Sort offers
-    offers.sort((a, b) => {
+    filteredResults.sort((a, b) => {
       switch (filters.sortBy) {
         case 'best_rate':
           return a.margin - b.margin; // Lower margin = better rate for buyer
@@ -214,8 +301,13 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
       }
     });
 
-    return offers;
-  }, [searchQuery, filters]);
+    console.log('✅ FX Marketplace - Offers filtered:', {
+      filteredCount: filteredResults.length,
+      totalCount: offers.length
+    });
+
+    return filteredResults;
+  }, [offers, searchQuery, filters]);
 
   const renderFilters = () => (
     <View style={styles.filtersContainer}>
@@ -474,7 +566,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
           <MaterialIcons name="search" size={20} color={Colors.gray400} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search traders, currencies..."
+            placeholder="Search traders..."
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
@@ -487,27 +579,56 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
       {/* Market Stats */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsContainer}>
         <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary">24h Volume</Typography>
-          <Typography variant="h6" color="primary">$2.4M</Typography>
+          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>24h Volume</Typography>
+          <Typography variant="body1" color="primary" style={styles.statValue}>$2.4M</Typography>
         </Card>
         <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary">Active Offers</Typography>
-          <Typography variant="h6" color="secondary">{filteredOffers.length}</Typography>
-        </Card>
-        <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary">Online Traders</Typography>
-          <Typography variant="h6" color="success">
+          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>Online Traders</Typography>
+          <Typography variant="body1" color="success" style={styles.statValue}>
             {filteredOffers.filter(o => o.maker.onlineStatus === 'online').length}
           </Typography>
         </Card>
         <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary">Avg Response</Typography>
-          <Typography variant="h6">~8 min</Typography>
+          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>Avg Response</Typography>
+          <Typography variant="body1" style={styles.statValue}>~8 min</Typography>
         </Card>
       </ScrollView>
 
       {/* Offers List */}
-      {filteredOffers.length === 0 ? (
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Typography variant="body1" style={styles.loadingText}>
+            Loading offers...
+          </Typography>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error-outline" size={48} color={Colors.error} />
+          <Typography variant="h6" style={styles.errorTitle}>
+            Failed to load offers
+          </Typography>
+          <Typography variant="body2" color="textSecondary" style={styles.errorText}>
+            {error}
+          </Typography>
+          <Button
+            title="Retry"
+            onPress={loadOffers}
+            style={styles.retryButton}
+            variant="outline"
+          />
+          <Button
+            title="Debug Info"
+            onPress={async () => {
+              const debugData = await FXDebugUtils.exportDebugLogs();
+              Alert.alert('Debug Info', 'Check console for debug logs');
+            }}
+            style={styles.debugButton}
+            variant="text"
+            size="small"
+          />
+        </View>
+      ) : filteredOffers.length === 0 ? (
         renderEmptyState()
       ) : (
         <FlatList
@@ -516,6 +637,14 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
           renderItem={renderOfferCard}
           contentContainerStyle={styles.offersList}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
         />
       )}
 
@@ -677,14 +806,27 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
+    maxHeight: 60, // Limit the height of stats container
   },
   statCard: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    marginRight: Spacing.md,
-    minWidth: 100,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginRight: Spacing.sm,
+    minWidth: 90,
+    maxHeight: 50, // Limit card height
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statLabel: {
+    fontSize: 10,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   offersList: {
     paddingHorizontal: Spacing.lg,
@@ -907,5 +1049,38 @@ const styles = StyleSheet.create({
   },
   modalSecondaryButton: {
     width: '100%',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Spacing.xl * 2,
+  },
+  loadingText: {
+    marginTop: Spacing.md,
+    color: Colors.textSecondary,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xl * 2,
+  },
+  errorTitle: {
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
+  },
+  errorText: {
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+  },
+  retryButton: {
+    marginBottom: Spacing.md,
+    minWidth: 120,
+  },
+  debugButton: {
+    minWidth: 100,
   },
 });

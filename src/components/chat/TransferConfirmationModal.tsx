@@ -56,7 +56,7 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
   const [aptosBalances, setAptosBalances] = useState<Record<string, string>>({});
 
   // Use real wallet balances
-  const { balances: crossmintBalances, isLoading: crossmintLoading } = useBalance();
+  const { balances: Balances, isLoading: Loading } = useBalance();
 
   // Fetch Aptos balances
   useEffect(() => {
@@ -98,11 +98,11 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
       icon: 'currency-bitcoin',
       type: 'crypto',
     },
-    // Include CrossMint USDC if available
-    ...(crossmintBalances?.usdc ? [{
-      id: 'usdc_crossmint',
-      name: 'USDC (CrossMint)',
-      balance: parseFloat(crossmintBalances.usdc.amount || '0'),
+    // Include  USDC if available
+    ...(Balances?.usdc ? [{
+      id: 'usdc_',
+      name: 'USDC ()',
+      balance: parseFloat(Balances.usdc.amount || '0'),
       currency: 'USDC',
       icon: 'account-balance-wallet',
       type: 'crypto' as const,

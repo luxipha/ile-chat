@@ -116,6 +116,9 @@ export interface FXTrade {
   // Chat room
   chatRoomId: string;
   
+  // Payment proof
+  paymentProofUrl?: string;
+  
   // Blockchain
   releaseHash?: string;
   

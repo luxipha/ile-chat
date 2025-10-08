@@ -1,11 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL } from '../config/apiConfig';
 import { User } from './authService';
-
-// Detect environment and use appropriate URL
-const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const API_BASE_URL = isWeb
-  ? 'http://localhost:3000'  // Web browser
-  : 'http://192.168.31.102:3000'; // Mobile device
 
 export interface EmailVerificationResponse {
   success: boolean;
@@ -31,6 +26,46 @@ export interface AdditionalUserInfo {
 class EmailAuthService {
   private sessionId: string | null = null;
 
+  private async parseJsonResponse(response: Response): Promise<{
+    data?: any;
+    rawText?: string;
+    parseError?: Error;
+  }> {
+    const clonedResponse = response.clone();
+
+    try {
+      const data = await clonedResponse.json();
+      return { data };
+    } catch (error) {
+      const rawText = await response.text().catch(() => '');
+      console.error('Failed to parse JSON response', {
+        status: response.status,
+        statusText: response.statusText,
+        rawText,
+        error,
+      });
+      return { rawText, parseError: error instanceof Error ? error : new Error('JSON_PARSE_ERROR') };
+    }
+  }
+
+  private extractErrorMessage(result: any, fallback: string, rawText?: string): string {
+    if (result) {
+      if (typeof result === 'string') {
+        return result;
+      }
+
+      if (typeof result === 'object') {
+        return result.error || result.message || fallback;
+      }
+    }
+
+    if (rawText) {
+      return rawText.replace(/<[^>]*>?/gm, '').trim() || fallback;
+    }
+
+    return fallback;
+  }
+
   // Step 1: Send verification code to email
   async sendVerificationCode(email: string): Promise<EmailVerificationResponse> {
     try {
@@ -42,23 +77,23 @@ class EmailAuthService {
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
 
-      const result = await response.json();
+      const { data: result, rawText } = await this.parseJsonResponse(response);
 
       if (!response.ok) {
         return { 
           success: false, 
-          message: result.error || 'Failed to send verification code',
-          error: result.error 
+          message: this.extractErrorMessage(result, 'Failed to send verification code', rawText),
+          error: this.extractErrorMessage(result, 'Failed to send verification code', rawText)
         };
       }
 
       // Store session ID for verification step
-      this.sessionId = result.sessionId;
-      
+      this.sessionId = result?.sessionId || null;
+
       return { 
         success: true, 
-        message: result.message || 'Verification code sent successfully',
-        sessionId: result.sessionId
+        message: this.extractErrorMessage(result, 'Verification code sent successfully', rawText),
+        sessionId: result?.sessionId
       };
     } catch (error) {
       console.error('Send verification error:', error);
@@ -91,17 +126,17 @@ class EmailAuthService {
         }),
       });
 
-      const result = await response.json();
+      const { data: result, rawText } = await this.parseJsonResponse(response);
 
       if (!response.ok) {
         return { 
           success: false, 
-          error: result.error || 'Verification failed'
+          error: this.extractErrorMessage(result, 'Verification failed', rawText)
         };
       }
 
       // Both existing and new users get complete authentication
-      if (result.user && result.token) {
+      if (result?.user && result?.token) {
         await AsyncStorage.setItem('authToken', result.token);
         await AsyncStorage.setItem('userData', JSON.stringify(result.user));
         
@@ -150,25 +185,25 @@ class EmailAuthService {
         }),
       });
 
-      const result = await response.json();
+      const { data: result, rawText } = await this.parseJsonResponse(response);
 
       if (!response.ok) {
         return { 
           success: false, 
-          error: result.error || 'Registration failed'
+          error: this.extractErrorMessage(result, 'Registration failed', rawText)
         };
       }
 
       // Store authentication data
-      await AsyncStorage.setItem('authToken', result.token);
-      await AsyncStorage.setItem('userData', JSON.stringify(result.user));
+      await AsyncStorage.setItem('authToken', result?.token);
+      await AsyncStorage.setItem('userData', JSON.stringify(result?.user));
       
       this.sessionId = null; // Clear session
       
       return {
         success: true,
-        user: result.user,
-        token: result.token,
+        user: result?.user,
+        token: result?.token,
         isNewUser: true
       };
     } catch (error) {
@@ -199,19 +234,19 @@ class EmailAuthService {
         body: JSON.stringify({ sessionId: this.sessionId }),
       });
 
-      const result = await response.json();
+      const { data: result, rawText } = await this.parseJsonResponse(response);
 
       if (!response.ok) {
         return { 
           success: false, 
-          message: result.error || 'Failed to resend verification code',
-          error: result.error 
+          message: this.extractErrorMessage(result, 'Failed to resend verification code', rawText),
+          error: this.extractErrorMessage(result, 'Failed to resend verification code', rawText)
         };
       }
 
       return { 
         success: true, 
-        message: result.message || 'Verification code sent successfully'
+        message: this.extractErrorMessage(result, 'Verification code sent successfully', rawText)
       };
     } catch (error) {
       console.error('Resend verification error:', error);

@@ -14,6 +14,7 @@ interface ChatHeaderProps {
   onBack: () => void;
   onOptions?: () => void;
   onGroupInfo?: () => void;
+  onAvatarPress?: () => void;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -25,6 +26,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   onBack,
   onOptions,
   onGroupInfo,
+  onAvatarPress,
 }) => {
   const getSubtitle = () => {
     if (isGroup) {
@@ -48,6 +50,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           imageUrl={avatar}
           online={isOnline}
           size="small"
+          onPress={onAvatarPress}
         />
         
         <TouchableOpacity 

@@ -14,7 +14,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { RecipientPicker } from './RecipientPicker';
-import crossmintService from '../../services/crossmintService';
+import Service from '../../services/Service';
 import aptosService from '../../services/aptosService';
 
 interface Contact {
