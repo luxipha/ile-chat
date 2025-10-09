@@ -34,6 +34,10 @@ export const Colors = {
   background: '#F8F9FA',
   surface: '#FFFFFF',
   overlay: 'rgba(0, 0, 0, 0.5)',
+  
+  // Semantic Colors
+  textPrimary: '#202124',
+  border: '#DADCE0',
 };
 
 export const Typography = {

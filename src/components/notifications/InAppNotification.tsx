@@ -179,7 +179,7 @@ export const InAppNotification: React.FC<InAppNotificationProps> = ({
           name={notification.title}
           imageUrl={notification.avatar}
           size="medium"
-          shape="rounded"
+          
         />
       );
     }

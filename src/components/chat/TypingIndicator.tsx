@@ -90,9 +90,10 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ typingUsers })
         {/* Show avatar of first typing user */}
         <View style={styles.avatarContainer}>
           <Avatar
+            userId={typingUsers[0].id}
             name={typingUsers[0].name}
-            imageUrl={typingUsers[0].avatar}
             size="small"
+            
           />
         </View>
         

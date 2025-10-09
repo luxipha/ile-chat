@@ -158,7 +158,7 @@ export const NotificationScreen: React.FC<NotificationScreenProps> = ({
           name={notification.title}
           imageUrl={notification.avatar}
           size="medium"
-          shape="rounded"
+          
         />
       );
     }

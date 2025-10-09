@@ -10,7 +10,6 @@ interface AvatarProps {
   imageUrl?: string; // Optional - will auto-load current user's avatar if not provided
   userId?: string; // If provided, loads that user's profile. If not, loads current user
   size?: 'small' | 'medium' | 'large' | 'xlarge' | number;
-  shape?: 'circle' | 'rounded';
   online?: boolean;
   style?: ViewStyle;
   onPress?: () => void;
@@ -40,7 +39,6 @@ export const Avatar: React.FC<AvatarProps> = ({
   imageUrl: providedImageUrl,
   userId,
   size = 'medium',
-  shape = 'circle',
   online = false,
   style,
   onPress,
@@ -52,9 +50,9 @@ export const Avatar: React.FC<AvatarProps> = ({
   const [profileData, setProfileData] = useState<{ name: string; avatar?: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Auto-load profile if no data provided and not disabled
+  // Auto-load profile if userId provided or if no complete data provided and not disabled
   useEffect(() => {
-    if (!disableAutoLoad && (!providedName || !providedImageUrl)) {
+    if (!disableAutoLoad && (userId || (!providedName || !providedImageUrl))) {
       loadProfileData();
     }
   }, [userId, providedName, providedImageUrl, disableAutoLoad]);
@@ -66,9 +64,12 @@ export const Avatar: React.FC<AvatarProps> = ({
       const cacheKey = userId || 'current';
       const now = Date.now();
       
+      console.log('🔍 Avatar loadProfileData called:', { userId, cacheKey, providedName, providedImageUrl });
+      
       // Check cache first
       const cached = globalAvatarCache.get(cacheKey);
       if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+        console.log('📦 Avatar using cached data:', { cacheKey, cached });
         setProfileData({ name: cached.name, avatar: cached.avatar });
         setLoading(false);
         return;
@@ -147,11 +148,8 @@ export const Avatar: React.FC<AvatarProps> = ({
 
   const initials = getInitials(finalName);
 
-  // Calculate border radius based on shape
+  // Always use rounded square
   const getBorderRadius = (): number => {
-    if (shape === 'circle') {
-      return avatarSize / 2;
-    }
     return avatarSize * 0.2; // Rounded square
   };
 
@@ -202,8 +200,8 @@ export const Avatar: React.FC<AvatarProps> = ({
               width: avatarSize * 0.25,
               height: avatarSize * 0.25,
               borderRadius: avatarSize * 0.125,
-              right: shape === 'circle' ? 2 : -2,
-              top: shape === 'circle' ? 2 : -2,
+              right: -2,
+              top: -2,
             }
           ]} 
         />

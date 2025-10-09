@@ -532,10 +532,11 @@ export const GroupDetailsScreen: React.FC<GroupDetailsScreenProps> = ({
   const renderMemberItem = ({ item }: { item: GroupMember }) => (
     <View style={styles.memberItem}>
       <Avatar
+        userId={item.id}
         name={item.name}
-        imageUrl={item.avatar}
         online={item.isOnline}
         size="medium"
+        
       />
       <View style={styles.memberInfo}>
         <View style={styles.memberNameRow}>
@@ -1244,8 +1245,9 @@ export const GroupDetailsScreen: React.FC<GroupDetailsScreenProps> = ({
           {groupDetails?.avatar ? (
             <Avatar
               name={groupDetails.name}
-              imageUrl={groupDetails.avatar}
+              disableAutoLoad={true}
               size="large"
+              
             />
           ) : (
             <MaterialIcons name="group" size={48} color={ChatTheme.sendBubbleBackground} />

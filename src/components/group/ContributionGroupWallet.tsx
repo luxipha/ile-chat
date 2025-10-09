@@ -365,7 +365,7 @@ export const ContributionGroupWallet: React.FC<ContributionGroupWalletProps> = (
         
         {memberContributions.map((member) => (
           <View key={member.id} style={styles.memberItem}>
-            <Avatar name={member.name} imageUrl={member.avatar} size="medium" />
+            <Avatar userId={member.id} name={member.name} size="medium" />
             <View style={styles.memberInfo}>
               <Typography variant="h6">{member.name}</Typography>
               <Typography variant="caption" color="textSecondary">

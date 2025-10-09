@@ -74,7 +74,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
               userId={userId}
               name={name}
               size="large"
-              shape="rounded"
+              
             />
             <View style={styles.trustBadgeOverlay}>
               <Typography variant="caption" style={styles.trustBadgeText}>

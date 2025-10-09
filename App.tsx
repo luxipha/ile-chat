@@ -1971,8 +1971,8 @@ function App() {
           onPress={() => handleContactPress(contact)}
         >
           <Avatar
+            userId={contact.userId || contact.id}
             name={contact.name}
-            imageUrl={contact.profilePicture || contact.avatar}
             online={contact.isOnline}
             size="medium"
             shape="rounded"
@@ -4383,5 +4383,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.md,
     marginTop: Spacing.sm,
+  },
+  avatarText: {
+    color: Colors.gray600,
+    fontWeight: '600',
   },
 });

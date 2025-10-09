@@ -171,14 +171,11 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
           </Typography>
 
           <Button
-            variant="primary"
-            size="sm"
+            title={isPosting ? 'Posting...' : 'Post'}
             onPress={handlePost}
             disabled={!content.trim() || isPosting}
             style={styles.postButton}
-          >
-            {isPosting ? 'Posting...' : 'Post'}
-          </Button>
+          />
         </View>
 
         <ScrollView style={styles.content}>
@@ -188,7 +185,7 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
               name={currentUser?.name || 'User'}
               imageUrl={undefined}
               size="medium"
-              shape="rounded"
+              
             />
             <View style={styles.userDetails}>
               <Typography variant="h6" style={styles.userName}>

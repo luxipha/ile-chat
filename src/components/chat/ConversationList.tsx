@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatActionMenu } from './ChatActionMenu';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Colors } from '../../theme';
@@ -175,10 +175,11 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       >
         {item.isPinned && <View style={styles.pinIndicator}><MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} /></View>}
         <Avatar 
+          userId={item.id}
           name={item.name} 
-          imageUrl={item.avatar} 
           online={item.isOnline} 
           size="medium" 
+          
           onPress={onAvatarPress ? () => onAvatarPress(item) : undefined}
         />
         <View style={styles.contentContainer}>

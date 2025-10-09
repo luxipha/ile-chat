@@ -158,50 +158,29 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
     setError(null);
 
     try {
-      // Add each member to the group using the chatService
-      const results = await Promise.allSettled(
-        selectedMembers.map(member => 
-          chatService.inviteToGroup(groupId, member.id, member.name, member.email)
-        )
-      );
+      // Add members to the group using the chatService
+      const memberIds = selectedMembers.map(member => member.id);
+      const result = await chatService.inviteToGroup(groupId, memberIds);
 
-      // Check results
-      const successful = results.filter(result => result.status === 'fulfilled');
-      const failed = results.filter(result => result.status === 'rejected');
+      console.log('📊 [AddMembersModal] Member addition result:', result);
 
-      console.log('📊 [AddMembersModal] Member addition results:', {
-        successful: successful.length,
-        failed: failed.length,
-        total: results.length,
-      });
-
-      if (failed.length > 0) {
-        console.error('❌ [AddMembersModal] Some invitations failed:', failed);
-        // Show partial success message
-        const failedCount = failed.length;
-        const successCount = successful.length;
-        
-        if (successCount > 0) {
-          Alert.alert(
-            'Partial Success',
-            `${successCount} member(s) added successfully, but ${failedCount} invitation(s) failed.`
-          );
-        } else {
-          throw new Error('All invitations failed');
-        }
+      if (result.success) {
+        console.log(`✅ Successfully added ${selectedMembers.length} members to group`);
+        Alert.alert(
+          'Success', 
+          `Added ${selectedMembers.length} member${selectedMembers.length !== 1 ? 's' : ''} to the group`,
+          [{ text: 'OK', onPress: onClose }]
+        );
+        setSelectedMembers([]);
       } else {
-        console.log('✅ [AddMembersModal] All members added successfully');
-        Alert.alert('Success', `${selectedMembers.length} member(s) added to the group!`);
+        console.warn(`❌ Failed to add members to group:`, result.error);
+        Alert.alert('Error', result.error || 'Failed to add members to group');
       }
 
       // Notify parent component
-      if (onMembersAdded && successful.length > 0) {
-        const addedMembers = selectedMembers.slice(0, successful.length);
-        onMembersAdded(addedMembers);
+      if (onMembersAdded && result.success) {
+        onMembersAdded(selectedMembers);
       }
-
-      // Close modal
-      handleClose();
     } catch (error) {
       console.error('❌ [AddMembersModal] Error adding members:', error);
       setError('Failed to add members. Please try again.');
@@ -292,7 +271,7 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
         <View style={styles.groupInfoContainer}>
           <Avatar 
             name={groupDetails?.name || 'Group'} 
-            imageUrl={groupDetails?.avatar}
+            disableAutoLoad={true}
             size="medium" 
           />
           <View style={styles.groupInfo}>
@@ -331,7 +310,7 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
                     style={styles.selectedMember}
                     onPress={() => toggleMemberSelection(member)}
                   >
-                    <Avatar name={member.name} imageUrl={member.avatar} size="small" />
+                    <Avatar userId={member.id} name={member.name} size="small" />
                     <View style={styles.removeMemberButton}>
                       <MaterialIcons name="close" size={12} color={ChatTheme.background1} />
                     </View>
@@ -352,8 +331,8 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
               onPress={() => toggleMemberSelection(item)}
             >
               <Avatar 
+                userId={item.id}
                 name={item.name} 
-                imageUrl={item.avatar} 
                 online={item.isOnline} 
                 size="medium" 
               />
@@ -416,10 +395,7 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
             }
             onPress={handleAddMembers}
             disabled={!canAddMembers}
-            style={[
-              styles.addButton,
-              !canAddMembers && styles.disabledButton
-            ]}
+            style={!canAddMembers ? [styles.addButton, styles.disabledButton] : styles.addButton}
           />
         </View>
       </View>

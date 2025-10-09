@@ -357,9 +357,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             style={styles.avatarContainer}
           >
             <Avatar
+              userId={message.senderName}
               name={message.senderDisplayName || message.senderName || 'User'}
-              imageUrl={message.senderAvatar}
               size="small"
+              
             />
           </TouchableOpacity>
         )}

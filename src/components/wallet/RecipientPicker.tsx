@@ -111,7 +111,7 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
         name={contact.name}
         imageUrl={contact.avatar}
         size="medium"
-        shape="rounded"
+        
       />
       <View style={styles.contactInfo}>
         <Typography variant="h6">{contact.name}</Typography>

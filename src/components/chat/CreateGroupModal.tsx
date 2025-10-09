@@ -15,7 +15,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 
@@ -395,7 +395,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   style={styles.selectedMember}
                   onPress={() => toggleMemberSelection(member)}
                 >
-                  <Avatar name={member.name} imageUrl={member.avatar} size="small" />
+                  <Avatar userId={member.id} name={member.name} size="small"  />
                   <View style={styles.removeMemberButton}>
                     <MaterialIcons name="close" size={12} color={ChatTheme.background1} />
                   </View>
@@ -414,7 +414,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             style={styles.contactItem}
             onPress={() => toggleMemberSelection(item)}
           >
-            <Avatar name={item.name} imageUrl={item.avatar} online={item.isOnline} size="medium" />
+            <Avatar userId={item.id} name={item.name} online={item.isOnline} size="medium"  />
             <View style={styles.contactInfo}>
               <Typography variant="h6">{item.name}</Typography>
               <Typography variant="caption" color="textSecondary">
@@ -492,7 +492,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           <View style={styles.membersList}>
             {/* You (admin) */}
             <View style={styles.memberItem}>
-              <Avatar name="You" size="small" />
+              <Avatar size="small" />
               <Typography variant="body2" style={styles.memberName}>You</Typography>
               <View style={styles.adminBadge}>
                 <Typography variant="caption" style={styles.adminBadgeText}>Admin</Typography>
@@ -501,7 +501,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             {/* Selected members */}
             {selectedMembers.map((member) => (
               <View key={member.id} style={styles.memberItem}>
-                <Avatar name={member.name} imageUrl={member.avatar} size="small" />
+                <Avatar userId={member.id} name={member.name} size="small" />
                 <Typography variant="body2" style={styles.memberName}>{member.name}</Typography>
               </View>
             ))}

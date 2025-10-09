@@ -11,7 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Avatar } from '../chat/Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 
@@ -346,7 +346,7 @@ export const GroupWallet: React.FC<GroupWalletProps> = ({
 
   const renderMemberItem = ({ item }: { item: MemberContribution }) => (
     <View style={styles.memberItem}>
-      <Avatar name={item.name} imageUrl={item.avatar} size="medium" />
+      <Avatar userId={item.id} name={item.name} size="medium"  />
       <View style={styles.memberInfo}>
         <View style={styles.memberNameRow}>
           <Typography variant="h6">{item.name}</Typography>
