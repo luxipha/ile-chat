@@ -10,13 +10,17 @@ import {
   SafeAreaView,
   Animated,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import authService from '../../services/authService';
 import profileService from '../../services/profileService';
+import { API_BASE_URL } from '../../config/apiConfig';
 
 interface ProfileScreenProps {
   onBack: () => void;
@@ -49,6 +53,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [editField, setEditField] = useState<string>('');
   const [editValue, setEditValue] = useState<string>('');
   const [updating, setUpdating] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  
+  // Image preview states
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  
   const slideAnim = useState(new Animated.Value(0))[0];
 
   useEffect(() => {
@@ -64,23 +73,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           setUserProfile({
             id: currentUser.id,
             name: profileResult.profile.name || currentUser.name || '',
-            email: profileResult.profile.email || currentUser.email,
-            phone: profileResult.profile.phone,
-            gender: profileResult.profile.gender,
-            dateOfBirth: profileResult.profile.dateOfBirth,
-            region: profileResult.profile.region,
-            address: profileResult.profile.address,
-            bio: profileResult.profile.bio,
+            email: undefined, // Email not available in ChatUserProfile
+            phone: undefined, // Phone not available in ChatUserProfile
+            gender: undefined, // Gender not available in ChatUserProfile
+            dateOfBirth: undefined, // Date of birth not available in ChatUserProfile
+            region: undefined, // Region not available in ChatUserProfile
+            address: undefined, // Address not available in ChatUserProfile
+            bio: undefined, // Bio not available in ChatUserProfile
             avatar: profileResult.profile.avatar,
-            bricks: currentUser.bricks || 0,
+            bricks: 0,
           });
         } else {
           // Fallback to basic user data
           setUserProfile({
             id: currentUser.id,
             name: currentUser.name || '',
-            email: currentUser.email,
-            bricks: currentUser.bricks || 0,
+            email: undefined, // Email not available in ChatUserProfile
+            bricks: 0,
           });
         }
       }
@@ -115,6 +124,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       setShowEditModal(false);
       setEditField('');
       setEditValue('');
+      setSelectedImageUri(null); // Clear selected image when closing modal
     });
   };
 
@@ -179,10 +189,291 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  const handleImagePicker = (type: 'camera' | 'gallery') => {
-    // TODO: Implement actual image picker functionality
-    console.log(`Selected ${type} for profile picture`);
-    Alert.alert('Image Picker', `${type} functionality will be implemented here`);
+  // Image compression utility function
+  const compressImage = async (imageUri: string): Promise<string> => {
+    console.log('🔄 Starting image compression for URI:', imageUri);
+    
+    try {
+      // Get image info first
+      const imageInfo = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        { format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      console.log('📏 Original image info:', imageInfo);
+      
+      // If image is already small enough, return as is
+      if (imageInfo.width <= 600 && imageInfo.height <= 600) {
+        console.log('✅ Image already optimized, no compression needed');
+        return imageUri;
+      }
+      
+      // Calculate new dimensions while maintaining aspect ratio
+      const maxDimension = 600; // Reduced from 800 to prevent memory issues
+      const aspectRatio = imageInfo.width / imageInfo.height;
+      let newWidth, newHeight;
+      
+      if (imageInfo.width > imageInfo.height) {
+        newWidth = maxDimension;
+        newHeight = maxDimension / aspectRatio;
+      } else {
+        newHeight = maxDimension;
+        newWidth = maxDimension * aspectRatio;
+      }
+      
+      console.log('🔄 Compressing image to dimensions:', { newWidth, newHeight });
+      
+      // Compress the image
+      const compressedImage = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: newWidth, height: newHeight } }],
+        { 
+          compress: 0.7, // Reduced to 70% quality for better performance
+          format: ImageManipulator.SaveFormat.JPEG 
+        }
+      );
+      
+      console.log('✅ Image compressed successfully:', compressedImage);
+      return compressedImage.uri;
+    } catch (error) {
+      console.error('❌ Error compressing image:', error);
+      // Return original URI if compression fails
+      return imageUri;
+    }
+  };
+
+  const handleImagePicker = async (type: 'camera' | 'gallery') => {
+    try {
+      console.log('🖼️ Starting image picker with type:', type);
+      
+      // Request permissions
+      if (type === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        console.log('📷 Camera permission status:', status);
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+          return;
+        }
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        console.log('📱 Gallery permission status:', status);
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Gallery permission is required to select photos.');
+          return;
+        }
+      }
+
+      // Launch image picker
+       let result;
+       if (type === 'camera') {
+         console.log('📷 Launching camera...');
+         result = await ImagePicker.launchCameraAsync({
+           mediaTypes: "images",
+           allowsEditing: true,
+           aspect: [1, 1],
+           quality: 0.8,
+         });
+       } else {
+         console.log('📱 Launching image library...');
+         result = await ImagePicker.launchImageLibraryAsync({
+           mediaTypes: "images",
+           allowsEditing: true,
+           aspect: [1, 1],
+           quality: 0.8,
+         });
+       }
+
+      console.log('🖼️ Image picker result:', result);
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        console.log('❌ Image picker was canceled or no assets');
+        return;
+      }
+
+      const imageUri = result.assets[0].uri;
+      console.log('✅ Selected image URI:', imageUri);
+      
+      // Compress the image before setting it for preview
+      console.log('🔄 Compressing image before preview...');
+      const compressedUri = await compressImage(imageUri);
+      console.log('✅ Image compression completed, using URI:', compressedUri);
+      
+      // Set selected image for preview in the same modal
+      console.log('🔄 Setting selectedImageUri to:', compressedUri);
+      setSelectedImageUri(compressedUri);
+      console.log('✅ Image selected and set for preview in modal');
+      
+    } catch (error) {
+      console.error('❌ Image picker error:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  const handleSaveProfilePicture = async () => {
+    console.log('🔄 handleSaveProfilePicture started');
+    if (!selectedImageUri) {
+      console.log('❌ No selectedImageUri, returning');
+      return;
+    }
+    
+    try {
+      console.log('🔄 Setting uploadingImage to true');
+      setUploadingImage(true);
+      
+      console.log('🔄 About to call uploadProfilePicture with URI:', selectedImageUri);
+      await uploadProfilePicture(selectedImageUri);
+      
+      console.log('✅ uploadProfilePicture completed successfully');
+      console.log('🔄 Clearing selectedImageUri and closing modal');
+      setSelectedImageUri(null);
+      setShowEditModal(false);
+      
+      console.log('✅ handleSaveProfilePicture completed successfully');
+    } catch (error) {
+      console.error('❌ Error in handleSaveProfilePicture:', error);
+      Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+    } finally {
+      console.log('🔄 Setting uploadingImage to false in finally block');
+      setUploadingImage(false);
+    }
+  };
+
+  const uploadProfilePicture = async (imageUri: string) => {
+    console.log('📤 uploadProfilePicture started with URI:', imageUri);
+    
+    try {
+      console.log('📷 Starting profile picture upload...', { imageUri });
+
+      console.log('🔄 Creating FormData object');
+      // Create FormData for image upload
+      const formData = new FormData();
+      
+      console.log('🔄 Appending image to FormData');
+      formData.append('image', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `profile_${Date.now()}.jpg`,
+      } as any);
+
+      console.log('🔄 Getting current user');
+      // Get auth token
+      const currentUser = await authService.getCachedUser();
+      if (!currentUser) {
+        console.log('❌ No current user found');
+        Alert.alert('Error', 'Please log in to upload profile picture.');
+        return;
+      }
+
+      console.log('🔄 Getting auth token');
+      const token = await authService.getToken();
+      if (!token) {
+        console.log('❌ No auth token found');
+        Alert.alert('Error', 'Authentication required for image upload.');
+        return;
+      }
+
+      // Upload image to backend using the same endpoint as chat
+      console.log('📤 Uploading profile picture to backend...');
+      const uploadUrl = `${API_BASE_URL}/api/firebase-auth/upload-image`;
+      
+      console.log('🔄 Creating AbortController for timeout');
+      // Create AbortController for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.log('⏰ Request timeout triggered');
+        controller.abort();
+      }, 30000); // 30 second timeout
+      
+      console.log('🔄 Making fetch request to upload endpoint');
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+      
+      console.log('📡 Fetch response received, status:', uploadResponse.status);
+      clearTimeout(timeoutId);
+
+      if (!uploadResponse.ok) {
+        console.log('❌ Response not ok, status:', uploadResponse.status);
+        const errorText = await uploadResponse.text();
+        console.error('❌ Profile picture upload failed:', {
+          status: uploadResponse.status,
+          statusText: uploadResponse.statusText,
+          error: errorText
+        });
+        Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+        return;
+      }
+
+      console.log('🔄 Parsing response JSON');
+      const uploadData = await uploadResponse.json();
+      console.log('✅ Upload response data:', uploadData);
+      
+      if (!uploadData.success) {
+        console.error('❌ Profile picture upload failed:', uploadData.error);
+        Alert.alert('Error', uploadData.error || 'Failed to upload profile picture.');
+        return;
+      }
+
+      const imageUrl = uploadData.imageUrl || uploadData.url;
+      if (!imageUrl) {
+        console.error('❌ No image URL returned from upload');
+        Alert.alert('Error', 'Failed to get uploaded image URL.');
+        return;
+      }
+
+      console.log('✅ Profile picture uploaded successfully:', imageUrl);
+
+      console.log('🔄 Updating user profile with new image URL:', imageUrl);
+      // Update user profile with new avatar
+      const updateResult = await authService.updateProfile({ avatar: imageUrl });
+      
+      if (updateResult.success && updateResult.user) {
+        console.log('✅ User profile updated successfully');
+        // Update local state
+        setUserProfile(prev => prev ? { ...prev, avatar: imageUrl } : null);
+        Alert.alert('Success', 'Profile picture updated successfully!');
+        setShowEditModal(false);
+      } else {
+        console.error('❌ Failed to update profile with new avatar:', updateResult.error);
+        Alert.alert('Error', 'Failed to update profile. Please try again.');
+      }
+
+    } catch (error) {
+      console.error('❌ Error in uploadProfilePicture:', error);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('⏰ Request was aborted due to timeout');
+        Alert.alert('Timeout', 'Upload timed out. Please check your connection and try again.');
+      } else {
+        console.log('❌ General upload error');
+        Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+      }
+    }
+  };
+
+  const removeProfilePicture = async () => {
+    try {
+      setUploadingImage(true);
+      
+      // Update profile with empty avatar
+      await authService.updateProfile({ avatar: '' });
+      
+      // Update local state
+      setUserProfile(prev => prev ? { ...prev, avatar: '' } : null);
+      
+      Alert.alert('Success', 'Profile picture removed successfully');
+    } catch (error) {
+      console.error('Error removing profile picture:', error);
+      Alert.alert('Error', 'Failed to remove profile picture. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const getFieldValue = (field: string): string => {
@@ -230,7 +521,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </Typography>
         <Typography 
           variant="body2" 
-          color={value ? "textPrimary" : "textSecondary"}
+          color={value ? "text" : "textSecondary"}
           style={styles.profileValue}
         >
           {value || 'Not set'}
@@ -258,7 +549,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+            <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
           </TouchableOpacity>
           <Typography variant="h3">Profile</Typography>
           <View style={styles.headerSpacer} />
@@ -275,7 +566,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+            <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
           </TouchableOpacity>
           <Typography variant="h3">Profile</Typography>
           <View style={styles.headerSpacer} />
@@ -292,7 +583,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+          <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
         </TouchableOpacity>
         <Typography variant="h3">Profile</Typography>
         <View style={styles.headerSpacer} />
@@ -418,12 +709,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 <Typography variant="h5" style={styles.editModalTitle}>
                   Edit {editField}
                 </Typography>
-                <TouchableOpacity onPress={handleSaveField} disabled={updating}>
+                <TouchableOpacity 
+                  onPress={editField === 'Profile Picture' ? handleSaveProfilePicture : handleSaveField} 
+                  disabled={editField === 'Profile Picture' ? (uploadingImage || !selectedImageUri) : updating}
+                >
                   <Typography 
                     variant="h6" 
-                    style={[styles.saveText, updating && styles.disabledText]}
+                    style={[
+                      styles.saveText, 
+                      (editField === 'Profile Picture' ? (uploadingImage || !selectedImageUri) : updating) && styles.disabledText
+                    ]}
                   >
-                    {updating ? 'Saving...' : 'Save'}
+                    {editField === 'Profile Picture' ? 
+                      (uploadingImage ? 'Uploading...' : 'Save Photo') : 
+                      (updating ? 'Saving...' : 'Save')
+                    }
                   </Typography>
                 </TouchableOpacity>
               </View>
@@ -437,10 +737,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       Profile Picture
                     </Typography>
                     
-                    {/* Current Avatar Preview */}
+                    {/* Current/Selected Avatar Preview */}
                     <View style={styles.avatarPreviewContainer}>
                       <View style={styles.avatarPreview}>
-                        {userProfile?.avatar ? (
+                        {selectedImageUri ? (
+                          <Image 
+                            source={{ uri: selectedImageUri }} 
+                            style={styles.avatarPreviewImage}
+                            onLoadStart={() => console.log('🔄 Preview image load started')}
+                            onLoad={() => console.log('✅ Preview image loaded successfully')}
+                            onError={(error) => console.log('❌ Preview image load error:', error)}
+                          />
+                        ) : userProfile?.avatar ? (
                           <Image source={{ uri: userProfile.avatar }} style={styles.avatarPreviewImage} />
                         ) : (
                           <View style={styles.avatarPlaceholder}>
@@ -449,17 +757,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         )}
                       </View>
                       <Typography variant="body2" color="textSecondary" style={styles.avatarPreviewText}>
-                        {userProfile?.avatar ? 'Current profile picture' : 'No profile picture set'}
+                        {selectedImageUri ? 'Selected image - click Save Photo to upload' : 
+                         userProfile?.avatar ? 'Current profile picture' : 'No profile picture set'}
                       </Typography>
                     </View>
 
                     {/* Upload Options */}
                     <View style={styles.uploadOptions}>
                       <TouchableOpacity 
-                        style={styles.uploadOption} 
+                        style={[styles.uploadOption, uploadingImage && styles.disabledOption]} 
                         onPress={() => handleImagePicker('camera')}
+                        disabled={uploadingImage}
                       >
-                        <MaterialIcons name="camera-alt" size={24} color={Colors.primary} />
+                        {uploadingImage ? (
+                          <ActivityIndicator size="small" color={Colors.primary} />
+                        ) : (
+                          <MaterialIcons name="camera-alt" size={24} color={Colors.primary} />
+                        )}
                         <View style={styles.uploadOptionContent}>
                           <Typography variant="h6" style={styles.uploadOptionText}>
                             Take Photo
@@ -471,10 +785,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       </TouchableOpacity>
 
                       <TouchableOpacity 
-                        style={styles.uploadOption} 
+                        style={[styles.uploadOption, uploadingImage && styles.disabledOption]} 
                         onPress={() => handleImagePicker('gallery')}
+                        disabled={uploadingImage}
                       >
-                        <MaterialIcons name="photo-library" size={24} color={Colors.primary} />
+                        {uploadingImage ? (
+                          <ActivityIndicator size="small" color={Colors.primary} />
+                        ) : (
+                          <MaterialIcons name="photo-library" size={24} color={Colors.primary} />
+                        )}
                         <View style={styles.uploadOptionContent}>
                           <Typography variant="h6" style={styles.uploadOptionText}>
                             Choose from Gallery
@@ -485,7 +804,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         </View>
                       </TouchableOpacity>
 
-                      {userProfile?.avatar && (
+                      {selectedImageUri && (
+                        <TouchableOpacity 
+                          style={[styles.uploadOption, styles.clearOption]} 
+                          onPress={() => {
+                            setSelectedImageUri(null);
+                            console.log('🔄 Cleared selected image');
+                          }}
+                        >
+                          <MaterialIcons name="clear" size={24} color={Colors.warning} />
+                          <View style={styles.uploadOptionContent}>
+                            <Typography variant="h6" style={[styles.uploadOptionText, { color: Colors.warning }]}>
+                              Clear Selection
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary" style={styles.uploadOptionSubtext}>
+                              Remove selected image
+                            </Typography>
+                          </View>
+                        </TouchableOpacity>
+                      )}
+
+                      {userProfile?.avatar && !selectedImageUri && (
                         <TouchableOpacity 
                           style={[styles.uploadOption, styles.removeOption]} 
                           onPress={() => {
@@ -494,7 +833,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                               'Are you sure you want to remove your profile picture?',
                               [
                                 { text: 'Cancel', style: 'cancel' },
-                                { text: 'Remove', style: 'destructive', onPress: () => console.log('Remove photo') }
+                                { text: 'Remove', style: 'destructive', onPress: removeProfilePicture }
                               ]
                             );
                           }}
@@ -567,6 +906,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </Animated.View>
         </View>
       </Modal>
+
     </View>
   );
 };
@@ -666,7 +1006,7 @@ const styles = StyleSheet.create({
   fieldLabel: {
     marginBottom: Spacing.lg,
     fontWeight: '500',
-    color: Colors.textSecondary,
+    color: Colors.gray600,
     fontSize: 16,
   },
   textInput: {
@@ -676,7 +1016,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     fontSize: 18,
-    color: Colors.textPrimary,
+    color: Colors.gray900,
     backgroundColor: Colors.background,
     minHeight: 50,
   },
@@ -750,8 +1090,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   removeOption: {
-    borderColor: Colors.errorLight,
-    backgroundColor: Colors.errorLight + '20',
+    borderColor: Colors.error,
+    backgroundColor: Colors.error + '20',
+  },
+  clearOption: {
+    borderColor: Colors.warning,
+    backgroundColor: Colors.warning + '20',
   },
   uploadOptionContent: {
     flex: 1,
@@ -763,5 +1107,8 @@ const styles = StyleSheet.create({
   },
   uploadOptionSubtext: {
     fontSize: 12,
+  },
+  disabledOption: {
+    opacity: 0.6,
   },
 });

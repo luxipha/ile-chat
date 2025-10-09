@@ -40,6 +40,8 @@ interface FormErrors {
   bio?: string;
   location?: string;
   dateOfBirth?: string;
+  gender?: string;
+  avatar?: string;
   general?: string;
 }
 
@@ -191,8 +193,14 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
       'Choose an option',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Camera', onPress: () => console.log('Open camera') },
-        { text: 'Gallery', onPress: () => console.log('Open gallery') },
+        { text: 'Camera', onPress: () => {
+          // TODO: Implement camera functionality
+          Alert.alert('Camera', 'Camera functionality not yet implemented');
+        }},
+        { text: 'Gallery', onPress: () => {
+          // TODO: Implement gallery functionality  
+          Alert.alert('Gallery', 'Gallery functionality not yet implemented');
+        }},
         { text: 'Remove', style: 'destructive', onPress: () => handleInputChange('avatar', '') },
       ]
     );
@@ -205,7 +213,7 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+          <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
         </TouchableOpacity>
         <Typography variant="h6" style={styles.headerTitle}>
           Edit Profile
@@ -430,7 +438,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.gray300,
   },
   backButton: {
     padding: Spacing.sm,
@@ -498,31 +506,31 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.gray300,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
     fontSize: 16,
-    color: Colors.textPrimary,
+    color: Colors.gray900,
     backgroundColor: Colors.white,
   },
   inputError: {
     borderColor: Colors.error,
   },
   inputText: {
-    color: Colors.textPrimary,
+    color: Colors.gray900,
   },
   placeholderText: {
     color: Colors.gray400,
   },
   textArea: {
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.gray300,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
     fontSize: 16,
-    color: Colors.textPrimary,
+    color: Colors.gray900,
     backgroundColor: Colors.white,
     height: 100,
   },
@@ -535,7 +543,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.gray300,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
@@ -558,7 +566,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: Spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.gray300,
   },
   modalOption: {
     flexDirection: 'row',
