@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 

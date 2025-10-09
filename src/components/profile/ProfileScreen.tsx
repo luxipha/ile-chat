@@ -18,7 +18,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
 import { clearAvatarCache } from '../ui/Avatar';
-import { Colors, Spacing, BorderRadius } from '../../theme';
+import { Colors, Spacing, BorderRadius, Layout } from '../../theme';
 import authService from '../../services/authService';
 import profileService from '../../services/profileService';
 import { API_BASE_URL } from '../../config/apiConfig';
@@ -56,6 +56,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [updating, setUpdating] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   
+  // Date of birth separate inputs
+  const [dobMonth, setDobMonth] = useState<string>('');
+  const [dobDay, setDobDay] = useState<string>('');
+  const [dobYear, setDobYear] = useState<string>('');
+  
   // Image preview states
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   
@@ -76,7 +81,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           setUserProfile({
             id: currentUser.id,
             name: profileResult.profile.name || currentUser.name || '',
-            email: undefined, // Email not available in ChatUserProfile
+            email: currentUser.email, // Use email from Firebase auth
             phone: undefined, // Phone not available in ChatUserProfile
             gender: undefined, // Gender not available in ChatUserProfile
             dateOfBirth: undefined, // Date of birth not available in ChatUserProfile
@@ -91,7 +96,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           setUserProfile({
             id: currentUser.id,
             name: currentUser.name || '',
-            email: undefined, // Email not available in ChatUserProfile
+            email: currentUser.email, // Use email from Firebase auth
             bricks: 0,
           });
         }
@@ -107,6 +112,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const handleEditField = (field: string, currentValue?: string) => {
     setEditField(field);
     setEditValue(currentValue || '');
+    
+    // Handle date of birth separately
+    if (field === 'Date of Birth' && currentValue) {
+      const dateParts = currentValue.split('-');
+      if (dateParts.length === 3) {
+        setDobYear(dateParts[0]);
+        setDobMonth(dateParts[1]);
+        setDobDay(dateParts[2]);
+      } else {
+        setDobMonth('');
+        setDobDay('');
+        setDobYear('');
+      }
+    } else if (field === 'Date of Birth') {
+      setDobMonth('');
+      setDobDay('');
+      setDobYear('');
+    }
+    
     setShowEditModal(true);
     
     // Animate slide in
@@ -128,6 +152,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       setEditField('');
       setEditValue('');
       setSelectedImageUri(null); // Clear selected image when closing modal
+      // Clear date of birth inputs
+      setDobMonth('');
+      setDobDay('');
+      setDobYear('');
     });
   };
 
@@ -153,13 +181,52 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         throw new Error('Invalid field');
       }
 
+      let valueToSave = editValue;
+      
+      // Handle date of birth specially
+      if (editField === 'Date of Birth') {
+        if (dobMonth && dobDay && dobYear) {
+          // Validate date components
+          const month = parseInt(dobMonth);
+          const day = parseInt(dobDay);
+          const year = parseInt(dobYear);
+          
+          if (month < 1 || month > 12) {
+            Alert.alert('Invalid Date', 'Month must be between 1 and 12');
+            return;
+          }
+          
+          if (day < 1 || day > 31) {
+            Alert.alert('Invalid Date', 'Day must be between 1 and 31');
+            return;
+          }
+          
+          if (year < 1900 || year > new Date().getFullYear()) {
+            Alert.alert('Invalid Date', 'Please enter a valid year');
+            return;
+          }
+          
+          // Format as YYYY-MM-DD
+          valueToSave = `${year}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`;
+          
+          // Validate the complete date
+          const date = new Date(valueToSave);
+          if (date.toISOString().split('T')[0] !== valueToSave) {
+            Alert.alert('Invalid Date', 'Please enter a valid date');
+            return;
+          }
+        } else {
+          valueToSave = '';
+        }
+      }
+
       // Update profile via service
-      const updateData = { [updateField]: editValue };
+      const updateData = { [updateField]: valueToSave };
       const result = await profileService.updateProfile(updateData);
       
       if (result.success) {
         // Update local state
-        setUserProfile(prev => prev ? { ...prev, [updateField]: editValue } : null);
+        setUserProfile(prev => prev ? { ...prev, [updateField]: valueToSave } : null);
         handleCloseModal();
         Alert.alert('Success', `${editField} updated successfully`);
       } else {
@@ -764,7 +831,58 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                           />
                         ) : userProfile?.avatar ? (
                           <Image source={{ uri: userProfile.avatar }} style={styles.avatarPreviewImage} />
-                        ) : (
+                        ) : editField === 'Date of Birth' ? (
+                      <>
+                        <Typography variant="body1" style={styles.fieldLabel}>
+                          {editField}
+                        </Typography>
+                        <View style={styles.dateInputContainer}>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Month
+                            </Typography>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobMonth}
+                              onChangeText={setDobMonth}
+                              placeholder="MM"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={2}
+                              autoFocus={true}
+                            />
+                          </View>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Day
+                            </Typography>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobDay}
+                              onChangeText={setDobDay}
+                              placeholder="DD"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={2}
+                            />
+                          </View>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Year
+                            </Typography>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobYear}
+                              onChangeText={setDobYear}
+                              placeholder="YYYY"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={4}
+                            />
+                          </View>
+                        </View>
+                      </>
+                    ) : (
                           <View style={styles.avatarPlaceholder}>
                             <MaterialIcons name="account-circle" size={80} color={Colors.gray400} />
                           </View>
@@ -866,52 +984,109 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </View>
                   </>
                 ) : (
-                  // Regular Text Input Interface
                   <>
-                    <Typography variant="body1" style={styles.fieldLabel}>
-                      {editField}
-                    </Typography>
-                    <TextInput
-                      style={[
-                        styles.textInput,
-                        getFieldType(editField) === 'multiline' && styles.multilineInput
-                      ]}
-                      value={editValue}
-                      onChangeText={setEditValue}
-                      placeholder={`Enter your ${editField.toLowerCase()}`}
-                      placeholderTextColor={Colors.gray400}
-                      keyboardType={
-                        getFieldType(editField) === 'email' ? 'email-address' :
-                        getFieldType(editField) === 'phone' ? 'phone-pad' : 'default'
-                      }
-                      multiline={getFieldType(editField) === 'multiline'}
-                      numberOfLines={getFieldType(editField) === 'multiline' ? 4 : 1}
-                      autoFocus={true}
-                    />
-                    
-                    {editField === 'Gender' && (
-                      <View style={styles.genderOptions}>
-                        {['Male', 'Female', 'Other'].map((gender) => (
-                          <TouchableOpacity
-                            key={gender}
-                            style={[
-                              styles.genderOption,
-                              editValue === gender && styles.selectedGenderOption
-                            ]}
-                            onPress={() => setEditValue(gender)}
-                          >
-                            <Typography 
-                              variant="body1" 
+                    {editField === 'Gender' ? (
+                      <>
+                        <Typography variant="body1" style={styles.fieldLabel}>
+                          {editField}
+                        </Typography>
+                        <View style={styles.genderOptions}>
+                          {['Male', 'Female'].map((gender) => (
+                            <TouchableOpacity
+                              key={gender}
                               style={[
-                                styles.genderOptionText,
-                                editValue === gender && styles.selectedGenderOptionText
+                                styles.genderOption,
+                                editValue === gender && styles.selectedGenderOption
                               ]}
+                              onPress={() => setEditValue(gender)}
                             >
-                              {gender}
+                              <Typography 
+                                variant="body1" 
+                                style={[
+                                  styles.genderOptionText,
+                                  editValue === gender && styles.selectedGenderOptionText
+                                ]}
+                              >
+                                {gender}
+                              </Typography>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </>
+                    ) : editField === 'Date of Birth' ? (
+                      <>
+                        <Typography variant="body1" style={styles.fieldLabel}>
+                          {editField}
+                        </Typography>
+                        <View style={styles.dateInputContainer}>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Month
                             </Typography>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobMonth}
+                              onChangeText={setDobMonth}
+                              placeholder="MM"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={2}
+                              autoFocus={true}
+                            />
+                          </View>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Day
+                            </Typography>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobDay}
+                              onChangeText={setDobDay}
+                              placeholder="DD"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={2}
+                            />
+                          </View>
+                          <View style={styles.dateInputGroup}>
+                            <Typography variant="body2" style={styles.dateInputLabel}>
+                              Year
+                            </Typography>
+                            <TextInput
+                              style={[styles.textInput, styles.dateInput]}
+                              value={dobYear}
+                              onChangeText={setDobYear}
+                              placeholder="YYYY"
+                              placeholderTextColor={Colors.gray400}
+                              keyboardType="numeric"
+                              maxLength={4}
+                            />
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <Typography variant="body1" style={styles.fieldLabel}>
+                          {editField}
+                        </Typography>
+                        <TextInput
+                          style={[
+                            styles.textInput,
+                            getFieldType(editField) === 'multiline' && styles.multilineInput
+                          ]}
+                          value={editValue}
+                          onChangeText={setEditValue}
+                          placeholder={`Enter your ${editField.toLowerCase()}`}
+                          placeholderTextColor={Colors.gray400}
+                          keyboardType={
+                            getFieldType(editField) === 'email' ? 'email-address' :
+                            getFieldType(editField) === 'phone' ? 'phone-pad' : 'default'
+                          }
+                          multiline={getFieldType(editField) === 'multiline'}
+                          numberOfLines={getFieldType(editField) === 'multiline' ? 4 : 1}
+                          autoFocus={true}
+                        />
+                      </>
                     )}
                   </>
                 )}
@@ -984,8 +1159,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     borderTopLeftRadius: BorderRadius.lg,
     borderTopRightRadius: BorderRadius.lg,
-    minHeight: 480,
-    maxHeight: '90%',
+    ...Layout.modal.standard,
   },
   editModalContent: {
     flex: 1,
@@ -1058,9 +1232,10 @@ const styles = StyleSheet.create({
   },
   genderOptionText: {
     textAlign: 'center',
+    color: Colors.gray900,
   },
   selectedGenderOptionText: {
-    color: Colors.primary,
+    color: Colors.white,
     fontWeight: '600',
   },
   avatarPreviewContainer: {
@@ -1124,5 +1299,25 @@ const styles = StyleSheet.create({
   },
   disabledOption: {
     opacity: 0.6,
+  },
+  dateInputContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: Spacing.md,
+  },
+  dateInputGroup: {
+    flex: 1,
+    marginHorizontal: Spacing.xs,
+  },
+  dateInputLabel: {
+    marginBottom: Spacing.sm,
+    fontWeight: '500',
+    color: Colors.gray600,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  dateInput: {
+    textAlign: 'center',
+    flex: 1,
   },
 });

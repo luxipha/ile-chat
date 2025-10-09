@@ -141,4 +141,22 @@ export const Layout = {
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.xl,
   },
+  // iOS Modal Heights - Optimized for iOS experience
+  modal: {
+    // Standard modal height for forms and content
+    standard: {
+      minHeight: 600,
+      maxHeight: '85%' as const,
+    },
+    // Compact modal for simple inputs
+    compact: {
+      minHeight: 400,
+      maxHeight: '70%' as const,
+    },
+    // Large modal for complex forms or content
+    large: {
+      minHeight: 700,
+      maxHeight: '90%' as const,
+    },
+  },
 };

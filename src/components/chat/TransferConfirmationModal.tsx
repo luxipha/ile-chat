@@ -11,7 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import aptosService from '../../services/aptosService';
 import { useBalance } from '../../hooks/useBalance';
