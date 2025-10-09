@@ -64,12 +64,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     loadUserProfile();
   }, []);
 
-  const loadUserProfile = async () => {
+  const loadUserProfile = async (forceRefresh = false) => {
     try {
       const currentUser = await authService.getCachedUser();
       if (currentUser) {
-        const profileResult = await profileService.getUserProfile(currentUser.id);
+        const profileResult = await profileService.getUserProfile(currentUser.id, forceRefresh);
         if (profileResult.success && profileResult.profile) {
+          console.log('🔄 Profile loaded from service:', profileResult.profile);
+          console.log('🖼️ Avatar from profile service:', profileResult.profile.avatar);
           setUserProfile({
             id: currentUser.id,
             name: profileResult.profile.name || currentUser.name || '',
@@ -329,6 +331,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       setSelectedImageUri(null);
       setShowEditModal(false);
       
+      // Force refresh profile to ensure UI reflects the updated avatar
+      console.log('🔄 Force refreshing profile to reflect updated avatar');
+      await loadUserProfile(true);
+      
       console.log('✅ handleSaveProfilePicture completed successfully');
     } catch (error) {
       console.error('❌ Error in handleSaveProfilePicture:', error);
@@ -430,10 +436,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       console.log('✅ Profile picture uploaded successfully:', imageUrl);
 
       console.log('🔄 Updating user profile with new image URL:', imageUrl);
-      // Update user profile with new avatar
-      const updateResult = await authService.updateProfile({ avatar: imageUrl });
+      // Update user profile with new avatar using the correct API endpoint
+      if (!userProfile?.id) {
+        throw new Error('User profile ID not found');
+      }
+      const updateResult = await profileService.updateUserProfile(userProfile.id, { avatar: imageUrl });
       
-      if (updateResult.success && updateResult.user) {
+      if (updateResult.success && updateResult.profile) {
         console.log('✅ User profile updated successfully');
         // Update local state
         setUserProfile(prev => prev ? { ...prev, avatar: imageUrl } : null);

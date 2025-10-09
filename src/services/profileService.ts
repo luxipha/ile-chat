@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../config/apiConfig';
 
 export interface ProfileUpdateData {
   name?: string;
+  avatar?: string;
   // Add other profile fields as needed
 }
 
@@ -46,12 +47,19 @@ class ProfileService {
     }
   }
 
-  async getUserProfile(firebaseUid: string): Promise<{ success: boolean; profile?: ChatUserProfile & { aptosAddress?: string }; error?: string }> {
+  clearUserProfileCache(firebaseUid: string): void {
+    this.userProfileCache.delete(firebaseUid);
+    console.log('🗑️ Cleared user profile cache for:', firebaseUid);
+  }
+
+  async getUserProfile(firebaseUid: string, forceRefresh = false): Promise<{ success: boolean; profile?: ChatUserProfile & { aptosAddress?: string }; error?: string }> {
     try {
-      // Check cache first
-      const cachedProfile = this.userProfileCache.get(firebaseUid);
-      if (cachedProfile) {
-        return { success: true, profile: cachedProfile };
+      // Check cache first (unless forcing refresh)
+      if (!forceRefresh) {
+        const cachedProfile = this.userProfileCache.get(firebaseUid);
+        if (cachedProfile) {
+          return { success: true, profile: cachedProfile };
+        }
       }
 
       console.log('🔍 Fetching user profile for Firebase UID:', firebaseUid);
@@ -89,6 +97,30 @@ class ProfileService {
       return { success: false, error: result.error || 'Failed to update profile' };
     } catch (error) {
       console.error('Update profile error:', error);
+      return { success: false, error: 'Network error. Please try again.' };
+    }
+  }
+
+  async updateUserProfile(firebaseUid: string, updates: { avatar?: string; name?: string }): Promise<{ success: boolean; profile?: ChatUserProfile; error?: string }> {
+    try {
+      console.log('🔄 Updating user profile via API for UID:', firebaseUid, 'Updates:', updates);
+      
+      // Update via backend API (same system that getUserProfile fetches from)
+      const response = await apiClient.put(`/api/user/profile/${firebaseUid}`, updates);
+      
+      if (response.success && response.data) {
+        const profileData = response.data as { success: boolean; profile: ChatUserProfile };
+        if (profileData.success && profileData.profile) {
+          // Clear cache and update it with new data
+          this.userProfileCache.set(firebaseUid, profileData.profile);
+          console.log('✅ User profile updated via API:', profileData.profile);
+          return { success: true, profile: profileData.profile };
+        }
+      }
+      
+      return { success: false, error: response.error || 'Failed to update user profile' };
+    } catch (error) {
+      console.error('Update user profile error:', error);
       return { success: false, error: 'Network error. Please try again.' };
     }
   }

@@ -181,6 +181,31 @@ class ApiService {
     });
   }
 
+  async put<T>(endpoint: string, data?: any, token?: string): Promise<ApiResponse<T>> {
+    const headers: Record<string, string> = {};
+    let body: any;
+
+    // Check if data is FormData
+    if (data instanceof FormData) {
+      // Don't set Content-Type for FormData, let browser set it with boundary
+      body = data;
+    } else {
+      // Use JSON for regular data
+      headers['Content-Type'] = 'application/json';
+      body = data ? JSON.stringify(data) : undefined;
+    }
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return this.request(endpoint, {
+      method: 'PUT',
+      headers,
+      body,
+    });
+  }
+
   // Add GET method for requests that need authentication
   async get<T>(endpoint: string, token?: string): Promise<ApiResponse<T>> {
     console.log('📡 ApiService.get() called:', { endpoint, hasToken: !!token });
@@ -233,6 +258,10 @@ export const apiClient = {
   post: async (endpoint: string, data?: any) => {
     const token = await getAuthToken(); // We'll need to implement this
     return apiService.post(endpoint, data, token);
+  },
+  put: async (endpoint: string, data?: any) => {
+    const token = await getAuthToken();
+    return apiService.put(endpoint, data, token);
   },
   get: async (endpoint: string, options?: { params?: Record<string, any> }) => {
     const token = await getAuthToken();
