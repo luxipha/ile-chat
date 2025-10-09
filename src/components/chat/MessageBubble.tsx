@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
 import StickerMessage from './StickerMessage';
 import { StickerData } from '../../types/sticker';

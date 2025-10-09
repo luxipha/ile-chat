@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 
 interface TypingIndicatorProps {
   typingUsers: Array<{

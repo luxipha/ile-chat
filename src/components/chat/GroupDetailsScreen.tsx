@@ -14,7 +14,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Avatar } from './Avatar';
+import { Avatar } from '../ui/Avatar';
 import { GroupWallet } from '../group/GroupWallet';
 import { ContributionFlow } from '../group/ContributionFlow';
 import { GroupProposal } from '../group/GroupProposal';

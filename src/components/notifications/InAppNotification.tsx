@@ -5,11 +5,11 @@ import {
   TouchableOpacity,
   Animated,
   Dimensions,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
+import { Avatar } from '../ui/Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 
 export interface InAppNotificationData {
@@ -37,7 +37,7 @@ export const InAppNotification: React.FC<InAppNotificationProps> = ({
   const slideAnim = useRef(new Animated.Value(-100)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const hideTimeoutRef = useRef<NodeJS.Timeout>();
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (notification) {
@@ -86,7 +86,7 @@ export const InAppNotification: React.FC<InAppNotificationProps> = ({
       }).start();
 
       hideTimeoutRef.current = setTimeout(() => {
-        handleDismiss();
+        onHide();
       }, duration);
     }
   };
@@ -175,7 +175,12 @@ export const InAppNotification: React.FC<InAppNotificationProps> = ({
 
     if (notification.avatar) {
       return (
-        <Image source={{ uri: notification.avatar }} style={styles.avatar} />
+        <Avatar
+          name={notification.title}
+          imageUrl={notification.avatar}
+          size="medium"
+          shape="rounded"
+        />
       );
     }
 
@@ -271,59 +276,52 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 9999,
-    paddingHorizontal: Spacing.md,
-  },
-  notificationContainer: {
-    borderRadius: BorderRadius.md,
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    zIndex: 1000,
   },
   notification: {
+    backgroundColor: Colors.white,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.md,
-    borderLeftWidth: 4,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    minHeight: 68,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: Spacing.md,
+    shadowColor: Colors.black,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
   },
   iconContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.md,
+    alignItems: 'center',
+    marginRight: Spacing.sm,
   },
   content: {
     flex: 1,
-    marginRight: Spacing.sm,
   },
   title: {
-    fontWeight: '600',
     marginBottom: 2,
-  },
-  message: {
-    lineHeight: 18,
-  },
-  dismissButton: {
-    padding: Spacing.xs,
-    borderRadius: BorderRadius.sm,
   },
   progressBar: {
     height: 2,
-    borderBottomLeftRadius: BorderRadius.md,
-    borderBottomRightRadius: BorderRadius.md,
+    backgroundColor: Colors.gray200,
+    borderRadius: 1,
+    marginTop: Spacing.xs,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+  },
+  closeButton: {
+    padding: Spacing.xs,
+    marginLeft: Spacing.xs,
   },
 });

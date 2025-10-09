@@ -11,6 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { Avatar } from '../ui/Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { QRScannerModal } from '../scanner/QRScannerModal';
 
@@ -106,15 +107,12 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
       style={styles.contactItem}
       onPress={() => onSelectRecipient(contact)}
     >
-      <View style={styles.contactAvatar}>
-        {contact.avatar ? (
-          <MaterialIcons name="person" size={24} color={Colors.primary} />
-        ) : (
-          <Typography variant="h6">
-            {contact.name.split(' ').map(n => n[0]).join('')}
-          </Typography>
-        )}
-      </View>
+      <Avatar
+        name={contact.name}
+        imageUrl={contact.avatar}
+        size="medium"
+        shape="rounded"
+      />
       <View style={styles.contactInfo}>
         <Typography variant="h6">{contact.name}</Typography>
         <Typography variant="body2" color="textSecondary">
@@ -380,17 +378,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.gray100,
   },
-  contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
   contactInfo: {
     flex: 1,
+    marginLeft: Spacing.md,
   },
   qrContainer: {
     flex: 1,

@@ -10,7 +10,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
-import { Avatar } from '../chat/Avatar';
+import { Avatar } from '../ui/Avatar';
 import { ChatTheme } from '../../theme/chatTheme';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { GroupMember } from '../../services/chatService';

@@ -5,10 +5,10 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
-  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
+import { Avatar } from '../ui/Avatar';
 import { EmptyNotifications } from '../ui/EmptyState';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { Colors, Spacing, BorderRadius } from '../../theme';
@@ -154,7 +154,12 @@ export const NotificationScreen: React.FC<NotificationScreenProps> = ({
   const getNotificationIcon = (notification: Notification) => {
     if (notification.avatar) {
       return (
-        <Image source={{ uri: notification.avatar }} style={styles.avatar} />
+        <Avatar
+          name={notification.title}
+          imageUrl={notification.avatar}
+          size="medium"
+          shape="rounded"
+        />
       );
     }
 
@@ -248,7 +253,7 @@ export const NotificationScreen: React.FC<NotificationScreenProps> = ({
   const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity onPress={onBack} style={styles.backButton}>
-        <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+        <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
       </TouchableOpacity>
       <View style={styles.titleContainer}>
         <Typography variant="h3" style={styles.headerTitle}>
@@ -263,7 +268,7 @@ export const NotificationScreen: React.FC<NotificationScreenProps> = ({
         )}
       </View>
       <TouchableOpacity onPress={onManageSettings} style={styles.settingsButton}>
-        <MaterialIcons name="settings" size={24} color={Colors.textPrimary} />
+        <MaterialIcons name="settings" size={24} color={Colors.gray900} />
       </TouchableOpacity>
     </View>
   );
@@ -438,7 +443,7 @@ const styles = StyleSheet.create({
     color: Colors.gray600,
   },
   activeFilterTabText: {
-    color: Colors.textPrimary,
+    color: Colors.gray900,
     fontWeight: '600',
   },
   markAllButton: {
@@ -460,7 +465,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.gray200,
     position: 'relative',
   },
   unreadNotification: {
@@ -469,12 +474,6 @@ const styles = StyleSheet.create({
   notificationContent: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: Spacing.md,
   },
   iconContainer: {
     width: 48,

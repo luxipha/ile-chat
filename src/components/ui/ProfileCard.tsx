@@ -3,20 +3,21 @@ import {
   View,
   TouchableOpacity,
   StyleSheet,
-  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from './Typography';
 import { Card } from './Card';
+import { Avatar } from './Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 
 interface ProfileCardProps {
-  name: string;
+  userId?: string; // If provided, shows that user's profile. If not, shows current user
+  name?: string; // If provided, overrides the name from profile
   role: string;
   region: string;
   joinDate: string;
   bricksCount: number;
-  profilePicture?: string;
+  profilePicture?: string; // DEPRECATED: Use UserAvatar instead
   trustBadge?: 'verified' | 'premium' | 'agent' | null;
   trustLevel: number; // 1-5 for percentage calculation
   showShareIcon?: boolean;
@@ -29,12 +30,13 @@ interface ProfileCardProps {
 }
 
 export const ProfileCard: React.FC<ProfileCardProps> = ({
+  userId,
   name,
   role,
   region,
   joinDate,
   bricksCount,
-  profilePicture,
+  profilePicture, // DEPRECATED
   trustBadge,
   trustLevel,
   showShareIcon = false,
@@ -67,29 +69,19 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
     <Card style={[styles.profileCard, style]}>
       <View style={styles.profileHeader}>
         <View style={styles.avatarContainer}>
-          {profilePicture ? (
-            <View style={styles.avatarWrapper}>
-              <Image source={{ uri: profilePicture }} style={styles.avatar} />
-              <View style={styles.trustBadgeOverlay}>
-                <Typography variant="caption" style={styles.trustBadgeText}>
-                  {Math.round((trustLevel / 5) * 100)}%
-                </Typography>
-              </View>
+          <View style={styles.avatarWrapper}>
+            <Avatar
+              userId={userId}
+              name={name}
+              size="large"
+              shape="rounded"
+            />
+            <View style={styles.trustBadgeOverlay}>
+              <Typography variant="caption" style={styles.trustBadgeText}>
+                {Math.round((trustLevel / 5) * 100)}%
+              </Typography>
             </View>
-          ) : (
-            <View style={styles.avatarWrapper}>
-              <View style={styles.avatar}>
-                <Typography variant="h2" style={styles.avatarText}>
-                  {name.split(' ').map(n => n[0]).join('')}
-                </Typography>
-              </View>
-              <View style={styles.trustBadgeOverlay}>
-                <Typography variant="caption" style={styles.trustBadgeText}>
-                  {Math.round((trustLevel / 5) * 100)}%
-                </Typography>
-              </View>
-            </View>
-          )}
+          </View>
         </View>
         
         <View style={styles.profileInfo}>
@@ -168,14 +160,6 @@ const styles = StyleSheet.create({
   avatarWrapper: {
     position: 'relative',
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   trustBadgeOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -193,7 +177,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   avatarText: {
-    color: Colors.textSecondary,
+    color: Colors.gray600,
     fontWeight: '600',
   },
   profileInfo: {

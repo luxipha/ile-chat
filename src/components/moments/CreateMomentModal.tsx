@@ -14,6 +14,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
 import { ValidationError } from '../ui/ErrorMessage';
+import { Avatar } from '../ui/Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { validateTextContent } from '../../utils/validation';
 
@@ -183,11 +184,12 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
         <ScrollView style={styles.content}>
           {/* User Info */}
           <View style={styles.userInfo}>
-            <View style={styles.avatar}>
-              <Typography variant="h6" style={styles.avatarText}>
-                {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
-              </Typography>
-            </View>
+            <Avatar
+              name={currentUser?.name || 'User'}
+              imageUrl={undefined}
+              size="medium"
+              shape="rounded"
+            />
             <View style={styles.userDetails}>
               <Typography variant="h6" style={styles.userName}>
                 {currentUser?.name || 'User'}
@@ -316,21 +318,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.lg,
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  avatarText: {
-    color: Colors.white,
-    fontWeight: '600',
-  },
   userDetails: {
     flex: 1,
+    marginLeft: Spacing.md,
   },
   userName: {
     fontWeight: '600',

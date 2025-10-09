@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
+import { clearAvatarCache } from '../ui/Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import authService from '../../services/authService';
 import profileService from '../../services/profileService';
@@ -446,6 +447,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         console.log('✅ User profile updated successfully');
         // Update local state
         setUserProfile(prev => prev ? { ...prev, avatar: imageUrl } : null);
+        
+        // Clear avatar cache so all Avatar components update immediately
+        clearAvatarCache(userProfile.id);
+        
         Alert.alert('Success', 'Profile picture updated successfully!');
         setShowEditModal(false);
       } else {

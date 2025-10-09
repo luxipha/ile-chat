@@ -7,11 +7,11 @@ import {
   TextInput,
   Alert,
   FlatList,
-  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
+import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { EmptyState } from '../ui/EmptyState';
@@ -71,17 +71,11 @@ export const AddContactScreen: React.FC<AddContactScreenProps> = ({
     <TouchableOpacity onPress={() => onUserSelect(user)}>
       <Card style={styles.userCard}>
         <View style={styles.userRow}>
-          <View style={styles.avatarContainer}>
-            {user.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.avatar} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Typography variant="h6" style={styles.avatarText}>
-                  {user.name.charAt(0).toUpperCase()}
-                </Typography>
-              </View>
-            )}
-          </View>
+          <Avatar
+            name={user.name}
+            imageUrl={user.avatar}
+            size="medium"
+          />
           
           <View style={styles.userInfo}>
             <Typography variant="h6" style={styles.userName}>
@@ -382,26 +376,7 @@ const styles = StyleSheet.create({
   userRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  avatarContainer: {
-    marginRight: Spacing.md,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.full,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.white,
-    fontWeight: '600',
+    gap: Spacing.md,
   },
   userInfo: {
     flex: 1,

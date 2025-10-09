@@ -11,6 +11,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from './Typography';
 import { Button } from './Button';
+import { Avatar } from './Avatar';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 
 interface Contact {
@@ -104,15 +105,11 @@ export const ContactSelector: React.FC<ContactSelectorProps> = ({
       style={styles.contactItem}
       onPress={() => handleContactPress(contact)}
     >
-      <View style={styles.contactAvatar}>
-        {contact.avatar ? (
-          <MaterialIcons name="person" size={24} color={Colors.primary} />
-        ) : (
-          <Typography variant="h6" style={styles.avatarText}>
-            {contact.name.split(' ').map(n => n[0]).join('')}
-          </Typography>
-        )}
-      </View>
+      <Avatar
+        name={contact.name}
+        imageUrl={contact.avatar}
+        size="medium"
+      />
       <View style={styles.contactInfo}>
         <Typography variant="h6">{contact.name}</Typography>
       </View>
@@ -270,19 +267,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Colors.gray100,
-  },
-  contactAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '600',
+    gap: Spacing.md,
   },
   contactInfo: {
     flex: 1,

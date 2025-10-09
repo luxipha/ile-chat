@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Button } from './src/components/ui/Button';
 import { Card } from './src/components/ui/Card';
 import { Typography } from './src/components/ui/Typography';
+import { Avatar } from './src/components/ui/Avatar';
 import { Colors, Spacing, BorderRadius } from './src/theme';
 import { ConversationList, Conversation } from './src/components/chat/ConversationList';
 import { ChatScreen } from './src/components/chat/ChatScreen';
@@ -1967,13 +1968,15 @@ function App() {
     const renderContactItem = (contact: any) => (
       <View key={contact.id} style={styles.enhancedContactRow}>
         <TouchableOpacity 
-          style={styles.enhancedContactAvatar}
           onPress={() => handleContactPress(contact)}
         >
-          <Typography variant="h6" style={styles.avatarText}>
-            {contact.avatar}
-          </Typography>
-          {contact.isOnline && <View style={styles.onlineIndicator} />}
+          <Avatar
+            name={contact.name}
+            imageUrl={contact.profilePicture || contact.avatar}
+            online={contact.isOnline}
+            size="medium"
+            shape="rounded"
+          />
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -2561,13 +2564,12 @@ function App() {
           {/* User header */}
           <View style={styles.momentUserHeader}>
             <View style={styles.momentUserInfo}>
-              <View style={styles.momentAvatar}>
-                {userAvatar ? (
-                  <Image source={{ uri: userAvatar }} style={styles.momentAvatarImage} />
-                ) : (
-                  <Typography variant="h6">{userName.split(' ').map((n: string) => n[0]).join('')}</Typography>
-                )}
-              </View>
+              <Avatar
+                name={userName}
+                userId={moment.authorId}
+                size="medium"
+                shape="rounded"
+              />
               <View style={styles.momentUserDetails}>
                 <Typography variant="h6" style={styles.momentUserName}>{userName}</Typography>
                 <Typography variant="body2" color="textSecondary">{postTime}</Typography>
@@ -4042,35 +4044,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.gray200,
   },
-  enhancedContactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-    position: 'relative',
-  },
-  avatarText: {
-    color: Colors.white,
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  onlineIndicator: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: Colors.success,
-    borderWidth: 2,
-    borderColor: Colors.white,
-  },
   enhancedContactInfo: {
     flex: 1,
     paddingRight: Spacing.sm,
+    marginLeft: Spacing.md,
   },
   contactNameRow: {
     flexDirection: 'row',
@@ -4195,22 +4172,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  momentAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.md, // Square with rounded corners
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  momentAvatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.md, // Square with rounded corners
-  },
+
   momentUserDetails: {
     flex: 1,
+    marginLeft: Spacing.md,
   },
   momentUserName: {
     fontWeight: '600',
