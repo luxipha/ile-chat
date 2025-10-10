@@ -2,6 +2,51 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebaseAuthService from './firebaseAuthService';
 import { API_BASE_URL } from '../config/apiConfig';
 
+export interface BankDetails {
+  bankName: string;
+  accountNumber: string;
+  accountHolderName: string; // Backend field name
+  accountName?: string; // Frontend field name (alternative)
+  currency: string;
+}
+
+export interface AlipayDetails {
+  accountName: string;
+  phoneNumber: string;
+}
+
+export interface PaymentMethodDetails {
+  bankDetails?: BankDetails;
+  alipayDetails?: AlipayDetails;
+}
+
+export interface MerchantProfile {
+  status: 'none' | 'pending' | 'approved' | 'rejected' | 'suspended';
+  bankDetails?: BankDetails;
+  alipayDetails?: AlipayDetails;
+  stats: {
+    totalTrades: number;
+    completedTrades: number;
+    tradingVolume: number;
+    averageRating: number;
+    responseTime: number;
+  };
+  settings: {
+    operatingHours: {
+      start: string;
+      end: string;
+      timezone: string;
+    };
+    autoAcceptTrades: boolean;
+    maxSimultaneousTrades: number;
+  };
+  stake: {
+    amount: number;
+    tradingVolume: number;
+    alpha: number;
+  };
+}
+
 export interface User {
   id: string;
   _id?: string; // Adding _id for backward compatibility
@@ -14,6 +59,8 @@ export interface User {
   onboardingCompleted: boolean;
   authMethod: 'email' | 'google' | 'telegram';
   avatar?: string; // Adding avatar property
+  role?: 'user' | 'merchant' | 'admin';
+  merchantProfile?: MerchantProfile;
 }
 
 export interface AuthResponse {

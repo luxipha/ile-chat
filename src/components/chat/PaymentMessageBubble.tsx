@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
+import { Colors, Shadows } from '../../theme';
 import { Typography } from '../ui/Typography';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -105,8 +106,8 @@ export const PaymentMessageBubble: React.FC<PaymentMessageBubbleProps> = ({
   // Gold gradient colors for completed payments, navy for others
   const isCompleted = paymentData.status === 'completed' || paymentData.status === 'received';
   const gradientColors = isCompleted 
-    ? ['#FFD700', '#FFA500', '#FF8C00'] // Gold gradient
-    : ['#1B365D', '#2C5282', '#3182CE']; // Navy gradient
+    ? Colors.gradientGold
+    : Colors.gradientNavy;
 
   return (
     <TouchableOpacity 
@@ -204,14 +205,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: ChatSpacing.md,
     minHeight: 120,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
+    ...Shadows.md,
   },
   header: {
     flexDirection: 'row',
@@ -241,7 +235,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   noteContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: Colors.overlayLight,
     borderRadius: 8,
     paddingHorizontal: ChatSpacing.sm,
     paddingVertical: ChatSpacing.xs,
@@ -269,23 +263,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   timestamp: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: Colors.overlayText,
     fontSize: 11,
   },
   transactionIdContainer: {
     marginTop: ChatSpacing.xs,
     paddingTop: ChatSpacing.xs,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+    borderTopColor: Colors.overlayMedium,
   },
   transactionId: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: Colors.overlayTextSecondary,
     fontSize: 10,
     textAlign: 'center',
   },
   decorativeCircle: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: Colors.overlayDark,
     borderRadius: 50,
   },
   decorativeCircle1: {

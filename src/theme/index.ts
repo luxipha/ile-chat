@@ -35,6 +35,17 @@ export const Colors = {
   surface: '#FFFFFF',
   overlay: 'rgba(0, 0, 0, 0.5)',
   
+  // Gradient Colors
+  gradientGold: ['#FFD700', '#FFA500', '#FF8C00'] as const,
+  gradientNavy: ['#1B365D', '#2C5282', '#3182CE'] as const,
+  
+  // Overlay Colors
+  overlayLight: 'rgba(255, 255, 255, 0.15)',
+  overlayMedium: 'rgba(255, 255, 255, 0.2)',
+  overlayDark: 'rgba(255, 255, 255, 0.1)',
+  overlayText: 'rgba(255, 255, 255, 0.8)',
+  overlayTextSecondary: 'rgba(255, 255, 255, 0.7)',
+  
   // Semantic Colors
   textPrimary: '#202124',
   border: '#DADCE0',

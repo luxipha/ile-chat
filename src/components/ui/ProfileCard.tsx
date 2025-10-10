@@ -3,6 +3,7 @@ import {
   View,
   TouchableOpacity,
   StyleSheet,
+  ViewStyle,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from './Typography';
@@ -26,7 +27,7 @@ interface ProfileCardProps {
   onSharePress?: () => void;
   onEditPress?: () => void;
   onQRPress?: () => void;
-  style?: any;
+  style?: ViewStyle;
 }
 
 export const ProfileCard: React.FC<ProfileCardProps> = ({

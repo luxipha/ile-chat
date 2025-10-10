@@ -831,58 +831,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                           />
                         ) : userProfile?.avatar ? (
                           <Image source={{ uri: userProfile.avatar }} style={styles.avatarPreviewImage} />
-                        ) : editField === 'Date of Birth' ? (
-                      <>
-                        <Typography variant="body1" style={styles.fieldLabel}>
-                          {editField}
-                        </Typography>
-                        <View style={styles.dateInputContainer}>
-                          <View style={styles.dateInputGroup}>
-                            <Typography variant="body2" style={styles.dateInputLabel}>
-                              Month
-                            </Typography>
-                            <TextInput
-                              style={[styles.textInput, styles.dateInput]}
-                              value={dobMonth}
-                              onChangeText={setDobMonth}
-                              placeholder="MM"
-                              placeholderTextColor={Colors.gray400}
-                              keyboardType="numeric"
-                              maxLength={2}
-                              autoFocus={true}
-                            />
-                          </View>
-                          <View style={styles.dateInputGroup}>
-                            <Typography variant="body2" style={styles.dateInputLabel}>
-                              Day
-                            </Typography>
-                            <TextInput
-                              style={[styles.textInput, styles.dateInput]}
-                              value={dobDay}
-                              onChangeText={setDobDay}
-                              placeholder="DD"
-                              placeholderTextColor={Colors.gray400}
-                              keyboardType="numeric"
-                              maxLength={2}
-                            />
-                          </View>
-                          <View style={styles.dateInputGroup}>
-                            <Typography variant="body2" style={styles.dateInputLabel}>
-                              Year
-                            </Typography>
-                            <TextInput
-                              style={[styles.textInput, styles.dateInput]}
-                              value={dobYear}
-                              onChangeText={setDobYear}
-                              placeholder="YYYY"
-                              placeholderTextColor={Colors.gray400}
-                              keyboardType="numeric"
-                              maxLength={4}
-                            />
-                          </View>
-                        </View>
-                      </>
-                    ) : (
+                        ) : (
                           <View style={styles.avatarPlaceholder}>
                             <MaterialIcons name="account-circle" size={80} color={Colors.gray400} />
                           </View>

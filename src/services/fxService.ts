@@ -85,6 +85,32 @@ class FXService {
   private apiBaseUrl = API_BASE_URL;
   
   /**
+   * Create a new FX offer
+   * @param offerData - The offer data to create
+   * @returns Promise with the response
+   */
+  async createOffer(offerData: any): Promise<any> {
+    const startTime = Date.now();
+    this.debugger.log('CREATE_OFFER_START', { offerData });
+    
+    try {
+      const response = await apiClient.post('/api/fx/offers', offerData);
+      
+      const responseTime = Date.now() - startTime;
+      this.debugger.log('CREATE_OFFER_SUCCESS', { 
+        response: response.data, 
+        responseTime 
+      });
+      
+      return response;
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      this.debugger.log('CREATE_OFFER_ERROR', { error, responseTime }, error);
+      throw error;
+    }
+  }
+
+  /**
    * Sign a release for a trade
    * @param tradeId - ID of the trade to sign release for
    * @returns Promise with the response
@@ -688,12 +714,12 @@ class FXService {
    */
   getCurrencies(): Currency[] {
     return [
-      { code: 'USD', name: 'US Dollar', symbol: '$', flag: '<�<�', type: 'fiat' },
-      { code: 'NGN', name: 'Nigerian Naira', symbol: '�', flag: '<�<�', type: 'fiat' },
-      { code: 'CNY', name: 'Chinese Yuan', symbol: '�', flag: '<�<�', type: 'fiat' },
-      { code: 'EUR', name: 'Euro', symbol: '�', flag: '<�<�', type: 'fiat' },
-      { code: 'GBP', name: 'British Pound', symbol: '�', flag: '<�<�', type: 'fiat' },
-      { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=�', type: 'crypto' },
+      { code: 'USD', name: 'US Dollar', symbol: '$', flag: '🇺🇸', type: 'fiat' },
+      { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: '🇳🇬', type: 'fiat' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '🇨🇳', type: 'fiat' },
+      { code: 'EUR', name: 'Euro', symbol: '€', flag: '🇪🇺', type: 'fiat' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', flag: '🇬🇧', type: 'fiat' },
+      { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '💰', type: 'crypto' },
     ];
   }
 
@@ -723,7 +749,7 @@ class FXService {
         id: 'bank_transfer',
         name: 'Bank Transfer',
         type: 'bank',
-        icon: 'account_balance',
+        icon: 'account-balance',
         processingTime: '10-30 minutes',
         limits: { min: 1000, max: 100000 },
       },
@@ -877,35 +903,45 @@ class FXService {
       return [];
     }
 
-    return backendOffers.map(offer => ({
-      id: offer._id || offer.id,
-      maker: {
-        id: offer.maker?.id || offer.makerId,
-        name: offer.maker?.name || offer.maker?.userName || 'Unknown Merchant',
-        avatar: offer.maker?.avatar || offer.maker?.profilePicture || '/api/placeholder/40/40',
-        trustScore: offer.maker?.trustScore || 0,
-        trustBadge: this.getTrustBadge(offer.maker?.trustScore || 0),
-        completedTrades: offer.maker?.completedTrades || 0,
-        responseTime: offer.maker?.responseTime || '~5 minutes',
-        onlineStatus: offer.maker?.isOnline ? 'online' : 'offline',
-      },
-      sellCurrency: this.transformCurrency(offer.sellCurrency),
-      buyCurrency: this.transformCurrency(offer.buyCurrency),
-      sellAmount: offer.sellAmount || 0,
-      buyAmount: offer.buyAmount || 0,
-      exchangeRate: offer.exchangeRate || 0,
-      margin: offer.margin || 0,
-      paymentMethods: this.transformPaymentMethods(offer.paymentMethods || []),
-      paymentWindow: offer.paymentWindow || 30,
-      minTrade: offer.minTrade || 0,
-      maxTrade: offer.maxTrade || 0,
-      status: offer.status || 'active',
-      availableAmount: offer.availableAmount || offer.sellAmount || 0,
-      terms: offer.terms || '',
-      kycRequired: offer.kycRequired || false,
-      createdAt: new Date(offer.createdAt),
-      updatedAt: new Date(offer.updatedAt),
-    }));
+    return backendOffers.map(offer => {
+      // Backend uses 'merchant' field, but frontend expects 'maker'
+      const merchantData = offer.merchant || offer.maker;
+      
+      return {
+        id: offer._id || offer.id,
+        maker: {
+          id: merchantData?._id || merchantData?.id || offer.makerId,
+          name: merchantData?.name || merchantData?.userName || 'Unknown Merchant',
+          avatar: merchantData?.avatar || merchantData?.profilePicture || '/api/placeholder/40/40',
+          trustScore: merchantData?.merchantProfile?.stats?.averageRating || merchantData?.trustScore || 85,
+          trustBadge: this.getTrustBadge(merchantData?.merchantProfile?.stats?.averageRating || merchantData?.trustScore || 85),
+          completedTrades: merchantData?.merchantProfile?.stats?.completedTrades || merchantData?.completedTrades || 0,
+          responseTime: merchantData?.merchantProfile?.stats?.responseTime ? `~${merchantData.merchantProfile.stats.responseTime} min` : '~5 minutes',
+          onlineStatus: 'online', // For now, assume all merchants are online
+        },
+        sellCurrency: this.transformCurrency(offer.fromCurrency || offer.sellCurrency),
+        buyCurrency: this.transformCurrency(offer.toCurrency || offer.buyCurrency),
+        sellAmount: offer.availableAmount || offer.sellAmount || 0,
+        buyAmount: offer.availableAmount && offer.exchangeRate ? 
+          Math.round(offer.availableAmount * offer.exchangeRate) : 
+          (offer.buyAmount || 0),
+        exchangeRate: offer.exchangeRate || 0,
+        margin: offer.margin || 0,
+        paymentMethods: this.transformPaymentMethods(offer.paymentMethods || []),
+        paymentWindow: offer.terms?.paymentWindow || offer.paymentWindow || 30,
+        minTrade: offer.minAmount || offer.minTrade || 0,
+        maxTrade: offer.maxAmount || offer.maxTrade || 0,
+        status: offer.status || 'active',
+        availableAmount: offer.availableAmount || offer.sellAmount || 0,
+        terms: offer.terms?.instructions || '',
+        autoReply: offer.autoReply || offer.terms?.autoReply || undefined,
+        kycRequired: offer.terms?.requiresVerification || offer.kycRequired || false,
+        bankDetails: offer.bankDetails || undefined, // Preserve bankDetails from backend
+        alipayDetails: offer.alipayDetails || undefined, // Preserve alipayDetails from backend
+        createdAt: new Date(offer.createdAt),
+        updatedAt: new Date(offer.updatedAt),
+      };
+    });
   }
 
   /**
@@ -935,8 +971,8 @@ class FXService {
         name: backendTrade.taker?.name || backendTrade.taker?.userName || 'You',
         trustScore: backendTrade.taker?.trustScore || 0,
       },
-      sellCurrency: this.transformCurrency(backendTrade.sellCurrency),
-      buyCurrency: this.transformCurrency(backendTrade.buyCurrency),
+      sellCurrency: this.transformCurrency(backendTrade.fromCurrency || backendTrade.sellCurrency),
+      buyCurrency: this.transformCurrency(backendTrade.toCurrency || backendTrade.buyCurrency),
       sellAmount: backendTrade.sellAmount || 0,
       buyAmount: backendTrade.buyAmount || 0,
       exchangeRate: backendTrade.exchangeRate || 0,

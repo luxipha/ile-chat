@@ -226,7 +226,7 @@ export const AddContactScreen: React.FC<AddContactScreenProps> = ({
             <EmptyState
               icon="person-search"
               title="No Users Found"
-              message={`No users found for "${searchQuery}". Try different search terms.`}
+              description={`No users found for "${searchQuery}". Try different search terms.`}
             />
           </View>
         );
@@ -241,7 +241,7 @@ export const AddContactScreen: React.FC<AddContactScreenProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Typography variant="h3">Add Contact</Typography>
         <View style={styles.headerSpacer} />
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: Spacing.md,
     fontSize: 16,
-    color: Colors.text,
+    color: Colors.textPrimary,
   },
   clearButton: {
     padding: Spacing.xs,
@@ -353,7 +353,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   hintTagText: {
-    color: Colors.textSecondary,
+    color: Colors.gray600,
     fontSize: 12,
   },
   loadingContainer: {
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.md,
-    color: Colors.textSecondary,
+    color: Colors.gray600,
   },
   resultsContainer: {
     marginBottom: Spacing.xl,

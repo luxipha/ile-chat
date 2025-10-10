@@ -57,7 +57,7 @@ const STICKER_CATEGORIES = [
   {
     id: 'gestures',
     name: 'Gestures',
-    icon: 'pan_tool' as const,
+    icon: 'pan-tool' as const,
     stickers: [
       { id: '21', emoji: '👍', name: 'Thumbs Up', category: 'gestures' },
       { id: '22', emoji: '👎', name: 'Thumbs Down', category: 'gestures' },
@@ -182,7 +182,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
                   color={
                     selectedCategory === category.id
                       ? Colors.primary
-                      : Colors.textSecondary
+                      : Colors.gray600
                   }
                 />
                 <Text
@@ -223,7 +223,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: Colors.overlay,
     justifyContent: 'flex-end',
   },
   container: {
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   categoryTabText: {
     marginLeft: Spacing.xs,
     fontSize: 14,
-    color: Colors.textSecondary,
+    color: Colors.gray600,
     fontWeight: '500',
   },
   categoryTabTextActive: {

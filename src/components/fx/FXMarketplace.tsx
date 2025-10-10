@@ -57,7 +57,7 @@ const PAYMENT_METHODS: PaymentMethod[] = [
     id: 'bank_ng',
     name: 'Nigerian Bank',
     type: 'bank',
-    icon: 'account-balance',
+    icon: 'account-balance-wallet',
     processingTime: '5-15 minutes',
     limits: { min: 1000, max: 5000000 },
   },
@@ -83,8 +83,8 @@ const MOCK_OFFERS: FXOffer[] = [
       responseTime: '~3 minutes',
       onlineStatus: 'online',
     },
-    sellCurrency: CURRENCIES.find(c => c.code === 'CNY')!,
-    buyCurrency: CURRENCIES.find(c => c.code === 'NGN')!,
+    sellCurrency: CURRENCIES.find(c => c.code === 'CNY') || CURRENCIES[2], // Fallback to CNY
+    buyCurrency: CURRENCIES.find(c => c.code === 'NGN') || CURRENCIES[1], // Fallback to NGN
     sellAmount: 1000,
     buyAmount: 220000,
     exchangeRate: 220,
@@ -110,8 +110,8 @@ const MOCK_OFFERS: FXOffer[] = [
       responseTime: '~8 minutes',
       onlineStatus: 'online',
     },
-    sellCurrency: CURRENCIES.find(c => c.code === 'USD')!,
-    buyCurrency: CURRENCIES.find(c => c.code === 'NGN')!,
+    sellCurrency: CURRENCIES.find(c => c.code === 'USD') || CURRENCIES[0], // Fallback to USD
+    buyCurrency: CURRENCIES.find(c => c.code === 'NGN') || CURRENCIES[1], // Fallback to NGN
     sellAmount: 5000,
     buyAmount: 7750000,
     exchangeRate: 1550,
@@ -137,8 +137,8 @@ const MOCK_OFFERS: FXOffer[] = [
       responseTime: '~12 minutes',
       onlineStatus: 'away',
     },
-    sellCurrency: CURRENCIES.find(c => c.code === 'EUR')!,
-    buyCurrency: CURRENCIES.find(c => c.code === 'USDC')!,
+    sellCurrency: CURRENCIES.find(c => c.code === 'EUR') || CURRENCIES[3], // Fallback to EUR
+    buyCurrency: CURRENCIES.find(c => c.code === 'USDC') || CURRENCIES[5], // Fallback to USDC
     sellAmount: 2000,
     buyAmount: 2150,
     exchangeRate: 1.075,
@@ -254,8 +254,8 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   };
 
   const checkUserEligibility = () => {
-    // Check if user has at least $1000 balance for merchant eligibility
-    return mockUser.balance >= 1000;
+    // Allow all users to become merchants (balance requirement removed)
+    return true;
   };
 
   const handleCreateOffer = () => {
@@ -319,11 +319,11 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
               <Typography variant="body2" style={styles.filterText}>
                 {filters.sellCurrency || 'Any'} 
               </Typography>
-              <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.textSecondary} />
+              <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
             </TouchableOpacity>
           </View>
 
-          <MaterialIcons name="arrow-forward" size={20} color={Colors.textSecondary} style={styles.arrowIcon} />
+          <MaterialIcons name="arrow-forward" size={20} color={Colors.gray600} style={styles.arrowIcon} />
 
           <View style={styles.filterGroup}>
             <Typography variant="caption" color="textSecondary">Receive</Typography>
@@ -331,7 +331,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
               <Typography variant="body2" style={styles.filterText}>
                 {filters.buyCurrency || 'Any'}
               </Typography>
-              <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.textSecondary} />
+              <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
             </TouchableOpacity>
           </View>
 
@@ -359,7 +359,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     </View>
   );
 
-  const renderTrustBadge = (badge: string | null) => {
+  const renderTrustBadge = (badge: string | null | undefined) => {
     if (!badge) return null;
     
     const badgeConfig = {
@@ -381,6 +381,17 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   const renderOfferCard = ({ item: offer }: { item: FXOffer }) => {
     const timeAgo = Math.round((Date.now() - offer.updatedAt.getTime()) / (1000 * 60));
     const isGoodRate = offer.margin <= 0;
+    
+    // Debug logging for amounts
+    console.log('📊 [FXMarketplace] Offer amounts:', {
+      id: offer.id,
+      sellAmount: offer.sellAmount,
+      buyAmount: offer.buyAmount,
+      availableAmount: offer.availableAmount,
+      exchangeRate: offer.exchangeRate,
+      sellCurrency: offer.sellCurrency.code,
+      buyCurrency: offer.buyCurrency.code
+    });
     
     return (
       <TouchableOpacity onPress={() => onOfferSelect(offer)}>
@@ -410,9 +421,6 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
                     {offer.maker.completedTrades} trades • {offer.maker.trustScore}% trust
                   </Typography>
                 </View>
-                <Typography variant="caption" color="textSecondary">
-                  Responds in {offer.maker.responseTime}
-                </Typography>
               </View>
             </View>
             
@@ -446,15 +454,6 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
                 <Typography variant="body2" color="primary" style={styles.rateText}>
                   Rate: {offer.exchangeRate}
                 </Typography>
-                <View style={[styles.marginBadge, {
-                  backgroundColor: isGoodRate ? Colors.success + '20' : Colors.warning + '20'
-                }]}>
-                  <Typography variant="caption" style={[styles.marginText, {
-                    color: isGoodRate ? Colors.success : Colors.warning
-                  }]}>
-                    {offer.margin > 0 ? '+' : ''}{offer.margin.toFixed(1)}%
-                  </Typography>
-                </View>
               </View>
 
               <View style={styles.buySide}>
@@ -515,7 +514,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
             title="Trade Now"
             onPress={() => onOfferSelect(offer)}
             style={styles.tradeButton}
-            size="small"
+            size="sm"
           />
         </Card>
       </TouchableOpacity>
@@ -576,23 +575,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
       {/* Filters */}
       {renderFilters()}
 
-      {/* Market Stats */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsContainer}>
-        <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>24h Volume</Typography>
-          <Typography variant="body1" color="primary" style={styles.statValue}>$2.4M</Typography>
-        </Card>
-        <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>Online Traders</Typography>
-          <Typography variant="body1" color="success" style={styles.statValue}>
-            {filteredOffers.filter(o => o.maker.onlineStatus === 'online').length}
-          </Typography>
-        </Card>
-        <Card style={styles.statCard}>
-          <Typography variant="caption" color="textSecondary" style={styles.statLabel}>Avg Response</Typography>
-          <Typography variant="body1" style={styles.statValue}>~8 min</Typography>
-        </Card>
-      </ScrollView>
+
 
       {/* Offers List */}
       {loading ? (
@@ -624,8 +607,8 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
               Alert.alert('Debug Info', 'Check console for debug logs');
             }}
             style={styles.debugButton}
-            variant="text"
-            size="small"
+            variant="ghost"
+            size="sm"
           />
         </View>
       ) : filteredOffers.length === 0 ? (
@@ -666,28 +649,14 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
               
               <View style={styles.requirementsList}>
                 <View style={styles.requirementItem}>
-                  <MaterialIcons 
-                    name={mockUser.balance >= 1000 ? "check-circle" : "cancel"} 
-                    size={20} 
-                    color={mockUser.balance >= 1000 ? Colors.success : Colors.error} 
-                  />
-                  <Typography variant="body2" style={styles.requirementText}>
-                    Minimum wallet balance: $1,000
-                  </Typography>
-                </View>
-                <Typography variant="caption" color="textSecondary" style={styles.balanceInfo}>
-                  Your current balance: ${mockUser.balance.toLocaleString()}
-                </Typography>
-                
-                <View style={styles.requirementItem}>
-                  <MaterialIcons name="verified-user" size={20} color={Colors.info} />
+                  <MaterialIcons name="check-circle" size={20} color={Colors.success} />
                   <Typography variant="body2" style={styles.requirementText}>
                     Complete merchant application
                   </Typography>
                 </View>
                 
                 <View style={styles.requirementItem}>
-                  <MaterialIcons name="account-balance" size={20} color={Colors.info} />
+                  <MaterialIcons name="account-balance-wallet" size={20} color={Colors.info} />
                   <Typography variant="body2" style={styles.requirementText}>
                     Provide bank account details
                   </Typography>
@@ -701,14 +670,13 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
             
             <View style={styles.modalButtons}>
               <Button
-                title="Add Funds"
+                title="Apply as Merchant"
                 onPress={() => {
                   setShowEligibilityModal(false);
-                  // TODO: Navigate to add funds screen
-                  Alert.alert('Add Funds', 'This would navigate to the add funds screen');
+                  // TODO: Navigate to merchant application screen
+                  Alert.alert('Merchant Application', 'This would navigate to the merchant application screen');
                 }}
                 style={styles.modalPrimaryButton}
-                disabled={mockUser.balance >= 1000}
               />
               <Button
                 title="Close"
@@ -1058,7 +1026,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.md,
-    color: Colors.textSecondary,
+    color: Colors.gray600,
   },
   errorContainer: {
     flex: 1,

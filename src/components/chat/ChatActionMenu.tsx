@@ -9,6 +9,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
+import { Shadows } from '../../theme';
 
 interface ChatActionMenuProps {
   visible: boolean;
@@ -107,18 +108,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   menu: {
+    position: 'absolute',
     backgroundColor: ChatTheme.background1,
     borderRadius: 12,
     paddingVertical: ChatSpacing.sm,
     minWidth: 200, // Increased from 150 to provide more space
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    ...Shadows.lg,
     borderWidth: 1,
     borderColor: ChatTheme.border,
   },

@@ -60,6 +60,18 @@ export interface FXOffer {
   autoReply?: string;
   kycRequired: boolean;
   
+  // Payment method details
+  bankDetails?: {
+    bankName: string;
+    accountNumber: string;
+    accountHolderName: string;
+    currency: string;
+  };
+  alipayDetails?: {
+    accountName: string;
+    phoneNumber: string;
+  };
+  
   // Metadata
   createdAt: Date;
   updatedAt: Date;

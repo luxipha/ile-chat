@@ -7,7 +7,7 @@ type CardVariant = 'elevated' | 'outlined' | 'filled';
 interface CardProps {
   children: React.ReactNode;
   variant?: CardVariant;
-  style?: ViewStyle;
+  style?: ViewStyle | ViewStyle[];
   padding?: keyof typeof Spacing;
 }
 

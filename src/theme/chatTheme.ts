@@ -24,6 +24,7 @@ export const ChatTheme = {
   borderActive: Colors.primary,
   accent: Colors.secondary, // Gold
   success: Colors.success,
+  warning: Colors.warning,
   error: Colors.error,
   
   // Special states

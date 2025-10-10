@@ -56,7 +56,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
     );
   };
 
-  const renderTrustBadge = (badge: string | null) => {
+  const renderTrustBadge = (badge: string | null | undefined) => {
     if (!badge) return null;
     
     const badgeConfig = {
@@ -101,6 +101,9 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
             <Typography variant="h5" style={styles.currencyCode}>
               {offer.sellCurrency.code}
             </Typography>
+            <Typography variant="h6" style={styles.amountText}>
+              {offer.sellCurrency.symbol}{offer.sellAmount.toLocaleString()}
+            </Typography>
             <Typography variant="caption" color="textSecondary">
               Selling
             </Typography>
@@ -112,15 +115,6 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
           <Typography variant="h6" color="primary" style={styles.rateText}>
             Rate: {offer.exchangeRate}
           </Typography>
-          <View style={[styles.marginBadge, {
-            backgroundColor: offer.margin <= 0 ? Colors.success + '20' : Colors.warning + '20'
-          }]}>
-            <Typography variant="caption" style={[styles.marginText, {
-              color: offer.margin <= 0 ? Colors.success : Colors.warning
-            }]}>
-              {offer.margin > 0 ? '+' : ''}{offer.margin.toFixed(1)}% margin
-            </Typography>
-          </View>
         </View>
 
         <View style={styles.buySide}>
@@ -130,6 +124,9 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
           <View>
             <Typography variant="h5" style={styles.currencyCode}>
               {offer.buyCurrency.code}
+            </Typography>
+            <Typography variant="h6" style={styles.amountText}>
+              {offer.buyCurrency.symbol}{offer.buyAmount.toLocaleString()}
             </Typography>
             <Typography variant="caption" color="textSecondary">
               Receiving
@@ -148,7 +145,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         <View style={styles.limitItem}>
           <Typography variant="caption" color="textSecondary">Max Trade</Typography>
           <Typography variant="body2" style={styles.limitValue}>
-            {offer.sellCurrency.symbol}{offer.maxTrade.toLocaleString()}
+            {offer.sellCurrency.symbol}{Math.min(offer.maxTrade, offer.availableAmount).toLocaleString()}
           </Typography>
         </View>
         <View style={styles.limitItem}>
@@ -294,7 +291,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         <Typography variant="h6" style={styles.sectionTitle}>Trading Terms</Typography>
         <View style={styles.termsList}>
           <View style={styles.termItem}>
-            <MaterialIcons name="access-time" size={16} color={Colors.textSecondary} />
+            <MaterialIcons name="access-time" size={16} color={Colors.gray600} />
             <Typography variant="body2" style={styles.termText}>
               Payment must be completed within 30 minutes of trade start
             </Typography>
@@ -306,13 +303,13 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
             </Typography>
           </View>
           <View style={styles.termItem}>
-            <MaterialIcons name="receipt" size={16} color={Colors.textSecondary} />
+            <MaterialIcons name="receipt" size={16} color={Colors.gray600} />
             <Typography variant="body2" style={styles.termText}>
               Payment proof must be uploaded for verification
             </Typography>
           </View>
           <View style={styles.termItem}>
-            <MaterialIcons name="gavel" size={16} color={Colors.textSecondary} />
+            <MaterialIcons name="gavel" size={16} color={Colors.gray600} />
             <Typography variant="body2" style={styles.termText}>
               Disputes will be resolved through platform arbitration
             </Typography>
@@ -398,14 +395,8 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
             <Typography variant="caption" color="textSecondary">Completed Trades</Typography>
           </View>
           <View style={styles.statItem}>
-            <Typography variant="h4" color="secondary">
-              {offer.maker.responseTime || 'New'}
-            </Typography>
-            <Typography variant="caption" color="textSecondary">Response Time</Typography>
-          </View>
-          <View style={styles.statItem}>
             <Typography variant="h4" color="success">
-              {offer.maker.joinDate || 'New'}
+              New
             </Typography>
             <Typography variant="caption" color="textSecondary">Member Since</Typography>
           </View>
@@ -499,6 +490,11 @@ const styles = StyleSheet.create({
   },
   currencyCode: {
     fontWeight: '600',
+  },
+  amountText: {
+    fontWeight: '600',
+    color: Colors.primary,
+    marginVertical: Spacing.xs,
   },
   rateText: {
     marginVertical: Spacing.sm,
@@ -603,7 +599,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.primary,
   },
   tabText: {
-    color: Colors.textSecondary,
+    color: Colors.gray600,
   },
   activeTabText: {
     color: Colors.primary,
