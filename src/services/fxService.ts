@@ -261,6 +261,15 @@ class FXService {
         };
       }
 
+      // Get current user for debugging
+      let currentUserDebug = null;
+      try {
+        const userData = await AsyncStorage.getItem('userData');
+        currentUserDebug = userData ? JSON.parse(userData) : null;
+      } catch (e) {
+        console.warn('Failed to get user for debugging:', e);
+      }
+
       // Prepare trade creation payload
       const tradePayload = {
         offerId,
@@ -269,7 +278,15 @@ class FXService {
         // Additional metadata can be added here
       };
 
-      this.debugger.log('CREATE_TRADE_PAYLOAD', { tradePayload });
+      this.debugger.log('CREATE_TRADE_PAYLOAD', { 
+        tradePayload,
+        userContext: {
+          userId: currentUserDebug?.id || currentUserDebug?._id,
+          userRole: currentUserDebug?.role,
+          isMerchant: currentUserDebug?.role === 'merchant' || !!currentUserDebug?.merchantProfile,
+          providedUserId: currentUserId
+        }
+      });
 
       // Make API call to create trade
       const endpoint = `/api/fx/offers/${offerId}/trade`;
@@ -280,13 +297,25 @@ class FXService {
         response, 
         responseTime,
         endpoint,
-        success: response.success 
+        success: response.success,
+        responseKeys: Object.keys(response || {}),
+        dataKeys: Object.keys(response.data || {}),
+        rawResponse: response
       });
 
       if (!response.success) {
         this.debugger.log('CREATE_TRADE_API_ERROR', { 
           error: response.error,
-          data: response.data 
+          data: response.data,
+          fullResponse: response,
+          httpStatus: 'unknown',
+          endpoint,
+          payload: tradePayload,
+          userContext: {
+            userId: currentUserDebug?.id || currentUserDebug?._id,
+            userRole: currentUserDebug?.role,
+            isMerchant: currentUserDebug?.role === 'merchant' || !!currentUserDebug?.merchantProfile
+          }
         });
         
         return {
@@ -296,7 +325,45 @@ class FXService {
       }
 
       // Transform backend response to frontend format
-      const transformedTrade = this.transformTradeFromBackend(response.data);
+      // API service wraps response in { success: true, data: backendResponse }
+      // Backend response is { success: true, message: "...", trade: {...} }
+      const backendResponse = response.data as any;
+      const tradeData = (backendResponse as any).trade || backendResponse;
+      
+      // Debug: Log the raw response to understand the structure
+      console.log('🔍 [FXService] Raw API response:', JSON.stringify(response, null, 2));
+      console.log('🔍 [FXService] Backend response:', JSON.stringify(backendResponse, null, 2));
+      console.log('🔍 [FXService] Trade data to transform:', JSON.stringify(tradeData, null, 2));
+      
+      this.debugger.log('CREATE_TRADE_EXTRACT_DATA', { 
+        apiResponseKeys: Object.keys(response || {}),
+        backendResponseKeys: Object.keys((backendResponse as any) || {}),
+        hasTradeProperty: !!(backendResponse as any).trade,
+        tradeDataKeys: Object.keys(tradeData || {}),
+        tradeDataSample: {
+          _id: tradeData?._id,
+          fromAmount: tradeData?.fromAmount,
+          toAmount: tradeData?.toAmount,
+          fromCurrency: tradeData?.fromCurrency,
+          toCurrency: tradeData?.toCurrency,
+          status: tradeData?.status,
+          offerId: tradeData?.offerId,
+          offer: tradeData?.offer,
+          offerRef: tradeData?.offerRef
+        }
+      });
+      
+      // Additional debug for offerId issue
+      console.log('🔍 [FXService] Backend trade data for offerId debug:', {
+        hasOfferId: 'offerId' in (tradeData || {}),
+        offerIdValue: tradeData?.offerId,
+        hasOffer: 'offer' in (tradeData || {}),
+        offerValue: tradeData?.offer,
+        hasOfferRef: 'offerRef' in (tradeData || {}),
+        offerRefValue: tradeData?.offerRef,
+        allKeys: Object.keys(tradeData || {})
+      });
+      const transformedTrade = this.transformTradeFromBackend(tradeData);
       
       const result = {
         success: true,
@@ -764,6 +831,7 @@ class FXService {
     ];
   }
 
+
   /**
    * Get user's trade history
    * @param filters - Optional filters for trades
@@ -921,9 +989,9 @@ class FXService {
         },
         sellCurrency: this.transformCurrency(offer.fromCurrency || offer.sellCurrency),
         buyCurrency: this.transformCurrency(offer.toCurrency || offer.buyCurrency),
-        sellAmount: offer.availableAmount || offer.sellAmount || 0,
-        buyAmount: offer.availableAmount && offer.exchangeRate ? 
-          Math.round(offer.availableAmount * offer.exchangeRate) : 
+        sellAmount: offer.maxAmount || offer.sellAmount || 0, // Use maxAmount as total sellAmount
+        buyAmount: offer.maxAmount && offer.exchangeRate ? 
+          Math.round(offer.maxAmount * offer.exchangeRate) : 
           (offer.buyAmount || 0),
         exchangeRate: offer.exchangeRate || 0,
         margin: offer.margin || 0,
@@ -932,7 +1000,7 @@ class FXService {
         minTrade: offer.minAmount || offer.minTrade || 0,
         maxTrade: offer.maxAmount || offer.maxTrade || 0,
         status: offer.status || 'active',
-        availableAmount: offer.availableAmount || offer.sellAmount || 0,
+        availableAmount: offer.availableAmount || offer.maxAmount || 0, // availableAmount is what's left
         terms: offer.terms?.instructions || '',
         autoReply: offer.autoReply || offer.terms?.autoReply || undefined,
         kycRequired: offer.terms?.requiresVerification || offer.kycRequired || false,
@@ -950,45 +1018,88 @@ class FXService {
   private transformTradeFromBackend(backendTrade: any): FXTrade {
     this.debugger.log('TRANSFORM_TRADE_FROM_BACKEND', { 
       tradeId: backendTrade._id || backendTrade.id,
-      status: backendTrade.status 
+      status: backendTrade.status,
+      fromAmount: backendTrade.fromAmount,
+      toAmount: backendTrade.toAmount,
+      sellAmount: backendTrade.sellAmount,
+      buyAmount: backendTrade.buyAmount,
+      fromCurrency: backendTrade.fromCurrency,
+      toCurrency: backendTrade.toCurrency,
+      offerId: backendTrade.offerId,
+      offer: backendTrade.offer,
+      offerRef: backendTrade.offerRef,
+      merchant: backendTrade.merchant,
+      buyer: backendTrade.buyer,
+      backendKeys: Object.keys(backendTrade || {})
     });
 
+    // Safeguard required fields to prevent UI crashes when backend omits them
+    const safeId = (backendTrade && (backendTrade._id || backendTrade.id)) 
+      || ('trade_' + Math.random().toString(36).substring(2, 11));
+    const safeCreatedAt = backendTrade?.createdAt ? new Date(backendTrade.createdAt) : new Date();
+    const safeChatRoomId = backendTrade?.chatRoomId || `chat_${safeId}`;
+    const safeEscrowAmount = typeof backendTrade?.escrowAmount === 'number' ? backendTrade.escrowAmount : 0;
+    const safeEscrowCurrency = backendTrade?.escrowCurrency 
+      || backendTrade?.sellCurrency?.code 
+      || backendTrade?.fromCurrency 
+      || 'USD';
+
+    // Enhanced offerId handling - backend returns offer as ObjectId string
+    const safeOfferId = backendTrade.offerId 
+      || backendTrade.offer?._id 
+      || backendTrade.offer?.id 
+      || backendTrade.offer  // Direct offer field (ObjectId string)
+      || backendTrade.offerRef;
+
+    console.log('🔍 [FXService] Transform offerId debug:', {
+      originalOfferId: backendTrade.offerId,
+      offerObjectId: backendTrade.offer?._id,
+      offerObjectIdAlt: backendTrade.offer?.id,
+      offerDirectField: backendTrade.offer,
+      offerRef: backendTrade.offerRef,
+      finalOfferId: safeOfferId
+    });
+
+    // Handle backend using 'merchant' and 'buyer' instead of 'maker' and 'taker'
+    const merchantData = backendTrade.merchant || backendTrade.maker;
+    const buyerData = backendTrade.buyer || backendTrade.taker;
+
     return {
-      id: backendTrade._id || backendTrade.id,
-      offerId: backendTrade.offerId,
+      id: safeId,
+      offerId: safeOfferId,
       maker: {
-        id: backendTrade.maker?.id || backendTrade.makerId,
-        name: backendTrade.maker?.name || backendTrade.maker?.userName || 'Merchant',
-        avatar: backendTrade.maker?.avatar || '/api/placeholder/40/40',
-        trustScore: backendTrade.maker?.trustScore || 0,
-        trustBadge: this.getTrustBadge(backendTrade.maker?.trustScore || 0),
-        completedTrades: backendTrade.maker?.completedTrades || 0,
-        responseTime: backendTrade.maker?.responseTime || '~5 minutes',
-        onlineStatus: backendTrade.maker?.isOnline ? 'online' : 'offline',
+        id: merchantData?.id || merchantData?._id || backendTrade.makerId,
+        name: merchantData?.name || merchantData?.userName || 'Merchant',
+        avatar: merchantData?.avatar || '/api/placeholder/40/40',
+        trustScore: merchantData?.trustScore || 0,
+        trustBadge: this.getTrustBadge(merchantData?.trustScore || 0),
+        completedTrades: merchantData?.completedTrades || 0,
+        responseTime: merchantData?.responseTime || '~5 minutes',
+        onlineStatus: merchantData?.isOnline ? 'online' : 'offline',
       },
       taker: {
-        id: backendTrade.taker?.id || backendTrade.takerId,
-        name: backendTrade.taker?.name || backendTrade.taker?.userName || 'You',
-        trustScore: backendTrade.taker?.trustScore || 0,
+        id: buyerData?.id || buyerData?._id || backendTrade.takerId,
+        name: buyerData?.name || buyerData?.userName || 'You',
+        trustScore: buyerData?.trustScore || 0,
       },
       sellCurrency: this.transformCurrency(backendTrade.fromCurrency || backendTrade.sellCurrency),
       buyCurrency: this.transformCurrency(backendTrade.toCurrency || backendTrade.buyCurrency),
-      sellAmount: backendTrade.sellAmount || 0,
-      buyAmount: backendTrade.buyAmount || 0,
+      sellAmount: backendTrade.sellAmount || backendTrade.fromAmount || 0,
+      buyAmount: backendTrade.buyAmount || backendTrade.toAmount || 0,
       exchangeRate: backendTrade.exchangeRate || 0,
-      paymentMethod: this.transformPaymentMethod(backendTrade.paymentMethod),
+      paymentMethod: this.transformPaymentMethod(backendTrade.paymentMethod || backendTrade.paymentDetails),
+      escrowAmount: safeEscrowAmount,
+      escrowCurrency: safeEscrowCurrency,
       status: backendTrade.status || 'pending',
-      createdAt: new Date(backendTrade.createdAt),
+      createdAt: safeCreatedAt,
       quoteLockExpiry: new Date(backendTrade.quoteLockExpiry || Date.now() + 10 * 60 * 1000),
       paymentWindow: {
-        start: new Date(backendTrade.paymentWindow?.start || backendTrade.createdAt),
+        start: backendTrade?.paymentWindow?.start ? new Date(backendTrade.paymentWindow.start) : safeCreatedAt,
         end: new Date(backendTrade.paymentWindow?.end || Date.now() + 30 * 60 * 1000),
       },
-      chatRoomId: backendTrade.chatRoomId || `chat_${backendTrade._id || backendTrade.id}`,
+      chatRoomId: safeChatRoomId,
       paymentProofUrl: backendTrade.paymentProofUrl as any, // Type assertion for payment proof URL
       disputeReason: backendTrade.disputeReason,
-      rating: backendTrade.rating,
-      review: backendTrade.review,
     };
   }
 
@@ -1068,7 +1179,7 @@ class FXService {
 
     // Create mock trade object
     const trade: FXTrade = {
-      id: 'trade_' + Math.random().toString(36).substr(2, 9),
+      id: 'trade_' + Math.random().toString(36).substring(2, 11),
       offerId: offer.id,
       maker: offer.maker,
       taker: {
@@ -1084,14 +1195,14 @@ class FXService {
       paymentMethod: paymentMethod,
       escrowAmount: amount * 0.1, // Adding 10% escrow amount
       escrowCurrency: offer.sellCurrency.code, // Using sell currency code for escrow
-      status: 'quote_locked' as const, // Using a valid status from FXTrade type
+      status: 'pending_acceptance' as const, // Correct status for buyer-initiated trades
       createdAt: new Date(),
       quoteLockExpiry: new Date(Date.now() + 10 * 60 * 1000), // 10 min
       paymentWindow: {
         start: new Date(),
         end: new Date(Date.now() + offer.paymentWindow * 60 * 1000),
       },
-      chatRoomId: 'chat_' + Math.random().toString(36).substr(2, 9),
+      chatRoomId: 'chat_' + Math.random().toString(36).substring(2, 11),
     };
 
     this.debugger.log('MOCK_TRADE_CREATED', { trade });
@@ -1119,8 +1230,8 @@ class FXService {
           responseTime: '~2 minutes',
           onlineStatus: 'online',
         },
-        sellCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: '�', flag: '<�<�', type: 'fiat' },
-        buyCurrency: { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '=�', type: 'crypto' },
+        sellCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '🇨🇳', type: 'fiat' },
+        buyCurrency: { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '💰', type: 'crypto' },
         sellAmount: 10000,
         buyAmount: 1380,
         exchangeRate: 0.138,
@@ -1132,6 +1243,35 @@ class FXService {
         status: 'active',
         availableAmount: 10000,
         terms: 'Fast payment required. No new accounts.',
+        kycRequired: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: '68e8ebc02eeaf86a4cf6b6ad',
+        maker: {
+          id: 'merchant_1',
+          name: 'Merchant',
+          avatar: '/api/placeholder/40/40',
+          trustScore: 85,
+          trustBadge: undefined,
+          completedTrades: 0,
+          responseTime: '~5 minutes',
+          onlineStatus: 'offline',
+        },
+        sellCurrency: { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: '🇳🇬', type: 'fiat' },
+        buyCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '🇨🇳', type: 'fiat' },
+        sellAmount: 500,
+        buyAmount: 60000,
+        exchangeRate: 120,
+        margin: 0,
+        paymentMethods: this.getPaymentMethods().slice(0, 1),
+        paymentWindow: 30,
+        minTrade: 500,
+        maxTrade: 1000,
+        status: 'active',
+        availableAmount: 500,
+        terms: 'Quick payment required.',
         kycRequired: false,
         createdAt: new Date(),
         updatedAt: new Date(),

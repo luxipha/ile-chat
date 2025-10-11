@@ -17,12 +17,15 @@ import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import { FXTheme, FXColors } from '../../theme/fxTheme';
 import { FXOffer, FXFilter, Currency, PaymentMethod } from '../../types/fx';
 import fxService, { FXDebugUtils } from '../../services/fxService';
+import authService from '../../services/authService';
 
 interface FXMarketplaceProps {
   onOfferSelect: (offer: FXOffer) => void;
   onCreateOffer: () => void;
+  onViewTrades?: () => void;
   onBack?: () => void;
 }
 
@@ -158,6 +161,7 @@ const MOCK_OFFERS: FXOffer[] = [
 export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   onOfferSelect,
   onCreateOffer,
+  onViewTrades,
   onBack,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -174,11 +178,17 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  
+  // User role detection state
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isCurrentUserMerchant, setIsCurrentUserMerchant] = useState(false);
 
-  // Mock user data - this would come from user context/store in real app
-  const mockUser = {
-    balance: 800, // Less than $1000 to show eligibility gate
-    isMerchant: false,
+  // Debug function for development
+  const handleDebugPress = () => {
+    if (__DEV__) {
+      console.log('FX Debug - Offers:', offers);
+      Alert.alert('Debug Info', `Offers: ${offers.length}\nFilters: ${JSON.stringify(filters, null, 2)}`);
+    }
   };
 
   // Load data on component mount
@@ -186,12 +196,38 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     loadInitialData();
   }, []);
 
+  // User role detection
+  useEffect(() => {
+    const detectUserRole = async () => {
+      try {
+        const user = await authService.getCachedUser();
+        console.log('👤 [FXMarketplace] Current user:', user ? Object.keys(user) : 'null');
+        console.log('👤 [FXMarketplace] User role:', user?.role);
+        console.log('👤 [FXMarketplace] User ID:', user?.id);
+        
+        setCurrentUser(user);
+        
+        // Check if user is a merchant
+        const isMerchant = user?.role === 'merchant' || user?.merchantProfile?.status === 'approved';
+        setIsCurrentUserMerchant(isMerchant);
+        console.log('🏪 [FXMarketplace] Is current user merchant?', isMerchant);
+        
+        
+      } catch (error) {
+        console.error('❌ [FXMarketplace] Error detecting user role:', error);
+      }
+    };
+
+    detectUserRole();
+  }, []);
+
+
   // Load offers when filters change
   useEffect(() => {
     if (currencies.length > 0) { // Only load offers after currencies are loaded
       loadOffers();
     }
-  }, [filters]);
+  }, [filters, currencies.length]);
 
   const loadInitialData = async () => {
     console.log('🔄 FX Marketplace - Loading initial data...');
@@ -310,35 +346,35 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   }, [offers, searchQuery, filters]);
 
   const renderFilters = () => (
-    <View style={styles.filtersContainer}>
+    <View style={FXTheme.inputs.container}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={styles.filterRow}>
-          <View style={styles.filterGroup}>
+        <View style={FXTheme.layouts.row}>
+          <View style={FXTheme.layouts.column}>
             <Typography variant="caption" color="textSecondary">Pay with</Typography>
-            <TouchableOpacity style={styles.currencyFilter}>
-              <Typography variant="body2" style={styles.filterText}>
+            <TouchableOpacity style={FXTheme.buttons.action}>
+              <Typography variant="body2" style={{ color: Colors.primary }}>
                 {filters.sellCurrency || 'Any'} 
               </Typography>
               <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
             </TouchableOpacity>
           </View>
 
-          <MaterialIcons name="arrow-forward" size={20} color={Colors.gray600} style={styles.arrowIcon} />
+          <MaterialIcons name="arrow-forward" size={20} color={Colors.gray600} style={{ marginHorizontal: Spacing.md }} />
 
-          <View style={styles.filterGroup}>
+          <View style={FXTheme.layouts.column}>
             <Typography variant="caption" color="textSecondary">Receive</Typography>
-            <TouchableOpacity style={styles.currencyFilter}>
-              <Typography variant="body2" style={styles.filterText}>
+            <TouchableOpacity style={FXTheme.buttons.action}>
+              <Typography variant="body2" style={{ color: Colors.primary }}>
                 {filters.buyCurrency || 'Any'}
               </Typography>
               <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.filterGroup}>
+          <View style={FXTheme.layouts.column}>
             <Typography variant="caption" color="textSecondary">Sort by</Typography>
             <TouchableOpacity 
-              style={styles.sortFilter}
+              style={FXTheme.buttons.action}
               onPress={() => {
                 const sortOptions: FXFilter['sortBy'][] = ['best_rate', 'fastest', 'highest_trust', 'most_trades'];
                 const currentIndex = sortOptions.indexOf(filters.sortBy);
@@ -346,7 +382,7 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
                 setFilters({...filters, sortBy: sortOptions[nextIndex]});
               }}
             >
-              <Typography variant="body2" style={styles.filterText}>
+              <Typography variant="body2" style={{ color: Colors.primary }}>
                 {filters.sortBy === 'best_rate' ? 'Best Rate' :
                  filters.sortBy === 'fastest' ? 'Fastest' :
                  filters.sortBy === 'highest_trust' ? 'Highest Trust' : 'Most Trades'}
@@ -372,317 +408,384 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
     if (!config) return null;
     
     return (
-      <View style={[styles.trustBadge, { backgroundColor: config.color + '20' }]}>
+      <View style={[FXTheme.badges.status, { backgroundColor: config.color + '20' }]}>
         <MaterialIcons name={config.icon as any} size={12} color={config.color} />
       </View>
     );
   };
 
   const renderOfferCard = ({ item: offer }: { item: FXOffer }) => {
-    const timeAgo = Math.round((Date.now() - offer.updatedAt.getTime()) / (1000 * 60));
-    const isGoodRate = offer.margin <= 0;
-    
-    // Debug logging for amounts
-    console.log('📊 [FXMarketplace] Offer amounts:', {
-      id: offer.id,
-      sellAmount: offer.sellAmount,
-      buyAmount: offer.buyAmount,
-      availableAmount: offer.availableAmount,
-      exchangeRate: offer.exchangeRate,
-      sellCurrency: offer.sellCurrency.code,
-      buyCurrency: offer.buyCurrency.code
-    });
-    
     return (
       <TouchableOpacity onPress={() => onOfferSelect(offer)}>
-        <Card style={styles.offerCard}>
-          {/* Header with trader info */}
-          <View style={styles.offerHeader}>
-            <View style={styles.traderInfo}>
-              <View style={styles.traderAvatarContainer}>
-                <View style={styles.traderAvatar}>
-                  <Typography variant="caption" style={styles.traderAvatarText}>
-                    {offer.maker.name.substring(0, 2).toUpperCase()}
-                  </Typography>
-                </View>
-                {renderTrustBadge(offer.maker.trustBadge)}
-                <View style={[styles.onlineIndicator, {
-                  backgroundColor: offer.maker.onlineStatus === 'online' ? Colors.success : 
-                                 offer.maker.onlineStatus === 'away' ? Colors.warning : Colors.gray400
-                }]} />
-              </View>
-              
-              <View style={styles.traderDetails}>
-                <Typography variant="h6" style={styles.traderName}>
-                  {offer.maker.name}
+        <Card style={FXTheme.cards.base}>
+        <View style={FXTheme.layouts.rowBetween}>
+          <View style={FXTheme.layouts.row}>
+            <View style={FXTheme.layouts.centerHorizontal}>
+              <View style={[
+                {
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: Colors.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: Spacing.sm,
+                }
+              ]}>
+                <Typography variant="body2" style={{ color: Colors.primary, ...FXTheme.text.bold }}>
+                  {offer.maker.name.charAt(0)}
                 </Typography>
-                <View style={styles.traderStats}>
-                  <Typography variant="caption" color="textSecondary">
-                    {offer.maker.completedTrades} trades • {offer.maker.trustScore}% trust
-                  </Typography>
-                </View>
+              </View>
+              {offer.maker.onlineStatus === 'online' && (
+                <View style={[
+                  {
+                    position: 'absolute',
+                    bottom: -2,
+                    right: Spacing.sm - 2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: Colors.success,
+                    borderWidth: 2,
+                    borderColor: Colors.white,
+                  }
+                ]} />
+              )}
+            </View>
+            <View style={FXTheme.layouts.column}>
+              <Typography variant="body1" style={FXTheme.text.bold}>
+                {offer.maker.name}
+              </Typography>
+              <View style={FXTheme.layouts.row}>
+                <Typography variant="caption" color="textSecondary">
+                  {offer.maker.completedTrades} trades • {offer.maker.trustScore}⭐
+                </Typography>
               </View>
             </View>
-            
+          </View>
+          {renderTrustBadge(offer.maker.trustBadge)}
+        </View>
+
+        <View style={FXTheme.trade.limits}>
+          <View style={FXTheme.currency.side}>
             <Typography variant="caption" color="textSecondary">
-              {timeAgo}m ago
+              Selling
+            </Typography>
+            <View style={FXTheme.currency.info}>
+              <Typography variant="body2" style={FXTheme.text.currencyCode}>
+                {offer.sellCurrency.code}
+              </Typography>
+            </View>
+            <Typography variant="h3" style={FXTheme.text.amount}>
+              {offer.sellCurrency.symbol}{offer.sellAmount.toLocaleString()}
             </Typography>
           </View>
 
-          {/* Trade details */}
-          <View style={styles.tradeDetails}>
-            <View style={styles.currencyRow}>
-              <View style={styles.sellSide}>
-                <Typography variant="caption" color="textSecondary">Selling</Typography>
-                <View style={styles.currencyInfo}>
-                  <Typography variant="h4" style={styles.currencyFlag}>
-                    {offer.sellCurrency.flag}
-                  </Typography>
-                  <View>
-                    <Typography variant="h6" style={styles.amount}>
-                      {offer.sellCurrency.symbol}{offer.sellAmount.toLocaleString()}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {offer.sellCurrency.code}
-                    </Typography>
-                  </View>
-                </View>
-              </View>
+          <View style={FXTheme.currency.exchangeInfo}>
+            <Typography variant="caption" color="textSecondary">
+              Rate
+            </Typography>
+            <Typography variant="body1" style={FXTheme.text.rate}>
+              {offer.exchangeRate}
+            </Typography>
+          </View>
 
-              <View style={styles.exchangeRate}>
-                <MaterialIcons name="swap-horiz" size={24} color={Colors.primary} />
-                <Typography variant="body2" color="primary" style={styles.rateText}>
-                  Rate: {offer.exchangeRate}
+          <View style={FXTheme.currency.sideRight}>
+            <Typography variant="caption" color="textSecondary">
+              Buying
+            </Typography>
+            <View style={FXTheme.currency.info}>
+              <Typography variant="body2" style={FXTheme.text.currencyCode}>
+                {offer.buyCurrency.code}
+              </Typography>
+            </View>
+            <Typography variant="h3" style={FXTheme.text.amount}>
+              {offer.buyCurrency.symbol}{offer.buyAmount.toLocaleString()}
+            </Typography>
+          </View>
+        </View>
+
+        <View style={FXTheme.payment.methods}>
+          <Typography variant="caption" color="textSecondary">
+            Payment:
+          </Typography>
+          <View style={FXTheme.payment.methodsList}>
+            {offer.paymentMethods.map((method, index) => (
+              <View key={index} style={FXTheme.badges.method}>
+                <Typography variant="caption" style={FXTheme.payment.methodText}>
+                  {method.name}
                 </Typography>
               </View>
-
-              <View style={styles.buySide}>
-                <Typography variant="caption" color="textSecondary">For</Typography>
-                <View style={styles.currencyInfo}>
-                  <Typography variant="h4" style={styles.currencyFlag}>
-                    {offer.buyCurrency.flag}
-                  </Typography>
-                  <View>
-                    <Typography variant="h6" style={styles.amount}>
-                      {offer.buyCurrency.symbol}{offer.buyAmount.toLocaleString()}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {offer.buyCurrency.code}
-                    </Typography>
-                  </View>
-                </View>
-              </View>
-            </View>
+            ))}
           </View>
+        </View>
 
-          {/* Payment methods */}
-          <View style={styles.paymentMethods}>
-            <Typography variant="caption" color="textSecondary">Payment:</Typography>
-            <View style={styles.methodsList}>
-              {offer.paymentMethods.map((method, index) => (
-                <View key={method.id} style={styles.methodBadge}>
-                  <MaterialIcons name={method.icon as any} size={12} color={Colors.primary} />
-                  <Typography variant="caption" style={styles.methodText}>
-                    {method.name}
-                  </Typography>
-                </View>
-              ))}
-            </View>
+        <View style={FXTheme.trade.terms}>
+          <View style={FXTheme.trade.termItem}>
+            <Typography variant="caption" color="textSecondary">
+              Min Trade
+            </Typography>
+            <Typography variant="body2" style={FXTheme.trade.limitValue}>
+              {offer.sellCurrency.symbol}{offer.minTrade.toLocaleString()}
+            </Typography>
           </View>
-
-          {/* Trade terms */}
-          <View style={styles.tradeTerms}>
-            <View style={styles.termItem}>
-              <Typography variant="caption" color="textSecondary">Limits:</Typography>
-              <Typography variant="caption">
-                {offer.sellCurrency.symbol}{offer.minTrade} - {offer.sellCurrency.symbol}{offer.maxTrade}
-              </Typography>
-            </View>
-            <View style={styles.termItem}>
-              <Typography variant="caption" color="textSecondary">Window:</Typography>
-              <Typography variant="caption">{offer.paymentWindow} min</Typography>
-            </View>
-            <View style={styles.termItem}>
-              <Typography variant="caption" color="textSecondary">Available:</Typography>
-              <Typography variant="caption" color="success">
-                {offer.sellCurrency.symbol}{offer.availableAmount.toLocaleString()}
-              </Typography>
-            </View>
+          <View style={FXTheme.trade.termItem}>
+            <Typography variant="caption" color="textSecondary">
+              Max Trade
+            </Typography>
+            <Typography variant="body2" style={FXTheme.trade.limitValue}>
+              {offer.sellCurrency.symbol}{offer.maxTrade.toLocaleString()}
+            </Typography>
           </View>
-
-          <Button
-            title="Trade Now"
-            onPress={() => onOfferSelect(offer)}
-            style={styles.tradeButton}
-            size="sm"
-          />
-        </Card>
+          <View style={FXTheme.trade.termItem}>
+            <Typography variant="caption" color="textSecondary">
+              Time Limit
+            </Typography>
+            <Typography variant="body2" style={FXTheme.trade.limitValue}>
+              {offer.paymentWindow}m
+            </Typography>
+          </View>
+        </View>
+      </Card>
       </TouchableOpacity>
     );
   };
 
   const renderEmptyState = () => (
-    <View style={styles.emptyState}>
+    <View style={FXTheme.states.empty}>
       <MaterialIcons name="currency-exchange" size={48} color={Colors.gray400} />
-      <Typography variant="h6" style={styles.emptyTitle}>
+      <Typography variant="h6" style={FXTheme.states.emptyTitle}>
         No offers found
       </Typography>
-      <Typography variant="body2" color="textSecondary" style={styles.emptyText}>
+      <Typography variant="body2" color="textSecondary" style={FXTheme.states.emptyText}>
         Try adjusting your filters or create your own offer
       </Typography>
       <Button
         title="Create Offer"
         onPress={handleCreateOffer}
-        style={styles.createOfferButton}
+        style={FXTheme.buttons.create}
         variant="outline"
       />
     </View>
   );
 
   return (
-    <View style={styles.container}>
+    <View style={FXTheme.containers.screen}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={FXTheme.headers.main}>
         {onBack && (
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <TouchableOpacity onPress={onBack} style={FXTheme.buttons.back}>
             <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
           </TouchableOpacity>
         )}
-        <View style={styles.headerContent}>
-          <Typography variant="h3">FX Marketplace</Typography>
+        
+        <View style={FXTheme.headers.content}>
+          <Typography variant="h4">FX Marketplace</Typography>
           <Typography variant="body2" color="textSecondary">
-            {filteredOffers.length} offers available
+            Find the best exchange rates
           </Typography>
         </View>
-        <TouchableOpacity style={styles.createButton} onPress={handleCreateOffer}>
-          <MaterialIcons name="add" size={24} color={Colors.background} />
-        </TouchableOpacity>
+        
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {onViewTrades && (
+            <TouchableOpacity 
+              style={[FXTheme.buttons.secondary, { paddingHorizontal: 12, paddingVertical: 8 }]} 
+              onPress={onViewTrades}
+            >
+              <MaterialIcons name="history" size={20} color={Colors.primary} />
+              <Typography variant="caption" style={{ color: Colors.primary, marginLeft: 4 }}>
+                Trades
+              </Typography>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={FXTheme.buttons.create} onPress={handleCreateOffer}>
+            <MaterialIcons name="add" size={24} color={Colors.background} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <MaterialIcons name="search" size={20} color={Colors.gray400} />
+      <View style={FXTheme.inputs.container}>
+        <View style={FXTheme.inputs.searchContainer}>
+          <MaterialIcons name="search" size={20} color={Colors.gray600} />
           <TextInput
-            style={styles.searchInput}
-            placeholder="Search traders..."
+            style={FXTheme.inputs.searchInput}
+            placeholder="Search by currency or trader..."
             value={searchQuery}
             onChangeText={setSearchQuery}
+            placeholderTextColor={Colors.gray600}
           />
         </View>
       </View>
 
       {/* Filters */}
-      {renderFilters()}
+      <View style={FXTheme.containers.filters}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={FXTheme.layouts.rowGap}>
+            <View style={FXTheme.layouts.column}>
+              <Typography variant="caption" style={{ color: Colors.gray600 }}>From</Typography>
+              <TouchableOpacity style={[FXTheme.buttons.secondary, { paddingHorizontal: 12, paddingVertical: 8 }]}>
+                <Typography variant="body2" style={FXTheme.text.bold}>
+                  {filters.sellCurrency || 'Any'}
+                </Typography>
+                <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
+              </TouchableOpacity>
+            </View>
+            
+            <MaterialIcons name="arrow-forward" size={20} color={Colors.gray600} style={{ marginTop: 16 }} />
+            
+            <View style={FXTheme.layouts.column}>
+              <Typography variant="caption" style={{ color: Colors.gray600 }}>To</Typography>
+              <TouchableOpacity style={[FXTheme.buttons.secondary, { paddingHorizontal: 12, paddingVertical: 8 }]}>
+                <Typography variant="body2" style={FXTheme.text.bold}>
+                  {filters.buyCurrency || 'Any'}
+                </Typography>
+                <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.gray600} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={FXTheme.layouts.column}>
+              <Typography variant="caption" style={{ color: Colors.gray600 }}>Sort by</Typography>
+              <TouchableOpacity
+                style={[FXTheme.buttons.secondary, { paddingHorizontal: 12, paddingVertical: 8 }]}
+                onPress={() => {
+                  const nextSort = filters.sortBy === 'best_rate' ? 'fastest' : 
+                                  filters.sortBy === 'fastest' ? 'highest_trust' : 
+                                  filters.sortBy === 'highest_trust' ? 'most_trades' : 'best_rate';
+                  setFilters(prev => ({ ...prev, sortBy: nextSort }));
+                }}
+              >
+                <Typography variant="body2" style={FXTheme.text.bold}>
+                  {filters.sortBy === 'best_rate' ? 'Best Rate' : 
+                   filters.sortBy === 'fastest' ? 'Fastest' : 
+                   filters.sortBy === 'highest_trust' ? 'Highest Trust' : 'Most Trades'}
+                </Typography>
+                <MaterialIcons name="keyboard-arrow-down" size={16} color={Colors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
 
-
-
-      {/* Offers List */}
-      {loading ? (
-        <View style={styles.loadingContainer}>
+      {/* Loading State */}
+      {loading && (
+        <View style={FXTheme.states.loading}>
           <ActivityIndicator size="large" color={Colors.primary} />
-          <Typography variant="body1" style={styles.loadingText}>
+          <Typography variant="body1" style={FXTheme.states.loadingText}>
             Loading offers...
           </Typography>
         </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <View style={FXTheme.states.error}>
           <MaterialIcons name="error-outline" size={48} color={Colors.error} />
-          <Typography variant="h6" style={styles.errorTitle}>
-            Failed to load offers
+          <Typography variant="h6" style={FXTheme.states.errorTitle}>
+            Unable to load offers
           </Typography>
-          <Typography variant="body2" color="textSecondary" style={styles.errorText}>
+          <Typography variant="body2" color="textSecondary" style={FXTheme.states.errorText}>
             {error}
           </Typography>
           <Button
             title="Retry"
             onPress={loadOffers}
-            style={styles.retryButton}
-            variant="outline"
+            style={FXTheme.buttons.retry}
           />
-          <Button
-            title="Debug Info"
-            onPress={async () => {
-              const debugData = await FXDebugUtils.exportDebugLogs();
-              Alert.alert('Debug Info', 'Check console for debug logs');
-            }}
-            style={styles.debugButton}
-            variant="ghost"
-            size="sm"
-          />
+          {__DEV__ && (
+            <Button
+              title="Debug"
+              onPress={handleDebugPress}
+              style={FXTheme.buttons.debug}
+            />
+          )}
         </View>
-      ) : filteredOffers.length === 0 ? (
-        renderEmptyState()
-      ) : (
+      )}
+
+      {/* Offers List */}
+      {!loading && !error && (
         <FlatList
           data={filteredOffers}
           keyExtractor={(item) => item.id}
           renderItem={renderOfferCard}
-          contentContainerStyle={styles.offersList}
+          contentContainerStyle={FXTheme.containers.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              colors={[Colors.primary]}
-              tintColor={Colors.primary}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={loadOffers} />
+          }
+          ListEmptyComponent={
+            <View style={FXTheme.states.empty}>
+              <MaterialIcons name="currency-exchange" size={64} color={Colors.gray400} />
+              <Typography variant="h6" style={FXTheme.states.emptyTitle}>
+                No offers found
+              </Typography>
+              <Typography variant="body2" color="textSecondary" style={FXTheme.states.emptyText}>
+                Try adjusting your filters or create your own offer
+              </Typography>
+              <Button
+                title="Create Offer"
+                onPress={onCreateOffer}
+                style={FXTheme.buttons.createOffer}
+              />
+            </View>
           }
         />
       )}
 
-      {/* Eligibility Modal */}
-      <Modal visible={showEligibilityModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <MaterialIcons name="account-balance-wallet" size={48} color={Colors.primary} />
-              <Typography variant="h5" style={styles.modalTitle}>
-                Merchant Requirements
+      {/* KYC Required Modal */}
+      <Modal
+        visible={showEligibilityModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEligibilityModal(false)}
+      >
+        <View style={FXTheme.modals.overlay}>
+          <View style={FXTheme.modals.content}>
+            <View style={FXTheme.modals.header}>
+              <MaterialIcons name="verified-user" size={48} color={Colors.primary} />
+              <Typography variant="h5" style={FXTheme.modals.title}>
+                KYC Verification Required
               </Typography>
             </View>
-            
-            <View style={styles.modalBody}>
-              <Typography variant="body1" style={styles.modalText}>
-                To create FX offers, you need to become a merchant. Here are the requirements:
+
+            <View style={FXTheme.modals.body}>
+              <Typography variant="body1" style={FXTheme.modals.text}>
+                This offer requires identity verification to proceed with the trade.
               </Typography>
-              
-              <View style={styles.requirementsList}>
-                <View style={styles.requirementItem}>
+
+              <View style={FXTheme.modals.requirementsList}>
+                <View style={FXTheme.modals.requirementItem}>
                   <MaterialIcons name="check-circle" size={20} color={Colors.success} />
-                  <Typography variant="body2" style={styles.requirementText}>
-                    Complete merchant application
+                  <Typography variant="body2" style={FXTheme.modals.requirementText}>
+                    Government-issued ID verification
                   </Typography>
                 </View>
-                
-                <View style={styles.requirementItem}>
-                  <MaterialIcons name="account-balance-wallet" size={20} color={Colors.info} />
-                  <Typography variant="body2" style={styles.requirementText}>
-                    Provide bank account details
+                <View style={FXTheme.modals.requirementItem}>
+                  <MaterialIcons name="check-circle" size={20} color={Colors.success} />
+                  <Typography variant="body2" style={FXTheme.modals.requirementText}>
+                    Address verification
                   </Typography>
                 </View>
               </View>
-              
-              <Typography variant="body2" color="textSecondary" style={styles.modalSubtext}>
-                Once approved, you can create unlimited FX offers and earn from trading fees.
+
+              <Typography variant="body2" color="textSecondary" style={FXTheme.modals.subtext}>
+                Your information is encrypted and secure. Verification typically takes 5-10 minutes.
               </Typography>
             </View>
-            
-            <View style={styles.modalButtons}>
+
+            <View style={FXTheme.modals.buttons}>
               <Button
-                title="Apply as Merchant"
+                title="Complete KYC"
                 onPress={() => {
                   setShowEligibilityModal(false);
-                  // TODO: Navigate to merchant application screen
-                  Alert.alert('Merchant Application', 'This would navigate to the merchant application screen');
+                  // Navigate to KYC flow
                 }}
-                style={styles.modalPrimaryButton}
+                style={FXTheme.modals.primaryButton}
               />
               <Button
-                title="Close"
+                title="Cancel"
                 onPress={() => setShowEligibilityModal(false)}
-                style={styles.modalSecondaryButton}
-                variant="outline"
+                style={FXTheme.modals.secondaryButton}
               />
             </View>
           </View>
@@ -692,363 +795,4 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
-  backButton: {
-    padding: Spacing.sm,
-    marginRight: Spacing.md,
-  },
-  headerContent: {
-    flex: 1,
-  },
-  createButton: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: Spacing.md,
-    marginLeft: Spacing.sm,
-  },
-  filtersContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  filterGroup: {
-    alignItems: 'center',
-  },
-  currencyFilter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.md,
-    marginTop: Spacing.xs,
-  },
-  sortFilter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.primary + '10',
-    borderRadius: BorderRadius.md,
-    marginTop: Spacing.xs,
-  },
-  filterText: {
-    marginRight: Spacing.xs,
-    fontWeight: '500',
-  },
-  arrowIcon: {
-    marginTop: Spacing.md,
-  },
-  statsContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
-    maxHeight: 60, // Limit the height of stats container
-  },
-  statCard: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginRight: Spacing.sm,
-    minWidth: 90,
-    maxHeight: 50, // Limit card height
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statLabel: {
-    fontSize: 10,
-    marginBottom: 2,
-    textAlign: 'center',
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  offersList: {
-    paddingHorizontal: Spacing.lg,
-  },
-  offerCard: {
-    marginBottom: Spacing.md,
-  },
-  offerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: Spacing.md,
-  },
-  traderInfo: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  traderAvatarContainer: {
-    position: 'relative',
-    marginRight: Spacing.md,
-  },
-  traderAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  traderAvatarText: {
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  trustBadge: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 18,
-    height: 18,
-    borderRadius: BorderRadius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.background,
-  },
-  onlineIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: BorderRadius.full,
-    borderWidth: 2,
-    borderColor: Colors.background,
-  },
-  traderDetails: {
-    flex: 1,
-  },
-  traderName: {
-    fontWeight: '600',
-    marginBottom: Spacing.xs / 2,
-  },
-  traderStats: {
-    marginBottom: Spacing.xs / 2,
-  },
-  tradeDetails: {
-    marginBottom: Spacing.md,
-  },
-  currencyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sellSide: {
-    flex: 1,
-  },
-  buySide: {
-    flex: 1,
-    alignItems: 'flex-end',
-  },
-  exchangeRate: {
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-  },
-  currencyInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: Spacing.xs,
-  },
-  currencyFlag: {
-    marginRight: Spacing.sm,
-  },
-  amount: {
-    fontWeight: '600',
-  },
-  rateText: {
-    marginVertical: Spacing.xs,
-    fontWeight: '600',
-  },
-  marginBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs / 2,
-    borderRadius: BorderRadius.sm,
-  },
-  marginText: {
-    fontWeight: '600',
-    fontSize: 10,
-  },
-  paymentMethods: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  methodsList: {
-    flexDirection: 'row',
-    marginLeft: Spacing.sm,
-    gap: Spacing.sm,
-  },
-  methodBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs / 2,
-    backgroundColor: Colors.primary + '10',
-    borderRadius: BorderRadius.sm,
-  },
-  methodText: {
-    marginLeft: Spacing.xs / 2,
-    color: Colors.primary,
-    fontWeight: '500',
-    fontSize: 10,
-  },
-  tradeTerms: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray200,
-    marginBottom: Spacing.md,
-  },
-  termItem: {
-    alignItems: 'center',
-  },
-  tradeButton: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyTitle: {
-    marginVertical: Spacing.md,
-  },
-  emptyText: {
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
-  },
-  createOfferButton: {
-    paddingHorizontal: Spacing.xl,
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    width: '100%',
-    maxWidth: 400,
-  },
-  modalHeader: {
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  modalTitle: {
-    marginTop: Spacing.md,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  modalBody: {
-    marginBottom: Spacing.lg,
-  },
-  modalText: {
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
-  },
-  requirementsList: {
-    marginBottom: Spacing.lg,
-  },
-  requirementItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  requirementText: {
-    marginLeft: Spacing.md,
-    flex: 1,
-  },
-  balanceInfo: {
-    marginLeft: Spacing.xl + 8,
-    marginBottom: Spacing.md,
-  },
-  modalSubtext: {
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  modalButtons: {
-    gap: Spacing.md,
-  },
-  modalPrimaryButton: {
-    width: '100%',
-  },
-  modalSecondaryButton: {
-    width: '100%',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: Spacing.xl * 2,
-  },
-  loadingText: {
-    marginTop: Spacing.md,
-    color: Colors.gray600,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xl * 2,
-  },
-  errorTitle: {
-    marginTop: Spacing.md,
-    marginBottom: Spacing.sm,
-    textAlign: 'center',
-  },
-  errorText: {
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
-  },
-  retryButton: {
-    marginBottom: Spacing.md,
-    minWidth: 120,
-  },
-  debugButton: {
-    minWidth: 100,
-  },
-});
+// Styles have been replaced with FXTheme

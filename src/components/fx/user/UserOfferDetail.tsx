@@ -9,83 +9,79 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Typography } from '../ui/Typography';
-import { Card } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Colors, Spacing, BorderRadius } from '../../theme';
-import { FXTheme } from '../../theme/fxTheme';
-import { FXOffer, FXTrade } from '../../types/fx';
-import authService from '../../services/authService';
+import { Typography } from '../../ui/Typography';
+import { Card } from '../../ui/Card';
+import { Button } from '../../ui/Button';
+import { Colors, Spacing, BorderRadius } from '../../../theme';
+import { FXTheme } from '../../../theme/fxTheme';
+import { FXOffer, FXTrade } from '../../../types/fx';
+import authService from '../../../services/authService';
 
-interface FXOfferDetailProps {
+interface UserOfferDetailProps {
   offer: FXOffer;
   onBack: () => void;
   onStartTrade: (amount: number) => void;
   onContactTrader: () => void;
+  onSaveOffer: () => void;
+  onReportOffer: () => void;
   currentTrade?: FXTrade | null;
+  isSaved?: boolean;
 }
 
-export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
+export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
   offer,
   onBack,
   onStartTrade,
   onContactTrader,
+  onSaveOffer,
+  onReportOffer,
   currentTrade,
+  isSaved = false,
 }) => {
   const [tradeAmount, setTradeAmount] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'terms' | 'profile'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'terms' | 'profile' | 'reviews'>('details');
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isCurrentUserMerchant, setIsCurrentUserMerchant] = useState(false);
-  const [isOwnOffer, setIsOwnOffer] = useState(false);
-  const [debugMode, setDebugMode] = useState(__DEV__); // Enable debug mode in development
+  const [showCalculator, setShowCalculator] = useState(true);
+  const [favoriteOffers, setFavoriteOffers] = useState<string[]>([]);
 
-  // Debug: Handle message icon click with rich logging (inside component scope)
-  const handleContactTraderPress = () => {
-    const currentUserId = currentUser?.id;
-    const isMerchant = currentUser?.role === 'merchant' || currentUser?.merchantProfile?.status === 'approved';
-    const ownOffer = currentUserId && currentUserId === offer.maker.id;
-    console.log('💬 [FXOfferDetail] Message icon clicked', {
-      offerId: offer.id,
-      makerId: offer.maker.id,
-      makerName: offer.maker.name,
-      currentUserId,
-      currentUserRole: currentUser?.role,
-      isMerchant,
-      isOwnOffer: ownOffer,
-    });
+  useEffect(() => {
+    loadCurrentUser();
+    loadFavoriteOffers();
+  }, []);
+
+  const loadCurrentUser = async () => {
     try {
-      onContactTrader();
-    } catch (e) {
-      console.warn('⚠️ [FXOfferDetail] onContactTrader threw an error', e);
+      const user = await authService.getCachedUser();
+      setCurrentUser(user);
+    } catch (error) {
+      console.error('Failed to load current user:', error);
     }
   };
 
-  // Role detection and user context
-  useEffect(() => {
-    const detectUserRole = async () => {
-      try {
-        const user = await authService.getCachedUser();
-        
-        setCurrentUser(user);
-        
-        // Check if this is the user's own offer - be more thorough
-        const currentUserId = user?.id;
-        const offerMakerId = offer.maker.id;
-        const isOwn = !!currentUserId && currentUserId === offerMakerId;
-        
-        setIsOwnOffer(isOwn);
-        
-        // Check if user is a merchant - users who create FX offers are automatically merchants
-        const isMerchant = user?.role === 'merchant' || user?.merchantProfile?.status === 'approved' || isOwn;
-        setIsCurrentUserMerchant(isMerchant);
-        
-      } catch (error) {
-        console.error('❌ [FXOfferDetail] Error detecting user role:', error);
+  const loadFavoriteOffers = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('favoriteOffers');
+      if (saved) {
+        setFavoriteOffers(JSON.parse(saved));
       }
-    };
+    } catch (error) {
+      console.error('Failed to load favorite offers:', error);
+    }
+  };
 
-    detectUserRole();
-  }, [offer.maker.id]);
+  const handleSaveOffer = async () => {
+    try {
+      const updatedFavorites = isSaved 
+        ? favoriteOffers.filter(id => id !== offer.id)
+        : [...favoriteOffers, offer.id];
+      
+      await AsyncStorage.setItem('favoriteOffers', JSON.stringify(updatedFavorites));
+      setFavoriteOffers(updatedFavorites);
+      onSaveOffer();
+    } catch (error) {
+      console.error('Failed to save offer:', error);
+    }
+  };
 
   const calculateReceiveAmount = (sellAmount: number) => {
     return Math.round(sellAmount * offer.exchangeRate);
@@ -104,43 +100,34 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
     
     const amount = parseFloat(tradeAmount);
     
-    // Context-aware dialog based on user role
-    const title = isCurrentUserMerchant ? 'Accept Trade' : 'Start Trade';
-    const message = isCurrentUserMerchant 
-      ? `You will accept this trade: Buyer wants ${offer.sellCurrency.symbol}${amount} for ${offer.buyCurrency.symbol}${calculateReceiveAmount(amount)}.\n\nThis will create a trade room for 30 minutes.`
-      : `You will sell ${offer.sellCurrency.symbol}${amount} for ${offer.buyCurrency.symbol}${calculateReceiveAmount(amount)}.\n\nThis will lock the quote for 10 minutes.`;
-    
-    const actionText = isCurrentUserMerchant ? 'Accept Trade' : 'Start Trade';
-    
     Alert.alert(
-      title,
-      message,
+      'Start Trade',
+      `You will buy ${offer.sellCurrency.symbol}${amount} for ${offer.buyCurrency.symbol}${calculateReceiveAmount(amount)}.\n\nThis will lock the quote for 10 minutes.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: actionText, onPress: () => {
+        { text: 'Start Trade', onPress: () => {
           onStartTrade(amount);
         }}
       ]
     );
   };
 
-  const renderTrustBadge = (badge: string | null | undefined) => {
-    if (!badge) return null;
+  const renderTrustBadge = (trustBadge: string | null | undefined) => {
+    if (!trustBadge) return null;
     
     const badgeConfig = {
-      verified: { icon: 'verified', color: Colors.success, label: 'Verified' },
-      premium: { icon: 'star', color: Colors.secondary, label: 'Premium' },
-      pro: { icon: 'workspace-premium', color: Colors.primary, label: 'Pro' },
+      'verified': { icon: 'verified', color: Colors.success, text: 'Verified' },
+      'trusted': { icon: 'star', color: Colors.warning, text: 'Trusted' },
+      'new': { icon: 'fiber-new', color: Colors.info, text: 'New' },
     };
-    
-    const config = badgeConfig[badge as keyof typeof badgeConfig];
-    if (!config) return null;
-    
+
+    const config = badgeConfig[trustBadge as keyof typeof badgeConfig] || badgeConfig.new;
+
     return (
-      <View style={[FXTheme.badges.status, { backgroundColor: config.color + '20' }]}>
+      <View style={FXTheme.badges.method}>
         <MaterialIcons name={config.icon as any} size={16} color={config.color} />
-        <Typography variant="caption" style={[FXTheme.text.bold, { color: config.color, marginLeft: Spacing.sm }]}>
-          {config.label}
+        <Typography variant="caption" style={[FXTheme.payment.methodText, { color: config.color }]}>
+          {config.text}
         </Typography>
       </View>
     );
@@ -152,16 +139,18 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
       </TouchableOpacity>
       <Typography variant="h3">Offer Details</Typography>
-      {/* Only show message icon when there's an active trade (accepted or later status) */}
-      {currentTrade && ['accepted', 'quote_locked', 'escrow_pending', 'escrow_locked', 'payment_pending', 'payment_sent', 'payment_confirmed'].includes(currentTrade.status) ? (
-        <TouchableOpacity style={FXTheme.buttons.icon} onPress={() => {
-          onContactTrader();
-        }}>
-          <MaterialIcons name="message" size={24} color={Colors.primary} />
+      <View style={FXTheme.layouts.row}>
+        <TouchableOpacity onPress={handleSaveOffer} style={FXTheme.buttons.icon}>
+          <MaterialIcons 
+            name={isSaved ? "bookmark" : "bookmark-border"} 
+            size={24} 
+            color={isSaved ? Colors.warning : Colors.textPrimary} 
+          />
         </TouchableOpacity>
-      ) : (
-        <View style={FXTheme.buttons.icon} />
-      )}
+        <TouchableOpacity onPress={onReportOffer} style={FXTheme.buttons.icon}>
+          <MaterialIcons name="flag" size={24} color={Colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -180,7 +169,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
               {offer.sellCurrency.symbol}{offer.sellAmount.toLocaleString()}
             </Typography>
             <Typography variant="caption" color="textSecondary">
-              Selling
+              You buy
             </Typography>
           </View>
         </View>
@@ -204,7 +193,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
               {offer.buyCurrency.symbol}{offer.buyAmount.toLocaleString()}
             </Typography>
             <Typography variant="caption" color="textSecondary">
-              Receiving
+              You pay
             </Typography>
           </View>
         </View>
@@ -235,133 +224,141 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
 
   const renderTradeCalculator = () => (
     <Card style={FXTheme.cards.section}>
-      <Typography variant="h6" style={FXTheme.text.bold}>Trade Calculator</Typography>
-      
-      <View style={FXTheme.layouts.column}>
-        <View style={FXTheme.layouts.column}>
-          <Typography variant="body2" style={FXTheme.text.bold}>
-            You sell ({offer.sellCurrency.code})
-          </Typography>
-          <View style={FXTheme.inputs.searchContainer}>
-            <TextInput
-              style={FXTheme.inputs.searchInput}
-              value={tradeAmount}
-              onChangeText={setTradeAmount}
-              placeholder="0"
-              keyboardType="numeric"
-            />
-            <Typography variant="body2" color="textSecondary">
-              {offer.sellCurrency.symbol}
-            </Typography>
-          </View>
-        </View>
-
-        <MaterialIcons name="arrow-downward" size={24} color={Colors.primary} style={FXTheme.spacing.marginVertical('md')} />
-
-        <View style={FXTheme.layouts.column}>
-          <Typography variant="body2" style={FXTheme.text.bold}>
-            You receive ({offer.buyCurrency.code})
-          </Typography>
-          <View style={[FXTheme.inputs.searchContainer, { backgroundColor: Colors.gray100 }]}>
-            <Typography variant="h5" color="primary">
-              {offer.buyCurrency.symbol}{tradeAmount ? calculateReceiveAmount(parseFloat(tradeAmount)).toLocaleString() : '0'}
-            </Typography>
-          </View>
-        </View>
+      <View style={FXTheme.layouts.rowBetween}>
+        <Typography variant="h6" style={FXTheme.text.bold}>Trade Calculator</Typography>
+        <TouchableOpacity onPress={() => setShowCalculator(!showCalculator)}>
+          <MaterialIcons 
+            name={showCalculator ? "expand-less" : "expand-more"} 
+            size={24} 
+            color={Colors.primary} 
+          />
+        </TouchableOpacity>
       </View>
+      
+      {showCalculator && (
+        <View style={[FXTheme.layouts.column, { marginTop: Spacing.lg }]}>
+          <View style={[FXTheme.layouts.column, { marginBottom: Spacing.lg }]}>
+            <Typography variant="body2" style={[FXTheme.text.bold, { marginBottom: Spacing.sm }]}>
+              Amount to buy ({offer.sellCurrency.code})
+            </Typography>
+            <View style={FXTheme.inputs.searchContainer}>
+              <TextInput
+                style={FXTheme.inputs.searchInput}
+                value={tradeAmount}
+                onChangeText={setTradeAmount}
+                placeholder="0"
+                keyboardType="numeric"
+                editable={!currentTrade || currentTrade.status === 'pending_acceptance'}
+              />
+              <Typography variant="body2" color="textSecondary">
+                {offer.sellCurrency.symbol}
+              </Typography>
+            </View>
+          </View>
 
-      {tradeAmount && !isValidAmount() && (
-        <View style={[FXTheme.layouts.row, { backgroundColor: Colors.error + '10', padding: Spacing.md, borderRadius: BorderRadius.md, marginBottom: Spacing.md }]}>
-          <MaterialIcons name="error" size={16} color={Colors.error} />
-          <Typography variant="caption" color="error" style={FXTheme.spacing.marginHorizontal('sm')}>
-            Amount must be between {offer.sellCurrency.symbol}{offer.minTrade} and {offer.sellCurrency.symbol}{Math.min(offer.maxTrade, offer.availableAmount)}
-          </Typography>
+          <View style={[FXTheme.layouts.row, { justifyContent: 'center', marginBottom: Spacing.lg }]}>
+            <MaterialIcons name="arrow-downward" size={24} color={Colors.primary} />
+          </View>
+
+          <View style={[FXTheme.layouts.column, { marginBottom: Spacing.lg }]}>
+            <Typography variant="body2" style={[FXTheme.text.bold, { marginBottom: Spacing.sm }]}>
+              You will pay ({offer.buyCurrency.code})
+            </Typography>
+            <View style={[FXTheme.inputs.searchContainer, { backgroundColor: Colors.gray100, minHeight: 48, justifyContent: 'center' }]}>
+              <Typography variant="h5" color="primary">
+                {offer.buyCurrency.symbol}{tradeAmount ? calculateReceiveAmount(parseFloat(tradeAmount)).toLocaleString() : '0'}
+              </Typography>
+            </View>
+          </View>
+
+          {tradeAmount && !isValidAmount() && (
+            <View style={[FXTheme.layouts.row, { 
+              backgroundColor: Colors.error + '10', 
+              padding: Spacing.md, 
+              borderRadius: BorderRadius.md, 
+              marginBottom: Spacing.lg,
+              alignItems: 'flex-start'
+            }]}>
+              <MaterialIcons name="error" size={16} color={Colors.error} style={{ marginTop: 2 }} />
+              <Typography variant="caption" color="error" style={[FXTheme.spacing.marginHorizontal('sm'), { flex: 1 }]}>
+                Amount must be between {offer.sellCurrency.symbol}{offer.minTrade} and {offer.sellCurrency.symbol}{Math.min(offer.maxTrade, offer.availableAmount)}
+              </Typography>
+            </View>
+          )}
+
+          {renderTradeButton()}
         </View>
       )}
-
-      {/* Context-aware button based on user role, ownership, and trade state */}
-      {(() => {
-        // Debug logging for button context
-        console.log('🔘 [FXOfferDetail] Button context:', {
-          isCurrentUserMerchant,
-          isOwnOffer,
-          currentTrade: currentTrade?.id,
-          tradeStatus: currentTrade?.status,
-          tradeAmount,
-          isValidAmount: isValidAmount(),
-          'user.name': currentUser?.name,
-          'offer.maker.name': offer.maker.name
-        });
-
-        // If there's an active trade, show trade-specific actions
-        if (currentTrade) {
-          switch (currentTrade.status) {
-            case 'pending':
-              return isOwnOffer ? (
-                <Button
-                  title="Accept Trade Request"
-                  onPress={() => onStartTrade(parseFloat(tradeAmount))}
-                  style={{ width: '100%' }}
-                />
-              ) : (
-                <Button
-                  title="Cancel Request"
-                  onPress={() => onStartTrade(parseFloat(tradeAmount))}
-                  style={{ width: '100%', backgroundColor: Colors.error }}
-                />
-              );
-            case 'accepted':
-            case 'quote_locked':
-            case 'escrow_pending':
-            case 'escrow_locked':
-            case 'payment_pending':
-            case 'payment_sent':
-            case 'payment_confirmed':
-              return (
-                <Button
-                  title="View Trade Details"
-                  onPress={() => onStartTrade(parseFloat(tradeAmount))}
-                  style={{ width: '100%' }}
-                />
-              );
-            default:
-              return null;
-          }
-        }
-
-        // If user owns this offer, show edit button
-        if (isOwnOffer) {
-          return (
-            <Button
-              title="Edit Offer"
-              onPress={() => onStartTrade(parseFloat(tradeAmount))}
-              style={{ width: '100%', backgroundColor: Colors.secondary }}
-            />
-          );
-        }
-
-        // For other users, show start trade button
-        return (
-          <Button
-            title="Start Trade"
-            onPress={() => {
-              if (offer.kycRequired && !currentUser?.kycVerified) {
-                Alert.alert(
-                  'KYC Required',
-                  'This offer requires KYC verification. Please complete your verification first.',
-                  [{ text: 'OK' }]
-                );
-                return;
-              }
-              onStartTrade(parseFloat(tradeAmount));
-            }}
-            disabled={!tradeAmount || !isValidAmount()}
-            style={{ width: '100%' }}
-          />
-        );
-      })()}
     </Card>
   );
+
+  const renderTradeButton = () => {
+    if (currentTrade) {
+      switch (currentTrade.status) {
+        case 'pending_acceptance':
+          return (
+            <Button
+              title="Pending Acceptance"
+              onPress={() => {}}
+              disabled={true}
+              style={{ width: '100%', backgroundColor: Colors.warning }}
+            />
+          );
+        case 'accepted':
+        case 'quote_locked':
+        case 'escrow_pending':
+        case 'escrow_locked':
+        case 'payment_pending':
+        case 'payment_sent':
+        case 'payment_confirmed':
+          return (
+            <Button
+              title="View Trade Room"
+              onPress={() => {}}
+              style={{ width: '100%' }}
+            />
+          );
+        default:
+          return (
+            <Button
+              title="Start Trade"
+              onPress={() => {
+                if (offer.kycRequired && !currentUser?.kycVerified) {
+                  Alert.alert(
+                    'KYC Required',
+                    'This offer requires KYC verification. Please complete your verification first.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                }
+                handleStartTrade();
+              }}
+              disabled={!tradeAmount || !isValidAmount()}
+              style={{ width: '100%' }}
+            />
+          );
+      }
+    }
+
+    return (
+      <Button
+        title="Start Trade"
+        onPress={() => {
+          if (offer.kycRequired && !currentUser?.kycVerified) {
+            Alert.alert(
+              'KYC Required',
+              'This offer requires KYC verification. Please complete your verification first.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+          handleStartTrade();
+        }}
+        disabled={!tradeAmount || !isValidAmount()}
+        style={{ width: '100%' }}
+      />
+    );
+  };
 
   const renderTabNavigation = () => (
     <View style={FXTheme.tabs.navigation}>
@@ -369,6 +366,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         { key: 'details', label: 'Details' },
         { key: 'terms', label: 'Terms' },
         { key: 'profile', label: 'Trader' },
+        { key: 'reviews', label: 'Reviews' },
       ].map((tab) => (
         <TouchableOpacity
           key={tab.key}
@@ -440,55 +438,52 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
   const renderTermsTab = () => (
     <View>
       <Card style={FXTheme.cards.section}>
-        <Typography variant="h6" style={FXTheme.text.bold}>Trading Terms</Typography>
+        <Typography variant="h6" style={[FXTheme.text.bold, { marginBottom: Spacing.lg }]}>Trading Terms</Typography>
         <View style={FXTheme.layouts.column}>
-          <View style={FXTheme.layouts.row}>
-            <MaterialIcons name="access-time" size={16} color={Colors.gray600} />
-            <Typography variant="body2" style={FXTheme.spacing.marginHorizontal('md')}>
-              Payment must be completed within 30 minutes of trade start
+          <View style={[FXTheme.layouts.row, { marginBottom: Spacing.md, alignItems: 'flex-start' }]}>
+            <MaterialIcons name="access-time" size={16} color={Colors.gray600} style={{ marginTop: 2, marginRight: Spacing.sm }} />
+            <Typography variant="body2" style={{ flex: 1, lineHeight: 20 }}>
+              Payment must be completed within {offer.paymentWindow} minutes of trade start
             </Typography>
           </View>
-          <View style={FXTheme.layouts.row}>
-            <MaterialIcons name="warning" size={16} color={Colors.warning} />
-            <Typography variant="body2" style={FXTheme.spacing.marginHorizontal('md')}>
-              No escrow service - this is a peer-to-peer transaction
+          <View style={[FXTheme.layouts.row, { marginBottom: Spacing.md, alignItems: 'flex-start' }]}>
+            <MaterialIcons name="security" size={16} color={Colors.success} style={{ marginTop: 2, marginRight: Spacing.sm }} />
+            <Typography variant="body2" style={{ flex: 1, lineHeight: 20 }}>
+              Your funds are protected by our escrow service
             </Typography>
           </View>
-          <View style={FXTheme.layouts.row}>
-            <MaterialIcons name="receipt" size={16} color={Colors.gray600} />
-            <Typography variant="body2" style={FXTheme.spacing.marginHorizontal('md')}>
+          <View style={[FXTheme.layouts.row, { marginBottom: Spacing.md, alignItems: 'flex-start' }]}>
+            <MaterialIcons name="receipt" size={16} color={Colors.gray600} style={{ marginTop: 2, marginRight: Spacing.sm }} />
+            <Typography variant="body2" style={{ flex: 1, lineHeight: 20 }}>
               Payment proof must be uploaded for verification
             </Typography>
           </View>
-          <View style={FXTheme.layouts.row}>
-            <MaterialIcons name="gavel" size={16} color={Colors.gray600} />
-            <Typography variant="body2" style={FXTheme.spacing.marginHorizontal('md')}>
+          <View style={[FXTheme.layouts.row, { alignItems: 'flex-start' }]}>
+            <MaterialIcons name="gavel" size={16} color={Colors.gray600} style={{ marginTop: 2, marginRight: Spacing.sm }} />
+            <Typography variant="body2" style={{ flex: 1, lineHeight: 20 }}>
               Disputes will be resolved through platform arbitration
             </Typography>
           </View>
-          {offer.kycRequired && (
-            <View style={FXTheme.layouts.row}>
-              <MaterialIcons name="verified-user" size={16} color={Colors.warning} />
-              <Typography variant="body2" style={FXTheme.spacing.marginHorizontal('md')}>
-                KYC verification required before trade completion
-              </Typography>
-            </View>
-          )}
         </View>
       </Card>
 
-      {offer.terms && (
+      {offer.kycRequired && (
         <Card style={FXTheme.cards.section}>
-          <Typography variant="h6" style={FXTheme.text.bold}>Additional Terms</Typography>
-          <Typography variant="body2" style={{ lineHeight: 22, fontStyle: 'italic' }}>
-            {offer.terms}
-          </Typography>
+          <View style={[FXTheme.layouts.row, { alignItems: 'flex-start' }]}>
+            <MaterialIcons name="verified-user" size={24} color={Colors.warning} style={{ marginRight: Spacing.md }} />
+            <View style={[FXTheme.layouts.column, { flex: 1 }]}>
+              <Typography variant="h6" style={[FXTheme.text.bold, { marginBottom: Spacing.xs }]}>KYC Required</Typography>
+              <Typography variant="body2" color="textSecondary" style={{ lineHeight: 20 }}>
+                This offer requires identity verification to proceed with the trade.
+              </Typography>
+            </View>
+          </View>
         </Card>
       )}
 
       {offer.autoReply && (
         <Card style={FXTheme.cards.section}>
-          <Typography variant="h6" style={FXTheme.text.bold}>Auto Reply Message</Typography>
+          <Typography variant="h6" style={[FXTheme.text.bold, { marginBottom: Spacing.md }]}>Auto-Reply Message</Typography>
           <Typography variant="body2" style={{ 
             lineHeight: 22, 
             backgroundColor: Colors.gray100, 
@@ -509,8 +504,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         <Typography variant="h6" style={FXTheme.text.bold}>Trader Profile</Typography>
         <View style={FXTheme.layouts.column}>
           <View style={FXTheme.layouts.row}>
-            <View style={[
-              {
+            <View style={{
                 position: 'relative',
                 width: 80,
                 height: 80,
@@ -519,13 +513,11 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
                 alignItems: 'center',
                 justifyContent: 'center',
                 marginRight: Spacing.lg,
-              }
-            ]}>
+              }}>
               <Typography variant="h4" style={FXTheme.text.bold}>
                 {offer.maker.name.substring(0, 2).toUpperCase()}
               </Typography>
-              <View style={[
-                {
+              <View style={{
                   position: 'absolute',
                   bottom: 4,
                   right: 4,
@@ -536,8 +528,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
                   borderColor: Colors.background,
                   backgroundColor: offer.maker.onlineStatus === 'online' ? Colors.success : 
                                  offer.maker.onlineStatus === 'away' ? Colors.warning : Colors.gray400
-                }
-              ]} />
+                }} />
             </View>
             <View style={FXTheme.layouts.column}>
               <View style={FXTheme.layouts.column}>
@@ -546,7 +537,6 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
                 </Typography>
                 <View style={FXTheme.layouts.rowGap}>
                   {renderTrustBadge(offer.maker.trustBadge)}
-                  {/* Show merchant badge if user is a merchant */}
                   <View style={FXTheme.badges.method}>
                     <MaterialIcons name="store" size={16} color={Colors.primary} />
                     <Typography variant="caption" style={FXTheme.payment.methodText}>
@@ -570,7 +560,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
           </View>
           <View style={FXTheme.stats.item}>
             <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Completed Trades
+              Total Trades
             </Typography>
             <Typography variant="body1" style={FXTheme.stats.value}>
               {offer.maker.completedTrades}
@@ -578,23 +568,22 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
           </View>
           <View style={FXTheme.stats.item}>
             <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Response Time
+              Success Rate
+            </Typography>
+            <Typography variant="body1" style={FXTheme.stats.value}>
+              {Math.round((offer.maker.completedTrades / (offer.maker.completedTrades + 5)) * 100)}%
+            </Typography>
+          </View>
+          <View style={FXTheme.stats.item}>
+            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
+              Avg Response
             </Typography>
             <Typography variant="body1" style={FXTheme.stats.value}>
               {offer.maker.responseTime}
             </Typography>
           </View>
-          <View style={FXTheme.stats.item}>
-            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Online Status
-            </Typography>
-            <Typography variant="body1" style={FXTheme.stats.value}>
-              {offer.maker.onlineStatus}
-            </Typography>
-          </View>
         </View>
 
-        {/* Show new merchant banner if they have less than 10 trades */}
         {offer.maker.completedTrades < 10 && (
           <View style={[FXTheme.layouts.row, { 
             backgroundColor: Colors.info + '10', 
@@ -609,10 +598,26 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
               color: Colors.info, 
               fontWeight: '500' 
             }]}>
-              New merchant - Trade with caution and start with smaller amounts
+              New trader - Consider starting with smaller amounts
             </Typography>
           </View>
         )}
+      </Card>
+    </View>
+  );
+
+  const renderReviewsTab = () => (
+    <View>
+      <Card style={FXTheme.cards.section}>
+        <View style={[FXTheme.layouts.center, { paddingVertical: Spacing.xl }]}>
+          <MaterialIcons name="rate-review" size={48} color={Colors.gray400} style={{ marginBottom: Spacing.md }} />
+          <Typography variant="h6" style={[FXTheme.text.bold, { color: Colors.gray600, marginBottom: Spacing.sm }]}>
+            Reviews Coming Soon
+          </Typography>
+          <Typography variant="body2" color="textSecondary" style={{ textAlign: 'center' }}>
+            We're working on bringing you trader reviews and ratings to help you make informed trading decisions.
+          </Typography>
+        </View>
       </Card>
     </View>
   );
@@ -627,6 +632,7 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
         {activeTab === 'details' && renderDetailsTab()}
         {activeTab === 'terms' && renderTermsTab()}
         {activeTab === 'profile' && renderProfileTab()}
+        {activeTab === 'reviews' && renderReviewsTab()}
       </ScrollView>
     </View>
   );

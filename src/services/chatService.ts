@@ -34,6 +34,35 @@ const createConversationId = (userId1: string, userId2: string): string => {
   return `${sortedIds[0]}_${sortedIds[1]}`;
 };
 
+// Helper function to create trade-specific conversation IDs
+const createTradeConversationId = (userId1: string, userId2: string, tradeId?: string): string => {
+  const sortedIds = [userId1, userId2].sort();
+  const baseId = `${sortedIds[0]}_${sortedIds[1]}`;
+  return tradeId ? `trade_${baseId}_${tradeId}` : `trade_${baseId}`;
+};
+
+// Helper function to create trade room conversation IDs
+const createTradeRoomId = (tradeId: string): string => {
+  return `traderoom_${tradeId}`;
+};
+
+// Helper function to check if a conversation ID is trade-related
+const isTradeConversation = (conversationId: string): boolean => {
+  return conversationId.startsWith('trade_') || conversationId.startsWith('traderoom_');
+};
+
+// Helper function to extract trade ID from trade conversation ID
+const extractTradeId = (conversationId: string): string | null => {
+  if (conversationId.startsWith('traderoom_')) {
+    return conversationId.replace('traderoom_', '');
+  }
+  if (conversationId.startsWith('trade_')) {
+    const parts = conversationId.split('_');
+    return parts.length >= 4 ? parts[3] : null;
+  }
+  return null;
+};
+
 // This is a simplified representation for messages, matching react-native-gifted-chat
 export interface ChatMessage {
   _id: string;
@@ -51,8 +80,18 @@ export interface ChatMessage {
     currency: string;
     status: string;
     note?: string;
+    transactionId?: string;
+    senderName?: string;
+    recipientName?: string;
+    receipt?: string;
+    method?: string;
   };
   stickerData?: StickerData;
+  disputeData?: {
+    reason: string;
+    status?: string;
+    openedBy?: string;
+  };
 }
 
 // Interface for group member data
@@ -121,7 +160,7 @@ const chatService = {
           
           // For direct chats, get the other participant's ID to generate name
           const participants = data.participants || [];
-          const otherParticipantId = participants.find(p => p !== userId);
+          const otherParticipantId = participants.find((p: string) => p !== userId);
           
           // Generate a display name using user lookup
           let displayName = 'Chat';
@@ -239,6 +278,7 @@ const chatService = {
           createdAt: serverTimestamp(),
           senderId: sender._id,
         },
+        updatedAt: serverTimestamp(),
       });
     } catch (error: any) {
       // If conversation doesn't exist, create it
@@ -257,6 +297,7 @@ const chatService = {
           type: 'direct',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           lastMessage: {
             text: messageText,
             createdAt: serverTimestamp(),
@@ -375,6 +416,8 @@ const chatService = {
             transactionId: data.paymentData.transactionId,
             senderName: data.paymentData.senderName || data.user.name,
             recipientName: data.paymentData.recipientName,
+            receipt: data.paymentData.receipt,
+            method: data.paymentData.method,
           } : undefined,
           stickerData: data.stickerData ? {
             id: data.stickerData.id,
@@ -388,11 +431,72 @@ const chatService = {
             height: data.stickerData.height,
             title: data.stickerData.title,
           } : undefined,
+          disputeData: data.disputeData ? {
+            reason: data.disputeData.reason,
+            status: data.disputeData.status,
+            openedBy: data.disputeData.openedBy,
+          } : undefined,
         };
       });
       callback(messages);
     });
 
+    return unsubscribe;
+  },
+
+  /**
+   * Ensures a conversation exists with participants and appropriate TTL.
+   * Trade conversations have shorter expiry times than normal conversations.
+   */
+  ensureConversation: async (conversationId: string, participants: string[], isGroup: boolean = false) => {
+    const conversationRef = doc(db, 'conversations', conversationId);
+    const snap = await getDoc(conversationRef);
+    
+    // Determine expiry time based on conversation type
+    const isTradeChat = isTradeConversation(conversationId);
+    const expiryTime = isTradeChat 
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)  // 7 days for trade chats
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days for normal chats
+    
+    if (!snap.exists()) {
+      await setDoc(conversationRef, {
+        participants,
+        type: isGroup ? 'group' : 'direct',
+        isTradeChat,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        expiresAt: expiryTime,
+      });
+    } else {
+      const data = snap.data();
+      if (!data.expiresAt || (isTradeChat && !data.isTradeChat)) {
+        await updateDoc(conversationRef, {
+          expiresAt: expiryTime,
+          isTradeChat,
+        });
+      }
+    }
+  },
+
+  /**
+   * Subscribes to conversation metadata to get participants and expiry.
+   */
+  subscribeToConversationMeta: (
+    conversationId: string,
+    callback: (meta: { participants: string[]; expiresAt?: Date }) => void
+  ) => {
+    const conversationRef = doc(db, 'conversations', conversationId);
+    const unsubscribe = onSnapshot(conversationRef, (snap) => {
+      if (!snap.exists()) {
+        callback({ participants: [], expiresAt: undefined });
+        return;
+      }
+      const data = snap.data();
+      callback({
+        participants: data.participants || [],
+        expiresAt: data.expiresAt ? data.expiresAt.toDate() : undefined,
+      });
+    });
     return unsubscribe;
   },
 
@@ -1801,7 +1905,13 @@ const chatService = {
   },
 };
 
-// Export helper function for creating consistent conversation IDs
-export { createConversationId };
+// Export helper functions for creating consistent conversation IDs
+export { 
+  createConversationId, 
+  createTradeConversationId, 
+  createTradeRoomId, 
+  isTradeConversation, 
+  extractTradeId 
+};
 
 export default chatService;

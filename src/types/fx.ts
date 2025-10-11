@@ -114,7 +114,7 @@ export interface FXTrade {
   escrowTxHash?: string;
   
   // Status and timeline
-  status: 'quote_locked' | 'escrow_pending' | 'escrow_locked' | 'payment_pending' | 'payment_sent' | 'payment_confirmed' | 'completed' | 'disputed' | 'cancelled';
+  status: 'pending' | 'pending_acceptance' | 'accepted' | 'quote_locked' | 'escrow_pending' | 'escrow_locked' | 'payment_pending' | 'payment_sent' | 'payment_confirmed' | 'completed' | 'disputed' | 'cancelled';
   
   // Timestamps
   createdAt: Date;

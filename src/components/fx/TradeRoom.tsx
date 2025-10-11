@@ -14,7 +14,10 @@ import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import { FXTheme } from '../../theme/fxTheme';
 import { FXTrade, TradeMessage } from '../../types/fx';
+import authService from '../../services/authService';
+import chatService, { createTradeRoomId } from '../../services/chatService';
 
 interface TradeRoomProps {
   trade: FXTrade;
@@ -40,59 +43,111 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [showDispute, setShowDispute] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isCurrentUserMerchant, setIsCurrentUserMerchant] = useState(false);
+  const [chatExpiresAt, setChatExpiresAt] = useState<Date | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);
 
-  const isUserMaker = trade.maker.id === 'current_user_id'; // Replace with actual user ID check
+  const isUserMaker = currentUser?.id === trade.maker.id;
+  const isUserTaker = currentUser?.id === trade.taker.id;
   const otherParty = isUserMaker ? trade.taker : trade.maker;
 
+  // User role detection
   useEffect(() => {
-    // Initialize with system messages based on trade status
-    const systemMessages: TradeMessage[] = [
-      {
-        id: '1',
-        tradeId: trade.id,
-        type: 'system',
-        content: `Trade started! ${trade.maker.name} will receive ${trade.sellCurrency.symbol}${trade.sellAmount} and send ${trade.buyCurrency.symbol}${trade.buyAmount}.`,
-        timestamp: trade.createdAt,
-        systemEventType: 'escrow_locked',
-      },
-    ];
+    const detectUserRole = async () => {
+      try {
+        const user = await authService.getCachedUser();
+        console.log('👤 [TradeRoom] Current user:', user ? Object.keys(user) : 'null');
+        console.log('👤 [TradeRoom] User role:', user?.role);
+        console.log('👤 [TradeRoom] User ID:', user?.id);
+        console.log('🎯 [TradeRoom] Trade context:', {
+          tradeId: trade.id,
+          makerId: trade.maker.id,
+          takerId: trade.taker.id,
+          currentUserId: user?.id,
+          isUserMaker: user?.id === trade.maker.id,
+          isUserTaker: user?.id === trade.taker.id,
+          tradeStatus: trade.status
+        });
+        
+        setCurrentUser(user);
+        
+        // Check if user is a merchant
+        const isMerchant = user?.role === 'merchant' || user?.merchantProfile?.status === 'approved';
+        setIsCurrentUserMerchant(isMerchant);
+        console.log('🏪 [TradeRoom] Is current user merchant?', isMerchant);
+        
+      } catch (error) {
+        console.error('❌ [TradeRoom] Error detecting user role:', error);
+      }
+    };
 
-    if (trade.status === 'escrow_locked') {
-      systemMessages.push({
-        id: '2',
-        tradeId: trade.id,
-        type: 'system',
-        content: `Escrow locked: ${trade.escrowAmount} ${trade.escrowCurrency} secured in smart contract.`,
-        timestamp: new Date(trade.createdAt.getTime() + 30000),
-        systemEventType: 'escrow_locked',
-      });
+    detectUserRole();
+  }, [trade.id, trade.maker.id, trade.taker.id]);
 
-      systemMessages.push({
-        id: '3',
-        tradeId: trade.id,
-        type: 'system',
-        content: `Payment window started: ${trade.paymentWindow.end.getMinutes() - trade.paymentWindow.start.getMinutes()} minutes to complete payment.`,
-        timestamp: trade.paymentWindow.start,
-        systemEventType: 'payment_window_started',
-      });
-    }
-
-    setMessages(systemMessages);
-
-    // Set up timer for payment window
+  useEffect(() => {
+    // Payment window timer
     const updateTimer = () => {
       const now = new Date().getTime();
       const endTime = trade.paymentWindow.end.getTime();
       const remaining = Math.max(0, endTime - now);
       setTimeRemaining(remaining);
     };
-
     updateTimer();
     const timer = setInterval(updateTimer, 1000);
 
-    return () => clearInterval(timer);
-  }, [trade]);
+    // Firebase chat subscriptions
+    const setupChat = async () => {
+      const conversationId = trade.chatRoomId || createTradeRoomId(trade.id);
+      await chatService.ensureConversation(conversationId, [trade.maker.id, trade.taker.id], false);
+
+      const metaUnsub = chatService.subscribeToConversationMeta(conversationId, (meta) => {
+        setChatExpiresAt(meta.expiresAt);
+      });
+
+      const msgUnsub = chatService.getMessages(conversationId, (chatMsgs) => {
+        const mapped: TradeMessage[] = chatMsgs.map(m => {
+          const paymentProof = m.paymentData ? {
+            amount: m.paymentData.amount,
+            currency: m.paymentData.currency,
+            // ensure required string type
+            method: m.paymentData.method || 'unknown',
+            // include optional fields only when defined
+            ...(m.paymentData.transactionId ? { transactionId: m.paymentData.transactionId } : {}),
+            ...(m.paymentData.receipt ? { receipt: m.paymentData.receipt } : {}),
+          } : undefined;
+
+          return {
+            id: m._id,
+            tradeId: trade.id,
+            type: m.type === 'payment' ? 'payment_proof' : (m.type === 'dispute' ? 'dispute' : 'user'),
+            senderId: m.user?._id,
+            content: m.text || '',
+            timestamp: m.createdAt,
+            paymentProof,
+            disputeData: m.disputeData ? { reason: m.disputeData.reason } : undefined,
+          };
+        });
+        setMessages(mapped);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      });
+
+      return () => {
+        metaUnsub();
+        msgUnsub();
+      };
+    };
+
+    let cleanup: (() => void) | undefined;
+    setupChat().then((fn) => { cleanup = fn; }).catch((e) => console.error('Chat setup error', e));
+
+    return () => {
+      clearInterval(timer);
+      if (cleanup) cleanup();
+    };
+  }, [trade.id, trade.chatRoomId, trade.maker.id, trade.taker.id]);
 
   const formatTimeRemaining = (ms: number) => {
     const minutes = Math.floor(ms / (1000 * 60));
@@ -100,25 +155,25 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const sendMessage = () => {
-    if (!messageText.trim()) return;
+  const sendMessage = async () => {
+    if (!messageText.trim() || !currentUser?.id) return;
+    const isExpired = chatExpiresAt && new Date() >= chatExpiresAt;
+    if (isExpired) {
+      Alert.alert('Chat expired', 'This trade chat has expired.');
+      return;
+    }
 
-    const newMessage: TradeMessage = {
-      id: Date.now().toString(),
-      tradeId: trade.id,
-      type: 'user',
-      senderId: 'current_user_id', // Replace with actual user ID
-      content: messageText.trim(),
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, newMessage]);
+    const conversationId = trade.chatRoomId || createTradeRoomId(trade.id);
+    await chatService.ensureConversation(conversationId, [trade.maker.id, trade.taker.id], false);
+    await chatService.sendMessage(
+      conversationId,
+      messageText.trim(),
+      { _id: currentUser.id, name: currentUser.name || 'You', avatar: currentUser.avatar },
+      isUserMaker ? trade.taker.id : trade.maker.id,
+      'text'
+    );
     setMessageText('');
-
-    // Auto-scroll to bottom
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setTimeout(() => { flatListRef.current?.scrollToEnd({ animated: true }); }, 100);
   };
 
   const handleUploadPaymentProof = () => {
@@ -133,7 +188,7 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     );
   };
 
-  const uploadProof = (type: 'camera' | 'gallery') => {
+  const uploadProof = async (type: 'camera' | 'gallery') => {
     // Mock upload - in real app would use image picker
     const mockProof = {
       transactionId: 'TXN_' + Math.random().toString(36).substr(2, 9),
@@ -142,32 +197,17 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
       currency: trade.sellCurrency.code,
       method: trade.paymentMethod.name,
     };
-
-    const proofMessage: TradeMessage = {
-      id: Date.now().toString(),
-      tradeId: trade.id,
-      type: 'payment_proof',
-      senderId: 'current_user_id',
-      content: `Payment sent: ${trade.sellCurrency.symbol}${trade.sellAmount}`,
-      timestamp: new Date(),
-      paymentProof: mockProof,
-    };
-
-    setMessages(prev => [...prev, proofMessage]);
+    const conversationId = trade.chatRoomId || createTradeRoomId(trade.id);
+    await chatService.ensureConversation(conversationId, [trade.maker.id, trade.taker.id], false);
+    await chatService.sendMessage(
+      conversationId,
+      `Payment sent: ${trade.sellCurrency.symbol}${trade.sellAmount}`,
+      { _id: currentUser?.id, name: currentUser?.name || 'You', avatar: currentUser?.avatar },
+      isUserMaker ? trade.taker.id : trade.maker.id,
+      'payment',
+      { paymentData: mockProof }
+    );
     onUploadPaymentProof(mockProof);
-
-    // Add system confirmation
-    setTimeout(() => {
-      const systemMessage: TradeMessage = {
-        id: (Date.now() + 1).toString(),
-        tradeId: trade.id,
-        type: 'system',
-        content: 'Payment proof uploaded. Waiting for seller confirmation.',
-        timestamp: new Date(),
-        systemEventType: 'payment_sent',
-      };
-      setMessages(prev => [...prev, systemMessage]);
-    }, 1000);
   };
 
   const handleConfirmPayment = () => {
@@ -193,39 +233,35 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     );
   };
 
-  const handleOpenDispute = () => {
+  const handleOpenDispute = async () => {
     if (!disputeReason.trim()) {
       Alert.alert('Error', 'Please provide a reason for the dispute');
       return;
     }
 
     onOpenDispute(disputeReason);
-    
-    const disputeMessage: TradeMessage = {
-      id: Date.now().toString(),
-      tradeId: trade.id,
-      type: 'dispute',
-      senderId: 'current_user_id',
-      content: 'Dispute opened',
-      timestamp: new Date(),
-      disputeData: {
-        reason: disputeReason,
-      },
-    };
-
-    setMessages(prev => [...prev, disputeMessage]);
+    const conversationId = trade.chatRoomId || createTradeRoomId(trade.id);
+    await chatService.ensureConversation(conversationId, [trade.maker.id, trade.taker.id], false);
+    await chatService.sendMessage(
+      conversationId,
+      'Dispute opened',
+      { _id: currentUser?.id, name: currentUser?.name || 'You', avatar: currentUser?.avatar },
+      isUserMaker ? trade.taker.id : trade.maker.id,
+      'dispute',
+      { disputeData: { reason: disputeReason, openedBy: currentUser?.id, status: 'open' } }
+    );
     setShowDispute(false);
     setDisputeReason('');
   };
 
   const renderTradeHeader = () => (
-    <View style={styles.tradeHeader}>
-      <TouchableOpacity onPress={onBack} style={styles.backButton}>
+    <View style={FXTheme.headers.withBorder}>
+      <TouchableOpacity onPress={onBack} style={FXTheme.buttons.icon}>
         <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
       </TouchableOpacity>
       
-      <View style={styles.tradeInfo}>
-        <Typography variant="h6" style={styles.tradeTitle}>
+      <View style={FXTheme.layouts.column}>
+        <Typography variant="h6" style={FXTheme.text.bold}>
           Trade with {otherParty.name}
         </Typography>
         <Typography variant="caption" color="textSecondary">
@@ -233,11 +269,15 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
         </Typography>
       </View>
 
-      <View style={styles.tradeStatus}>
-        <View style={[styles.statusIndicator, { 
+      <View style={FXTheme.layouts.row}>
+        <View style={[{ 
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          marginRight: Spacing.sm,
           backgroundColor: getStatusColor(trade.status) 
         }]} />
-        <Typography variant="caption" style={styles.statusText}>
+        <Typography variant="caption" style={FXTheme.text.bold}>
           {getStatusLabel(trade.status)}
         </Typography>
       </View>
@@ -245,20 +285,35 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   );
 
   const renderTradeProgress = () => (
-    <Card style={styles.progressCard}>
-      <View style={styles.progressHeader}>
+    <Card style={FXTheme.cards.base}>
+      <View style={FXTheme.layouts.rowBetween}>
         <Typography variant="h6">Trade Progress</Typography>
         {timeRemaining > 0 && trade.status === 'payment_pending' && (
-          <View style={styles.timer}>
+          <View style={FXTheme.layouts.row}>
             <MaterialIcons name="timer" size={16} color={Colors.warning} />
-            <Typography variant="caption" color="warning" style={styles.timerText}>
+            <Typography variant="caption" color="warning" style={[FXTheme.text.bold, { marginLeft: Spacing.xs }]}>
               {formatTimeRemaining(timeRemaining)} left
             </Typography>
           </View>
         )}
       </View>
 
-      <View style={styles.tradeAmount}>
+      {chatExpiresAt && (
+        <View style={[FXTheme.layouts.row, {
+          backgroundColor: Colors.gray100,
+          paddingHorizontal: Spacing.md,
+          paddingVertical: Spacing.xs,
+          borderRadius: BorderRadius.lg,
+          marginBottom: Spacing.md,
+        }]}>
+          <MaterialIcons name="hourglass-top" size={16} color={Colors.gray600} />
+          <Typography variant="caption" color="textSecondary" style={{ marginLeft: Spacing.xs }}>
+            {new Date() >= chatExpiresAt ? 'Chat expired' : `Chat expires ${chatExpiresAt.toLocaleString()}`}
+          </Typography>
+        </View>
+      )}
+
+      <View style={[FXTheme.layouts.center, { marginBottom: Spacing.lg }]}>
         <Typography variant="body2" color="textSecondary">
           {isUserMaker ? 'You sell' : 'You buy'}
         </Typography>
@@ -282,34 +337,34 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
       case 'payment_pending':
         if (!isUserMaker) {
           return (
-            <View style={styles.actionButtons}>
+            <View style={FXTheme.layouts.rowGap}>
               <Button
                 title="Upload Payment Proof"
                 onPress={handleUploadPaymentProof}
-                style={styles.actionButton}
+                style={{ flex: 1 }}
               />
               <Button
                 title="Open Dispute"
                 variant="outline"
                 onPress={() => setShowDispute(true)}
-                style={styles.actionButton}
+                style={{ flex: 1 }}
               />
             </View>
           );
         } else {
           return (
-            <View style={styles.actionButtons}>
+            <View style={FXTheme.layouts.rowGap}>
               <Button
                 title="Confirm Payment Received"
                 onPress={handleConfirmPayment}
-                style={styles.actionButton}
+                style={{ flex: 1 }}
                 disabled={!hasPaymentProof()}
               />
               <Button
                 title="Open Dispute"
                 variant="outline"
                 onPress={() => setShowDispute(true)}
-                style={styles.actionButton}
+                style={{ flex: 1 }}
               />
             </View>
           );
@@ -317,22 +372,22 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
 
       case 'payment_confirmed':
         return (
-          <View style={styles.actionButtons}>
+          <View style={FXTheme.layouts.rowGap}>
             <Button
               title="Release Funds"
               onPress={onSignRelease}
-              style={styles.actionButton}
+              style={{ flex: 1 }}
             />
           </View>
         );
 
       case 'completed':
         return (
-          <View style={styles.actionButtons}>
+          <View style={FXTheme.layouts.rowGap}>
             <Button
               title="Rate Trading Partner"
               onPress={() => {/* Show rating modal */}}
-              style={styles.actionButton}
+              style={{ flex: 1 }}
               variant="outline"
             />
           </View>
@@ -374,23 +429,28 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   };
 
   const renderMessage = ({ item: message }: { item: TradeMessage }) => {
-    const isOwnMessage = message.senderId === 'current_user_id';
+    const isOwnMessage = message.senderId === currentUser?.id;
     const isSystemMessage = message.type === 'system';
 
     if (isSystemMessage) {
       return (
-        <View style={styles.systemMessage}>
-          <View style={styles.systemMessageContent}>
+        <View style={FXTheme.layouts.center}>
+          <View style={[FXTheme.layouts.row, {
+            backgroundColor: Colors.gray100,
+            paddingHorizontal: Spacing.md,
+            paddingVertical: Spacing.sm,
+            borderRadius: BorderRadius.lg,
+          }]}>
             <MaterialIcons 
               name={getSystemMessageIcon(message.systemEventType)} 
               size={16} 
               color={Colors.primary} 
             />
-            <Typography variant="body2" style={styles.systemMessageText}>
+            <Typography variant="body2" style={[FXTheme.text.bold, { marginLeft: Spacing.sm, textAlign: 'center' }]}>
               {message.content}
             </Typography>
           </View>
-          <Typography variant="caption" color="textSecondary" style={styles.systemTimestamp}>
+          <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs }}>
             {message.timestamp.toLocaleTimeString()}
           </Typography>
         </View>
@@ -399,15 +459,19 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
 
     if (message.type === 'payment_proof') {
       return (
-        <View style={[styles.messageContainer, isOwnMessage && styles.ownMessage]}>
-          <Card style={[styles.paymentProofCard, isOwnMessage && styles.ownPaymentProof]}>
-            <View style={styles.paymentProofHeader}>
+        <View style={[FXTheme.layouts.column, isOwnMessage ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
+          <Card style={[{
+            backgroundColor: isOwnMessage ? Colors.primary + '10' : Colors.success + '10',
+            borderWidth: 1,
+            borderColor: isOwnMessage ? Colors.primary + '20' : Colors.success + '20',
+          }]}>
+            <View style={FXTheme.layouts.row}>
               <MaterialIcons name="receipt" size={20} color={Colors.success} />
-              <Typography variant="h6" style={styles.paymentProofTitle}>
+              <Typography variant="h6" style={[FXTheme.text.bold, { marginLeft: Spacing.sm }]}>
                 Payment Proof
               </Typography>
             </View>
-            <Typography variant="body2" style={styles.paymentProofAmount}>
+            <Typography variant="body2" style={[FXTheme.text.bold, { marginBottom: Spacing.xs }]}>
               {message.paymentProof?.currency} {message.paymentProof?.amount?.toLocaleString()}
             </Typography>
             <Typography variant="caption" color="textSecondary">
@@ -419,7 +483,7 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
               </Typography>
             )}
           </Card>
-          <Typography variant="caption" color="textSecondary" style={styles.messageTimestamp}>
+          <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs }}>
             {message.timestamp.toLocaleTimeString()}
           </Typography>
         </View>
@@ -427,16 +491,22 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     }
 
     return (
-      <View style={[styles.messageContainer, isOwnMessage && styles.ownMessage]}>
-        <View style={[styles.messageBubble, isOwnMessage && styles.ownBubble]}>
+      <View style={[FXTheme.layouts.column, isOwnMessage ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
+        <View style={[{
+          backgroundColor: isOwnMessage ? Colors.primary : Colors.gray100,
+          paddingHorizontal: Spacing.md,
+          paddingVertical: Spacing.sm,
+          borderRadius: BorderRadius.lg,
+          maxWidth: '80%',
+        }]}>
           <Typography 
             variant="body2" 
-            style={[styles.messageText, isOwnMessage && styles.ownMessageText]}
+            style={[FXTheme.text.bold, { color: isOwnMessage ? Colors.background : Colors.textPrimary }]}
           >
             {message.content}
           </Typography>
         </View>
-        <Typography variant="caption" color="textSecondary" style={styles.messageTimestamp}>
+        <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs }}>
           {message.timestamp.toLocaleTimeString()}
         </Typography>
       </View>
@@ -458,17 +528,39 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     if (!showDispute) return null;
 
     return (
-      <View style={styles.modalOverlay}>
-        <View style={styles.disputeModal}>
-          <Typography variant="h6" style={styles.disputeTitle}>
+      <View style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <View style={{
+          backgroundColor: Colors.background,
+          borderRadius: BorderRadius.lg,
+          padding: Spacing.xl,
+          margin: Spacing.lg,
+          width: '90%',
+        }}>
+          <Typography variant="h6" style={[FXTheme.text.bold, { marginBottom: Spacing.md }]}>
             Open Dispute
           </Typography>
-          <Typography variant="body2" color="textSecondary" style={styles.disputeDescription}>
+          <Typography variant="body2" color="textSecondary" style={[FXTheme.text.bold, { marginBottom: Spacing.lg, lineHeight: 20 }]}>
             Describe the issue you're experiencing with this trade.
           </Typography>
           
           <TextInput
-            style={styles.disputeInput}
+            style={{
+              borderWidth: 1,
+              borderColor: Colors.gray300,
+              borderRadius: BorderRadius.md,
+              padding: Spacing.md,
+              marginBottom: Spacing.lg,
+              textAlignVertical: 'top',
+            }}
             value={disputeReason}
             onChangeText={setDisputeReason}
             placeholder="Explain the problem..."
@@ -476,17 +568,17 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
             numberOfLines={4}
           />
 
-          <View style={styles.disputeActions}>
+          <View style={FXTheme.layouts.rowGap}>
             <Button
               title="Cancel"
               variant="outline"
               onPress={() => setShowDispute(false)}
-              style={styles.disputeButton}
+              style={{ flex: 1 }}
             />
             <Button
               title="Open Dispute"
               onPress={handleOpenDispute}
-              style={styles.disputeButton}
+              style={{ flex: 1 }}
             />
           </View>
         </View>
@@ -495,32 +587,59 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={FXTheme.containers.screen}>
       {renderTradeHeader()}
       {renderTradeProgress()}
       
-      <View style={styles.chatContainer}>
+      <View style={{
+        flex: 1,
+        margin: Spacing.lg,
+        marginTop: Spacing.md,
+      }}>
         <FlatList
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={renderMessage}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingVertical: Spacing.md }}
         />
 
-        <View style={styles.inputContainer}>
+        <View style={[{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          paddingTop: Spacing.md,
+          borderTopWidth: 1,
+          borderTopColor: Colors.gray200,
+        }, chatExpiresAt && new Date() >= chatExpiresAt ? { opacity: 0.6 } : null]}>
           <TextInput
-            style={styles.messageInput}
+            style={{
+              flex: 1,
+              borderWidth: 1,
+              borderColor: Colors.gray300,
+              borderRadius: BorderRadius.lg,
+              paddingHorizontal: Spacing.md,
+              paddingVertical: Spacing.sm,
+              marginRight: Spacing.md,
+              maxHeight: 100,
+            }}
             value={messageText}
             onChangeText={setMessageText}
-            placeholder="Type a message..."
+            placeholder={chatExpiresAt && new Date() >= chatExpiresAt ? 'Chat expired' : 'Type a message...'}
+            editable={!(chatExpiresAt && new Date() >= chatExpiresAt)}
             multiline
           />
           <TouchableOpacity 
             onPress={sendMessage}
-            style={[styles.sendButton, { opacity: messageText.trim() ? 1 : 0.5 }]}
-            disabled={!messageText.trim()}
+            style={[{
+              width: 40,
+              height: 40,
+              borderRadius: BorderRadius.full,
+              backgroundColor: Colors.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }, { opacity: messageText.trim() && !(chatExpiresAt && new Date() >= chatExpiresAt) ? 1 : 0.5 }]}
+            disabled={!messageText.trim() || !!(chatExpiresAt && new Date() >= chatExpiresAt)}
           >
             <MaterialIcons name="send" size={20} color={Colors.background} />
           </TouchableOpacity>
@@ -531,213 +650,3 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  tradeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
-  },
-  backButton: {
-    padding: Spacing.sm,
-    marginRight: Spacing.md,
-  },
-  tradeInfo: {
-    flex: 1,
-  },
-  tradeTitle: {
-    fontWeight: '600',
-  },
-  tradeStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: Spacing.sm,
-  },
-  statusText: {
-    fontWeight: '500',
-  },
-  progressCard: {
-    margin: Spacing.lg,
-    marginBottom: 0,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  timer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timerText: {
-    marginLeft: Spacing.xs,
-    fontWeight: '600',
-  },
-  tradeAmount: {
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  actionButton: {
-    flex: 1,
-  },
-  chatContainer: {
-    flex: 1,
-    margin: Spacing.lg,
-    marginTop: Spacing.md,
-  },
-  messagesList: {
-    flex: 1,
-  },
-  messagesContent: {
-    paddingVertical: Spacing.md,
-  },
-  systemMessage: {
-    alignItems: 'center',
-    marginVertical: Spacing.md,
-  },
-  systemMessageContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.gray100,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-  },
-  systemMessageText: {
-    marginLeft: Spacing.sm,
-    textAlign: 'center',
-  },
-  systemTimestamp: {
-    marginTop: Spacing.xs,
-  },
-  messageContainer: {
-    alignItems: 'flex-start',
-    marginVertical: Spacing.sm,
-  },
-  ownMessage: {
-    alignItems: 'flex-end',
-  },
-  messageBubble: {
-    backgroundColor: Colors.gray100,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-    maxWidth: '80%',
-  },
-  ownBubble: {
-    backgroundColor: Colors.primary,
-  },
-  messageText: {
-    color: Colors.textPrimary,
-  },
-  ownMessageText: {
-    color: Colors.background,
-  },
-  messageTimestamp: {
-    marginTop: Spacing.xs,
-  },
-  paymentProofCard: {
-    backgroundColor: Colors.success + '10',
-    borderWidth: 1,
-    borderColor: Colors.success + '20',
-  },
-  ownPaymentProof: {
-    backgroundColor: Colors.primary + '10',
-    borderColor: Colors.primary + '20',
-  },
-  paymentProofHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  paymentProofTitle: {
-    marginLeft: Spacing.sm,
-    fontWeight: '600',
-  },
-  paymentProofAmount: {
-    fontWeight: '600',
-    marginBottom: Spacing.xs,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray200,
-  },
-  messageInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginRight: Spacing.md,
-    maxHeight: 100,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disputeModal: {
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    margin: Spacing.lg,
-    width: '90%',
-  },
-  disputeTitle: {
-    marginBottom: Spacing.md,
-    fontWeight: '600',
-  },
-  disputeDescription: {
-    marginBottom: Spacing.lg,
-    lineHeight: 20,
-  },
-  disputeInput: {
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-    textAlignVertical: 'top',
-  },
-  disputeActions: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  disputeButton: {
-    flex: 1,
-  },
-});

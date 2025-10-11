@@ -60,6 +60,7 @@ export interface User {
   authMethod: 'email' | 'google' | 'telegram';
   avatar?: string; // Adding avatar property
   role?: 'user' | 'merchant' | 'admin';
+  trustScore?: number; // Added trustScore property
   merchantProfile?: MerchantProfile;
 }
 
@@ -250,9 +251,51 @@ class AuthService {
         return { success: false, error: result.error || 'Session invalid' };
       }
 
+      let user = result.user;
+
+      // Check if merchantProfile is missing and try to fetch it separately
+      if (user && !user.merchantProfile) {
+        console.log('🔍 MerchantProfile missing from session, attempting to fetch separately...');
+        try {
+          const merchantResponse = await fetch(`${API_BASE_URL}/api/merchant/status`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (merchantResponse.ok) {
+            const merchantData = await merchantResponse.json();
+            console.log('📄 Merchant API response:', {
+              success: merchantData.success,
+              hasProfile: !!merchantData.merchantProfile,
+              status: merchantData.merchantProfile?.status,
+              keys: merchantData.merchantProfile ? Object.keys(merchantData.merchantProfile) : null
+            });
+
+            if (merchantData.success && merchantData.merchantProfile) {
+              user.merchantProfile = merchantData.merchantProfile;
+              console.log('✅ Successfully added merchantProfile to user data:', {
+                status: user.merchantProfile.status,
+                hasBankDetails: !!user.merchantProfile.bankDetails,
+                hasStats: !!user.merchantProfile.stats
+              });
+            }
+          } else {
+            console.log('⚠️ Merchant API call failed:', {
+              status: merchantResponse.status,
+              statusText: merchantResponse.statusText
+            });
+          }
+        } catch (merchantError) {
+          console.warn('⚠️ Error fetching merchant profile:', merchantError);
+        }
+      }
+
       console.log('✅ Session valid, saving user data');
-      await AsyncStorage.setItem('userData', JSON.stringify(result.user));
-      return { success: true, user: result.user };
+      await AsyncStorage.setItem('userData', JSON.stringify(user));
+      return { success: true, user };
     } catch (error) {
       console.error('❌ Session error:', error);
       console.error('❌ Session error details:', {

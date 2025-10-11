@@ -28,6 +28,7 @@ import { FXMarketplace } from './src/components/fx/FXMarketplace';
 import { FXOfferDetail } from './src/components/fx/FXOfferDetail';
 import { TradeRoom } from './src/components/fx/TradeRoom';
 import { CreateFXOffer } from './src/components/fx/CreateFXOffer';
+import { FXContainer } from './src/components/fx/FXContainer';
 import { ChangePasswordScreen } from './src/components/settings/ChangePasswordScreen';
 import { WalletSettingsScreen } from './src/components/settings/WalletSettingsScreen';
 import { PrivacySettingsScreen } from './src/components/settings/PrivacySettingsScreen';
@@ -62,7 +63,7 @@ import { NotificationProvider, useNotifications } from './src/contexts/Notificat
 import authService, { User } from './src/services/authService';
 import { communityService, CommunityPost } from './src/services/communityService';
 import profileService from './src/services/profileService';
-import chatService from './src/services/chatService';
+import chatService, { createConversationId, createTradeConversationId } from './src/services/chatService';
 import fxService from './src/services/fxService';
 import aptosService from './src/services/aptosService';
 import friendService from './src/services/friendService';
@@ -162,9 +163,6 @@ function App() {
   const [showP2PSend, setShowP2PSend] = useState(false);
   const [showLoanRequest, setShowLoanRequest] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<any>(null);
-  const [currentFXScreen, setCurrentFXScreen] = useState<FXScreen>('marketplace');
-  const [selectedOffer, setSelectedOffer] = useState<FXOffer | null>(null);
-  const [currentTrade, setCurrentTrade] = useState<FXTrade | null>(null);
   const [showCreateFXOffer, setShowCreateFXOffer] = useState(false);
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -1515,61 +1513,14 @@ function App() {
         );
 
       case 'marketplace':
-        switch (currentFXScreen) {
-          case 'offer_detail':
-            if (selectedOffer) {
-              return (
-                <FXOfferDetail
-                  offer={selectedOffer}
-                  onBack={() => {
-                    setSelectedOffer(null);
-                    setCurrentFXScreen('marketplace');
-                  }}
-                  onStartTrade={handleStartTrade}
-                  onContactTrader={() => {
-                    // Find the conversation for this trader
-                    const traderConversation = conversations.find(c => c.id === selectedOffer.maker.id);
-                    if (traderConversation) {
-                      setSelectedChat(traderConversation);
-                      // Don't change tabs, keep the user in wallet/FX context
-                    }
-                  }}
-                />
-              );
-            }
-            return null;
-            
-          case 'trade_room':
-            if (currentTrade) {
-              return (
-                <TradeRoom
-                  trade={currentTrade}
-                  onBack={() => {
-                    setCurrentTrade(null);
-                    setCurrentFXScreen('marketplace');
-                  }}
-                  onUploadPaymentProof={handleUploadPaymentProof}
-                  onConfirmPayment={handleConfirmPayment}
-                  onSignRelease={handleSignRelease}
-                  onOpenDispute={handleOpenDispute}
-                  onCompleteRating={handleCompleteRating}
-                />
-              );
-            }
-            return null;
-            
-          default:
-            return (
-              <FXMarketplace
-                onOfferSelect={(offer) => {
-                  setSelectedOffer(offer);
-                  setCurrentFXScreen('offer_detail');
-                }}
-                onCreateOffer={() => setShowCreateFXOffer(true)}
-                onBack={() => setCurrentWalletScreen('main')}
-              />
-            );
-        }
+        return (
+          <FXContainer 
+            currentUser={currentUser}
+            isLoadingGeneral={isLoadingGeneral}
+            setIsLoadingGeneral={setIsLoadingGeneral}
+            onBack={() => setCurrentWalletScreen('main')}
+          />
+        );
 
       case 'webview':
         // Debug authentication state before opening marketplace
@@ -1975,7 +1926,6 @@ function App() {
             name={contact.name}
             online={contact.isOnline}
             size="medium"
-            shape="rounded"
           />
         </TouchableOpacity>
         
@@ -2568,7 +2518,6 @@ function App() {
                 name={userName}
                 userId={moment.authorId}
                 size="medium"
-                shape="rounded"
               />
               <View style={styles.momentUserDetails}>
                 <Typography variant="h6" style={styles.momentUserName}>{userName}</Typography>
@@ -3057,167 +3006,6 @@ function App() {
     </View>
   );
 
-  // FX Trading Handlers
-  const handleStartTrade = async (amount: number) => {
-    if (!selectedOffer) {
-      console.error('No offer selected for trade');
-      return;
-    }
-
-    try {
-      console.log('🔄 Starting trade with FX service...');
-      setIsLoadingGeneral(true);
-
-      const response = await fxService.createTrade(
-        selectedOffer.id,
-        amount,
-        selectedOffer.paymentMethods[0],
-        currentUser?.id || 'current_user'
-      );
-
-      if (response.success && response.trade) {
-        console.log('✅ Trade created successfully:', response.trade);
-        setCurrentTrade(response.trade);
-        setCurrentFXScreen('trade_room');
-      } else {
-        console.error('❌ Failed to create trade:', response.error);
-        // Show error to user
-      }
-    } catch (error) {
-      console.error('❌ Exception creating trade:', error);
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
-
-  const handleUploadPaymentProof = async (file: any) => {
-    if (!currentTrade) return;
-
-    try {
-      console.log('📄 Uploading payment proof...');
-      setIsLoadingGeneral(true);
-
-      const response = await fxService.uploadPaymentProof(currentTrade.id, file);
-      
-      if (response.success) {
-        console.log('✅ Payment proof uploaded successfully');
-        // Update trade status
-        await updateTradeStatus('payment_sent');
-      } else {
-        console.error('❌ Failed to upload payment proof:', response.error);
-      }
-    } catch (error) {
-      console.error('❌ Exception uploading payment proof:', error);
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
-
-  const handleConfirmPayment = async () => {
-    if (!currentTrade) return;
-
-    try {
-      console.log('✅ Confirming payment...');
-      setIsLoadingGeneral(true);
-
-      const response = await fxService.confirmPayment(currentTrade.id);
-      
-      if (response.success) {
-        console.log('✅ Payment confirmed successfully');
-        await updateTradeStatus('payment_confirmed');
-      } else {
-        console.error('❌ Failed to confirm payment:', response.error);
-      }
-    } catch (error) {
-      console.error('❌ Exception confirming payment:', error);
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
-
-  const handleSignRelease = async () => {
-    if (!currentTrade) return;
-
-    try {
-      console.log('🔐 Signing release...');
-      setIsLoadingGeneral(true);
-
-      const response = await fxService.signRelease(currentTrade.id);
-      
-      if (response.success) {
-        console.log('✅ Release signed successfully');
-        await updateTradeStatus('completed');
-      } else {
-        console.error('❌ Failed to sign release:', response.error);
-      }
-    } catch (error) {
-      console.error('❌ Exception signing release:', error);
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
-
-  const handleOpenDispute = async (reason: string) => {
-    if (!currentTrade) return;
-
-    try {
-      console.log('⚠️ Opening dispute...');
-      setIsLoadingGeneral(true);
-
-      const response = await fxService.openDispute(currentTrade.id, reason);
-      
-      if (response.success) {
-        console.log('✅ Dispute opened successfully');
-        await updateTradeStatus('disputed');
-      } else {
-        console.error('❌ Failed to open dispute:', response.error);
-      }
-    } catch (error) {
-      console.error('❌ Exception opening dispute:', error);
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
-
-  const handleCompleteRating = async (rating: number, review?: string) => {
-    if (!currentTrade) return;
-
-    try {
-      console.log('⭐ Submitting rating...');
-      
-      const response = await fxService.submitRating(currentTrade.id, rating, review);
-      
-      if (response.success) {
-        console.log('✅ Rating submitted successfully');
-        // Navigate back to marketplace
-        setCurrentTrade(null);
-        setCurrentFXScreen('marketplace');
-      } else {
-        console.error('❌ Failed to submit rating:', response.error);
-      }
-    } catch (error) {
-      console.error('❌ Exception submitting rating:', error);
-    }
-  };
-
-  const updateTradeStatus = async (status: FXTrade['status']) => {
-    if (!currentTrade) return;
-
-    try {
-      const response = await fxService.updateTradeStatus(currentTrade.id, status);
-      
-      if (response.success) {
-        // Update local trade state
-        setCurrentTrade({
-          ...currentTrade,
-          status: status,
-        });
-      }
-    } catch (error) {
-      console.error('❌ Failed to update trade status:', error);
-    }
-  };
-
   const renderContent = () => {
     // If a chat is selected, render it regardless of active tab
     if (selectedChat) {
@@ -3368,7 +3156,7 @@ function App() {
           {renderContent()}
 
         {/* Tab Bar - Hide when in chat room or on sub-screens */}
-        {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentFXScreen === 'marketplace' && currentContactScreen === 'main' && (
+        {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main' && (
           <View style={styles.tabBar}>
           <TouchableOpacity 
             style={styles.tabItem}
