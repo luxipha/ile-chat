@@ -11,7 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../../ui/Typography';
 import { Card } from '../../ui/Card';
 import { Button } from '../../ui/Button';
-import { Colors, Spacing, BorderRadius } from '../../../theme';
+import { Colors, Spacing } from '../../../theme';
 import { FXTheme } from '../../../theme/fxTheme';
 import { FXTrade } from '../../../types/fx';
 import { User } from '../../../services/authService';
@@ -23,17 +23,22 @@ interface PendingTradesScreenProps {
   currentUser: User | null;
 }
 
+type TradeTab = 'active' | 'completed' | 'cancelled';
+
 export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
   onBack,
   onTradeSelect,
   currentUser,
 }) => {
-  const [pendingTrades, setPendingTrades] = useState<FXTrade[]>([]);
+  const [activeTab, setActiveTab] = useState<TradeTab>('active');
+  const [activeTrades, setActiveTrades] = useState<FXTrade[]>([]);
+  const [completedTrades, setCompletedTrades] = useState<FXTrade[]>([]);
+  const [cancelledTrades, setCancelledTrades] = useState<FXTrade[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load pending trades
-  const loadPendingTrades = async (isRefresh = false) => {
+  // Load all trades and categorize them
+  const loadTrades = async (isRefresh = false) => {
     if (!currentUser) return;
     
     try {
@@ -43,22 +48,39 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
         setLoading(true);
       }
       
-      // Get all trades where current user is the maker (merchant) and status is pending_acceptance
-      const response = await fxService.getUserTrades({ limit: 50, offset: 0 });
+      // Get all trades where current user is the merchant
+      const response = await fxService.getUserTrades({ limit: 100, offset: 0 });
       
       if (response.success) {
-        const merchantPendingTrades = response.trades.filter(trade => 
-          trade.maker.id === currentUser.id && 
-          trade.status === 'pending_acceptance'
+        const myTrades = response.trades.filter(trade => 
+          trade.maker?.id === currentUser.id || trade.merchant?.id === currentUser.id
         );
         
-        console.log('📋 [PendingTradesScreen] Loaded pending trades:', {
+        // Categorize trades by status
+        const active = myTrades.filter(trade => 
+          ['pending_acceptance', 'accepted', 'payment_pending', 'payment_sent', 'buyer_payment_sent', 'merchant_payment_sent', 'both_payments_sent', 'payment_confirmed'].includes(trade.status)
+        );
+        
+        const completed = myTrades.filter(trade => 
+          trade.status === 'completed'
+        );
+        
+        const cancelled = myTrades.filter(trade => 
+          ['cancelled', 'disputed'].includes(trade.status)
+        );
+        
+        console.log('📋 [PendingTradesScreen] Loaded all trades:', {
           totalTrades: response.trades.length,
-          pendingTrades: merchantPendingTrades.length,
+          myTrades: myTrades.length,
+          active: active.length,
+          completed: completed.length,
+          cancelled: cancelled.length,
           merchantId: currentUser.id
         });
         
-        setPendingTrades(merchantPendingTrades);
+        setActiveTrades(active);
+        setCompletedTrades(completed);
+        setCancelledTrades(cancelled);
       }
     } catch (error) {
       console.error('Failed to load pending trades:', error);
@@ -77,8 +99,8 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
       const response = await fxService.updateTradeStatus(trade.id, 'accepted');
       
       if (response.success) {
-        // Remove from pending trades and navigate to trade room
-        setPendingTrades(prev => prev.filter(t => t.id !== trade.id));
+        // Remove from active trades and navigate to trade room
+        setActiveTrades(prev => prev.filter(t => t.id !== trade.id));
         Alert.alert('Success', 'Trade request accepted! Opening trade room...', [
           {
             text: 'OK',
@@ -109,7 +131,7 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
               const response = await fxService.updateTradeStatus(trade.id, 'cancelled');
               
               if (response.success) {
-                setPendingTrades(prev => prev.filter(t => t.id !== trade.id));
+                setActiveTrades(prev => prev.filter(t => t.id !== trade.id));
                 Alert.alert('Success', 'Trade request declined');
               } else {
                 Alert.alert('Error', response.error || 'Failed to decline trade request');
@@ -125,77 +147,157 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
   };
 
   useEffect(() => {
-    loadPendingTrades();
+    loadTrades();
   }, [currentUser]);
 
-  const renderTradeCard = (trade: FXTrade) => (
-    <Card key={trade.id} style={styles.tradeCard}>
-      <View style={FXTheme.layouts.rowBetween}>
-        <View style={FXTheme.layouts.column}>
-          <Typography variant="h6" style={FXTheme.text.bold}>
-            {trade.taker.name}
+  const renderTradeCard = (trade: FXTrade) => {
+    const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+    const isPendingAcceptance = trade.status === 'pending_acceptance';
+    const isCompleted = trade.status === 'completed';
+    const isCancelled = ['cancelled', 'disputed'].includes(trade.status);
+    
+    return (
+      <Card key={trade.id} style={styles.tradeCard}>
+        <View style={FXTheme.layouts.rowBetween}>
+          <View style={FXTheme.layouts.column}>
+            <Typography variant="h6" style={FXTheme.text.bold}>
+              {trade.taker?.name || trade.buyer?.name || 'Unknown'}
+            </Typography>
+            <Typography variant="caption" color="textSecondary">
+              ID: {trade.id.substring(0, 8)}...
+            </Typography>
+          </View>
+          
+          <View style={[FXTheme.layouts.column, { alignItems: 'flex-end' }]}>
+            <Typography variant="caption" color="textSecondary">
+              {new Date(trade.createdAt).toLocaleDateString()}
+            </Typography>
+            <Typography variant="caption" color="textSecondary">
+              {new Date(trade.createdAt).toLocaleTimeString()}
+            </Typography>
+            {isExpired && (
+              <Typography variant="caption" color="error" style={FXTheme.text.bold}>
+                EXPIRED
+              </Typography>
+            )}
+          </View>
+        </View>
+
+        <View style={[FXTheme.layouts.center, { marginVertical: Spacing.md }]}>
+          <Typography variant="body2" color="textSecondary">
+            They want to buy
           </Typography>
-          <Typography variant="caption" color="textSecondary">
-            ID: {trade.id.substr(0, 8)}...
+          <Typography variant="h5" color="primary">
+            {trade.sellCurrency.symbol}{trade.sellAmount.toLocaleString()} {trade.sellCurrency.code}
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            For
+          </Typography>
+          <Typography variant="h5">
+            {trade.buyCurrency.symbol}{trade.buyAmount.toLocaleString()} {trade.buyCurrency.code}
+          </Typography>
+          <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs }}>
+            Rate: 1 {trade.sellCurrency.code} = {trade.exchangeRate} {trade.buyCurrency.code}
           </Typography>
         </View>
-        
-        <View style={[FXTheme.layouts.column, { alignItems: 'flex-end' }]}>
-          <Typography variant="caption" color="textSecondary">
-            {new Date(trade.createdAt).toLocaleDateString()}
-          </Typography>
-          <Typography variant="caption" color="textSecondary">
-            {new Date(trade.createdAt).toLocaleTimeString()}
-          </Typography>
-        </View>
-      </View>
 
-      <View style={[FXTheme.layouts.center, { marginVertical: Spacing.md }]}>
-        <Typography variant="body2" color="textSecondary">
-          They want to buy
+        {isExpired ? (
+          <View style={FXTheme.layouts.center}>
+            <Typography variant="body2" color="error" style={FXTheme.text.bold}>
+              Trade Expired - Will be auto-cancelled
+            </Typography>
+          </View>
+        ) : isCompleted ? (
+          <View style={FXTheme.layouts.center}>
+            <Typography variant="body2" color="success" style={FXTheme.text.bold}>
+              ✅ Trade Completed
+            </Typography>
+          </View>
+        ) : isCancelled ? (
+          <View style={FXTheme.layouts.center}>
+            <Typography variant="body2" color="error" style={FXTheme.text.bold}>
+              ❌ Trade {trade.status === 'disputed' ? 'Disputed' : 'Cancelled'}
+            </Typography>
+          </View>
+        ) : isPendingAcceptance ? (
+          <View style={FXTheme.layouts.row}>
+            <Button
+              title="Decline"
+              onPress={() => handleDeclineTrade(trade)}
+              style={{ flex: 1, marginRight: Spacing.sm }}
+              variant="outline"
+            />
+            <Button
+              title="Accept"
+              onPress={() => handleAcceptTrade(trade)}
+              style={{ flex: 1 }}
+              variant="primary"
+            />
+          </View>
+        ) : (
+          <Button
+            title="View Trade Room"
+            onPress={() => onTradeSelect(trade)}
+            style={{ width: '100%' }}
+            variant="primary"
+          />
+        )}
+      </Card>
+    );
+  };
+
+  const getCurrentTrades = () => {
+    switch (activeTab) {
+      case 'active':
+        return activeTrades;
+      case 'completed':
+        return completedTrades;
+      case 'cancelled':
+        return cancelledTrades;
+      default:
+        return activeTrades;
+    }
+  };
+
+  const getEmptyStateText = () => {
+    switch (activeTab) {
+      case 'active':
+        return {
+          title: 'No Active Trades',
+          description: 'When users trade with your offers, they\'ll appear here for you to manage.'
+        };
+      case 'completed':
+        return {
+          title: 'No Completed Trades',
+          description: 'Your completed trades will appear here once you finish transactions.'
+        };
+      case 'cancelled':
+        return {
+          title: 'No Cancelled Trades',
+          description: 'Cancelled or disputed trades will appear here.'
+        };
+      default:
+        return {
+          title: 'No Trades',
+          description: 'Your trades will appear here.'
+        };
+    }
+  };
+
+  const renderEmptyState = () => {
+    const emptyState = getEmptyStateText();
+    return (
+      <View style={styles.emptyState}>
+        <MaterialIcons name="pending-actions" size={64} color={Colors.gray400} />
+        <Typography variant="h6" color="textSecondary" style={{ marginTop: Spacing.md }}>
+          {emptyState.title}
         </Typography>
-        <Typography variant="h5" color="primary">
-          {trade.sellCurrency.symbol}{trade.sellAmount.toLocaleString()} {trade.sellCurrency.code}
-        </Typography>
-        <Typography variant="body2" color="textSecondary">
-          For
-        </Typography>
-        <Typography variant="h5">
-          {trade.buyCurrency.symbol}{trade.buyAmount.toLocaleString()} {trade.buyCurrency.code}
-        </Typography>
-        <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs }}>
-          Rate: 1 {trade.sellCurrency.code} = {trade.exchangeRate} {trade.buyCurrency.code}
+        <Typography variant="body2" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.sm }}>
+          {emptyState.description}
         </Typography>
       </View>
-
-      <View style={FXTheme.layouts.row}>
-        <Button
-          title="Decline"
-          onPress={() => handleDeclineTrade(trade)}
-          style={{ flex: 1, marginRight: Spacing.sm }}
-          variant="outline"
-        />
-        <Button
-          title="Accept"
-          onPress={() => handleAcceptTrade(trade)}
-          style={{ flex: 1 }}
-          variant="primary"
-        />
-      </View>
-    </Card>
-  );
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <MaterialIcons name="pending-actions" size={64} color={Colors.gray400} />
-      <Typography variant="h6" color="textSecondary" style={{ marginTop: Spacing.md }}>
-        No Pending Trade
-      </Typography>
-      <Typography variant="body2" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.sm }}>
-        When users trade with your offers, they'll appear here for your approval.
-      </Typography>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={FXTheme.containers.screen}>
@@ -206,10 +308,53 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
         </TouchableOpacity>
         
         <Typography variant="h6" style={FXTheme.text.bold}>
-          Pending Trade
+          My Trades
         </Typography>
 
-        <View />
+        <View style={styles.headerBadge}>
+          <Typography variant="caption" style={styles.headerBadgeText}>
+            {getCurrentTrades().length}
+          </Typography>
+        </View>
+      </View>
+
+      {/* Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'active' && styles.activeTab]}
+          onPress={() => setActiveTab('active')}
+        >
+          <Typography
+            variant="body2"
+            style={[styles.tabText, activeTab === 'active' && styles.activeTabText]}
+          >
+            Active ({activeTrades.length})
+          </Typography>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'completed' && styles.activeTab]}
+          onPress={() => setActiveTab('completed')}
+        >
+          <Typography
+            variant="body2"
+            style={[styles.tabText, activeTab === 'completed' && styles.activeTabText]}
+          >
+            Completed ({completedTrades.length})
+          </Typography>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'cancelled' && styles.activeTab]}
+          onPress={() => setActiveTab('cancelled')}
+        >
+          <Typography
+            variant="body2"
+            style={[styles.tabText, activeTab === 'cancelled' && styles.activeTabText]}
+          >
+            Cancelled ({cancelledTrades.length})
+          </Typography>
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
@@ -219,21 +364,21 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => loadPendingTrades(true)}
+            onRefresh={() => loadTrades(true)}
             colors={[Colors.primary]}
           />
         }
       >
-        {loading && pendingTrades.length === 0 ? (
+        {loading && getCurrentTrades().length === 0 ? (
           <View style={styles.loadingState}>
             <Typography variant="body2" color="textSecondary">
-              Loading pending trades...
+              Loading trades...
             </Typography>
           </View>
-        ) : pendingTrades.length === 0 ? (
+        ) : getCurrentTrades().length === 0 ? (
           renderEmptyState()
         ) : (
-          pendingTrades.map(renderTradeCard)
+          getCurrentTrades().map(renderTradeCard)
         )}
       </ScrollView>
     </View>
@@ -274,5 +419,30 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: 'bold',
     fontSize: 12,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray200,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomColor: Colors.primary,
+  },
+  tabText: {
+    color: Colors.gray600,
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: Colors.primary,
+    fontWeight: '600',
   },
 });

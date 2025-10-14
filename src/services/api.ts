@@ -10,8 +10,11 @@ if (__DEV__) {
 class ApiService {
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retryCount: number = 0
   ): Promise<ApiResponse<T>> {
+    const maxRetries = 2;
+    
     try {
       const fullUrl = `${API_BASE_URL}${endpoint}`;
       console.log('🚀 Making HTTP request:', {
@@ -26,11 +29,22 @@ class ApiService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for better reliability
       
+      // Build headers carefully - don't set Content-Type for FormData
+      const headers: Record<string, string> = {};
+      
+      // Only set Content-Type if not FormData and not already set in options
+      const optionsHeaders = options.headers as Record<string, string> | undefined;
+      if (!(options.body instanceof FormData) && 
+          !optionsHeaders?.['Content-Type'] && 
+          !optionsHeaders?.['content-type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+      
       const requestOptions = {
         ...options,
         signal: controller.signal,
         headers: {
-          'Content-Type': 'application/json',
+          ...headers,
           ...options.headers,
         },
       };
@@ -76,30 +90,95 @@ class ApiService {
       // Create a safe error object to prevent issues with non-Error objects
       const safeError = error instanceof Error ? error : new Error(String(error));
       
-      console.error('❌ Error details:', {
+      // Enhanced error logging for DOMException and fetch errors
+      console.error('❌ DETAILED Error Analysis:', {
+        // Basic error info
         message: safeError.message || 'Unknown error',
-        stack: safeError.stack || null,
         name: safeError.name || 'Unknown',
+        stack: safeError.stack || null,
+        
+        // Request context
         endpoint: endpoint,
         fullUrl: `${API_BASE_URL}${endpoint}`,
-        timestamp: new Date().toISOString()
+        method: options.method || 'GET',
+        timestamp: new Date().toISOString(),
+        
+        // Error type analysis
+        isDOMException: safeError.name === 'DOMException',
+        isAbortError: safeError.name === 'AbortError',
+        isNetworkFailed: safeError.message?.includes('Network request failed'),
+        isFetchError: safeError.message?.includes('fetch'),
+        
+        // Raw error object inspection
+        errorConstructor: safeError.constructor.name,
+        errorKeys: Object.keys(safeError),
+        errorType: typeof error,
+        
+        // Network connectivity hints
+        apiBaseUrl: API_BASE_URL,
+        isDevMode: __DEV__
       });
       
+      // Log specific DOMException details if applicable
+      if (safeError.name === 'DOMException' || error.name === 'DOMException') {
+        console.error('❌ DOMException Specific Analysis:', {
+          originalError: error,
+          possibleCauses: [
+            'Backend server is down or unreachable',
+            'Network timeout (request took longer than 15 seconds)',
+            'CORS policy blocking the request',
+            'Invalid request format or headers',
+            'DNS resolution failure'
+          ]
+        });
+      }
+      
       let errorMessage = 'Network error';
+      let errorCategory = 'unknown';
+      
       if (safeError.name === 'AbortError') {
         errorMessage = 'Request timeout. The server is taking longer than expected to respond.';
+        errorCategory = 'timeout';
         console.log('⚠️ Request timeout detected - consider retrying the request');
-      } else if (safeError.message.includes('Network request failed')) {
+      } else if (safeError.name === 'DOMException') {
+        errorMessage = 'Network connection failed. Please check your internet connection and try again.';
+        errorCategory = 'dom_exception';
+        console.log('⚠️ DOMException detected - likely network connectivity issue');
+      } else if (safeError.message?.includes('Network request failed')) {
         errorMessage = 'Cannot reach server. Check your network connection and server status.';
+        errorCategory = 'network_failed';
+      } else if (safeError.message?.includes('fetch')) {
+        errorMessage = 'Failed to connect to server. Please try again.';
+        errorCategory = 'fetch_error';
       } else {
-        errorMessage = safeError.message;
+        errorMessage = safeError.message || 'Unknown network error';
+        errorCategory = 'other';
+      }
+      
+      // Retry logic for recoverable errors
+      const isRecoverableError = safeError.name === 'DOMException' || 
+                                 safeError.message?.includes('Network request failed') ||
+                                 safeError.name === 'TypeError'; // Often network related
+      
+      if (isRecoverableError && retryCount < maxRetries) {
+        console.log(`🔄 Retrying request (attempt ${retryCount + 1}/${maxRetries}) for ${endpoint}`);
+        
+        // Wait before retry (exponential backoff)
+        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s...
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        return this.request(endpoint, options, retryCount + 1);
       }
       
       return {
         success: false,
         error: errorMessage,
+        errorCategory,
         isTimeout: safeError.name === 'AbortError',
-        isNetworkError: safeError.message?.includes('Network request failed')
+        isDOMException: safeError.name === 'DOMException',
+        isNetworkError: safeError.message?.includes('Network request failed'),
+        endpoint: endpoint,
+        retriesAttempted: retryCount
       };
     }
   }

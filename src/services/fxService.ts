@@ -83,6 +83,17 @@ class FXDebugger {
 class FXService {
   private debugger = FXDebugger.getInstance();
   private apiBaseUrl = API_BASE_URL;
+
+  private async getAuthToken(): Promise<string | undefined> {
+    try {
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
+      const token = await AsyncStorage.default.getItem('authToken');
+      return token || undefined;
+    } catch (error) {
+      console.error('Failed to get auth token:', error);
+      return undefined;
+    }
+  }
   
   /**
    * Create a new FX offer
@@ -505,101 +516,69 @@ class FXService {
    */
   async uploadPaymentProof(tradeId: string, file: any): Promise<{ success: boolean; fileUrl?: string; error?: string }> {
     const startTime = Date.now();
-    this.debugger.log('UPLOAD_PAYMENT_PROOF_START', { 
-      tradeId, 
-      fileInfo: {
-        name: file?.name,
-        type: file?.type,
-        size: file?.size,
-        uri: file?.uri
-      }
-    });
+    this.debugger.log('UPLOAD_PAYMENT_PROOF_START', { tradeId, file: file?.uri });
     
     try {
       if (!file) {
-        const error = 'No file provided for upload';
-        this.debugger.log('UPLOAD_PAYMENT_PROOF_VALIDATION_ERROR', { error });
-        return { success: false, error };
+        return { success: false, error: 'No file provided' };
       }
 
-      // Create FormData for file upload
+      // Upload to Firebase using the working endpoint
       const formData = new FormData();
-      formData.append('paymentProof', {
+      const fileToUpload = {
         uri: file.uri,
         type: file.type || 'image/jpeg',
         name: file.name || `payment_proof_${tradeId}_${Date.now()}.jpg`,
-      } as any);
+      };
       
-      formData.append('tradeId', tradeId);
-      formData.append('uploadedAt', new Date().toISOString());
+      formData.append('image', fileToUpload as any);
+      
+      const token = await this.getAuthToken();
+      if (!token) {
+        return { success: false, error: 'Authentication required' };
+      }
 
-      this.debugger.log('UPLOAD_PAYMENT_PROOF_FORM_DATA', { 
-        tradeId,
-        hasFile: !!file,
-        fileName: file.name
+      const response = await fetch(`${API_BASE_URL}/api/firebase-auth/upload-image`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
       });
 
-      // Upload to backend (which should handle Cloudinary upload)
-      const endpoint = `/api/fx/trades/${tradeId}/payment-proof`;
-      const response = await apiClient.post(endpoint, formData);
+      const responseData = await response.json();
       
-      const responseTime = Date.now() - startTime;
-      this.debugger.log('UPLOAD_PAYMENT_PROOF_API_RESPONSE', { 
-        response, 
-        responseTime,
-        endpoint,
-        success: response.success 
-      });
-
-      if (!response.success) {
-        this.debugger.log('UPLOAD_PAYMENT_PROOF_API_ERROR', { 
-          error: response.error,
-          data: response.data 
-        });
-        
+      if (!response.ok || !responseData.success) {
         return {
           success: false,
-          error: response.error || 'Failed to upload payment proof',
+          error: responseData.error || 'Failed to upload image'
         };
       }
 
-      const responseData = response.data as any;
-      const result = {
-        success: true,
-        fileUrl: responseData?.fileUrl || responseData?.url || '',
-      };
-
+      const responseTime = Date.now() - startTime;
       this.debugger.log('UPLOAD_PAYMENT_PROOF_SUCCESS', { 
         tradeId,
-        fileUrl: result.fileUrl,
-        responseTime
+        responseTime,
+        fileUrl: responseData.imageUrl || responseData.url
       });
 
-      return result;
+      return {
+        success: true,
+        fileUrl: responseData.imageUrl || responseData.url || file.uri
+      };
     } catch (error) {
-      const responseTime = Date.now() - startTime;
-      this.debugger.log('UPLOAD_PAYMENT_PROOF_ERROR', { error, responseTime }, error);
-      
-      // Fallback in development
-      if (__DEV__) {
-        this.debugger.log('UPLOAD_PAYMENT_PROOF_FALLBACK_TO_MOCK', { reason: 'API error in development' });
-        // Simulate upload delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return { 
-          success: true, 
-          fileUrl: `mock_url_${tradeId}_${Date.now()}.jpg` 
-        };
-      }
-      
+      this.debugger.log('UPLOAD_PAYMENT_PROOF_ERROR', { error }, error);
       return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to upload payment proof'
+        success: false,
+        error: error instanceof Error ? error.message : 'Upload failed'
       };
     }
   }
 
+
   /**
-   * Confirm payment received (merchant action)
+   * Confirm payment received (buyer action) - completes the trade
+   * Buyer protection model: buyer's satisfaction completes the transaction
    * @param tradeId - The trade ID
    * @returns Promise with confirmation result
    */
@@ -608,13 +587,16 @@ class FXService {
     this.debugger.log('CONFIRM_PAYMENT_START', { tradeId });
     
     try {
-      const response = await this.updateTradeStatus(tradeId, 'payment_confirmed');
+      // Use the proper confirm-payment endpoint
+      const endpoint = `/api/fx/trades/${tradeId}/confirm-payment`;
+      const response = await apiClient.post(endpoint, {});
       
       const responseTime = Date.now() - startTime;
       this.debugger.log('CONFIRM_PAYMENT_RESULT', { 
         tradeId,
         success: response.success,
-        responseTime
+        responseTime,
+        note: 'Using correct confirm-payment endpoint'
       });
       
       return {
@@ -852,6 +834,16 @@ class FXService {
       const endpoint = `/api/fx/trades?${queryParams.toString()}`;
       const response = await apiClient.get(endpoint);
       
+      // 🚨 CRITICAL: Log raw backend response before transformation
+      console.log('🚨 RAW BACKEND API RESPONSE (getUserTrades):', {
+        endpoint,
+        responseSuccess: response.success,
+        responseData: response.data,
+        tradesArray: Array.isArray(response.data) ? response.data : response.data?.trades,
+        firstTrade: Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0],
+        firstTradeKeys: (Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) ? Object.keys(Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) : null
+      });
+      
       const responseTime = Date.now() - startTime;
       this.debugger.log('GET_USER_TRADES_API_RESPONSE', { 
         response, 
@@ -878,14 +870,23 @@ class FXService {
         this.transformTradeFromBackend(trade)
       );
 
+      // Check for expired trades and auto-cancel them
+      const checkedTrades = await Promise.all(
+        transformedTrades.map(async (trade: FXTrade) => {
+          const expirationCheck = await this.checkAndCancelExpiredTrade(trade);
+          return expirationCheck.trade || trade;
+        })
+      );
+
       this.debugger.log('GET_USER_TRADES_SUCCESS', { 
-        tradesCount: transformedTrades.length,
+        tradesCount: checkedTrades.length,
+        originalTradesCount: transformedTrades.length,
         responseTime
       });
 
       return {
         success: true,
-        trades: transformedTrades,
+        trades: checkedTrades,
       };
     } catch (error) {
       const responseTime = Date.now() - startTime;
@@ -900,6 +901,79 @@ class FXService {
   }
 
   /**
+   * Check if trade is expired and auto-cancel if needed
+   * @param trade - The trade to check
+   * @returns Promise with updated trade or cancellation result
+   */
+  async checkAndCancelExpiredTrade(trade: FXTrade): Promise<{ success: boolean; trade?: FXTrade; cancelled?: boolean; error?: string }> {
+    this.debugger.log('CHECK_EXPIRED_TRADE_START', { 
+      tradeId: trade.id, 
+      status: trade.status,
+      paymentDeadline: trade.timeWindows?.paymentDeadline
+    });
+
+    // Check if trade is in a state that can expire
+    const expirableStatuses = ['pending_acceptance', 'accepted', 'quote_locked', 'escrow_locked', 'payment_pending'];
+    if (!expirableStatuses.includes(trade.status)) {
+      return { success: true, trade };
+    }
+
+    // Check if trade has expired
+    const now = new Date();
+    let isExpired = false;
+    let deadlineType = '';
+
+    // For pending_acceptance trades, check acceptance deadline
+    if (trade.status === 'pending_acceptance' && trade.timeWindows?.acceptanceDeadline) {
+      isExpired = now > trade.timeWindows.acceptanceDeadline;
+      deadlineType = 'acceptance';
+    }
+    // For accepted/payment_pending trades, check payment deadline
+    else if (trade.timeWindows?.paymentDeadline) {
+      isExpired = now > trade.timeWindows.paymentDeadline;
+      deadlineType = 'payment';
+    }
+
+    if (isExpired) {
+      this.debugger.log('TRADE_EXPIRED_AUTO_CANCEL', { 
+        tradeId: trade.id,
+        deadlineType,
+        deadline: deadlineType === 'acceptance' ? trade.timeWindows?.acceptanceDeadline : trade.timeWindows?.paymentDeadline
+      });
+
+      try {
+        // Auto-cancel the expired trade
+        const cancelResponse = await this.updateTradeStatus(trade.id, 'cancelled', {
+          reason: `Trade expired - ${deadlineType} deadline passed`,
+          autoCancel: true
+        });
+
+        if (cancelResponse.success) {
+          const cancelledTrade = { ...trade, status: 'cancelled' as const };
+          return { 
+            success: true, 
+            trade: cancelledTrade,
+            cancelled: true 
+          };
+        } else {
+          return {
+            success: false,
+            error: `Failed to auto-cancel expired trade: ${cancelResponse.error}`
+          };
+        }
+      } catch (error) {
+        this.debugger.log('AUTO_CANCEL_ERROR', { error }, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to auto-cancel expired trade'
+        };
+      }
+    }
+
+    return { success: true, trade };
+  }
+
+  /**
    * Get trade details by ID
    * @param tradeId - The trade ID
    * @returns Promise with trade data
@@ -911,6 +985,16 @@ class FXService {
     try {
       const endpoint = `/api/fx/trades/${tradeId}`;
       const response = await apiClient.get(endpoint);
+      
+      // 🚨 CRITICAL: Log raw backend response before transformation
+      console.log('🚨 RAW BACKEND API RESPONSE (getTradeById):', {
+        endpoint,
+        responseSuccess: response.success,
+        responseData: response.data,
+        responseDataType: typeof response.data,
+        responseDataKeys: response.data ? Object.keys(response.data) : null,
+        fullResponse: response
+      });
       
       const responseTime = Date.now() - startTime;
       this.debugger.log('GET_TRADE_BY_ID_API_RESPONSE', { 
@@ -932,17 +1016,40 @@ class FXService {
         };
       }
 
-      const transformedTrade = this.transformTradeFromBackend(response.data);
+      // Extract the actual trade object from the API response
+      const responseData = response.data as any;
+      const tradeData = responseData?.trade || responseData;
+      
+      console.log('🔍 Extracting trade data:', {
+        hasResponseData: !!responseData,
+        hasTradeField: !!responseData?.trade,
+        extractedData: tradeData,
+        extractedDataKeys: tradeData ? Object.keys(tradeData) : null
+      });
+      
+      const transformedTrade = this.transformTradeFromBackend(tradeData);
+
+      // Check if trade is expired and auto-cancel if needed
+      const expirationCheck = await this.checkAndCancelExpiredTrade(transformedTrade);
+      if (!expirationCheck.success) {
+        return {
+          success: false,
+          error: expirationCheck.error
+        };
+      }
+
+      const finalTrade = expirationCheck.trade || transformedTrade;
 
       this.debugger.log('GET_TRADE_BY_ID_SUCCESS', { 
-        tradeId: transformedTrade.id,
-        status: transformedTrade.status,
+        tradeId: finalTrade.id,
+        status: finalTrade.status,
+        cancelled: expirationCheck.cancelled,
         responseTime
       });
 
       return {
         success: true,
-        trade: transformedTrade,
+        trade: finalTrade,
       };
     } catch (error) {
       const responseTime = Date.now() - startTime;
@@ -1016,6 +1123,32 @@ class FXService {
    * Transform trade from backend format to frontend format
    */
   private transformTradeFromBackend(backendTrade: any): FXTrade {
+    // 🚨 CRITICAL: Raw backend data inspection
+    console.log('🔍 RAW BACKEND TRADE DATA (FULL STRUCTURE):', JSON.stringify(backendTrade, null, 2));
+    
+    console.log('🔍 PARTICIPANT FIELD ANALYSIS:', {
+      // Check all possible participant field variations
+      merchant: backendTrade.merchant,
+      merchantType: typeof backendTrade.merchant,
+      merchantKeys: backendTrade.merchant ? Object.keys(backendTrade.merchant) : null,
+      merchantId: backendTrade.merchantId,
+      merchant_id: backendTrade.merchant_id,
+      
+      buyer: backendTrade.buyer,
+      buyerType: typeof backendTrade.buyer,
+      buyerKeys: backendTrade.buyer ? Object.keys(backendTrade.buyer) : null,
+      buyerId: backendTrade.buyerId,
+      buyer_id: backendTrade.buyer_id,
+      
+      // Alternative field names
+      seller: backendTrade.seller,
+      owner: backendTrade.owner,
+      maker: backendTrade.maker,
+      taker: backendTrade.taker,
+      
+      allBackendKeys: Object.keys(backendTrade || {})
+    });
+    
     this.debugger.log('TRANSFORM_TRADE_FROM_BACKEND', { 
       tradeId: backendTrade._id || backendTrade.id,
       status: backendTrade.status,
@@ -1060,16 +1193,130 @@ class FXService {
       finalOfferId: safeOfferId
     });
 
-    // Handle backend using 'merchant' and 'buyer' instead of 'maker' and 'taker'
-    const merchantData = backendTrade.merchant || backendTrade.maker;
-    const buyerData = backendTrade.buyer || backendTrade.taker;
+    // ENHANCED PARTICIPANT DATA HANDLING
+    // Backend populates merchant/buyer with MongoDB objects or returns ObjectId strings
+    let merchantData = backendTrade.merchant || backendTrade.maker;
+    let buyerData = backendTrade.buyer || backendTrade.taker;
+    
+    console.log('🔍 [FXService] RAW participant data debug:', {
+      tradeId: safeId,
+      merchantDataType: typeof merchantData,
+      merchantDataKeys: merchantData ? Object.keys(merchantData) : null,
+      merchantRaw: merchantData,
+      buyerDataType: typeof buyerData,
+      buyerDataKeys: buyerData ? Object.keys(buyerData) : null,
+      buyerRaw: buyerData,
+      backendKeys: Object.keys(backendTrade || {})
+    });
+    
+    // ENHANCED ID extraction with comprehensive field checking
+    const extractUserId = (userData: any, fallbackName: string, debugContext: string) => {
+      console.log(`🔍 [${debugContext}] EXTRACTING USER ID:`, {
+        userData,
+        userDataType: typeof userData,
+        userDataKeys: userData ? Object.keys(userData) : null,
+        hasId: userData?.id,
+        has_id: userData?._id,
+        hasToString: userData?.toString
+      });
+      
+      if (!userData) {
+        console.log(`❌ [${debugContext}] No userData provided`);
+        return null;
+      }
+      
+      // If it's a string (ObjectId), create minimal object
+      if (typeof userData === 'string') {
+        console.log(`✅ [${debugContext}] String ObjectId found:`, userData);
+        return {
+          id: userData,
+          _id: userData,
+          name: fallbackName,
+          trustScore: 0
+        };
+      }
+      
+      // If it's a populated MongoDB object, extract the ID properly
+      if (typeof userData === 'object') {
+        // Try multiple ID extraction methods
+        const extractedId = userData._id?.toString() || userData._id || userData.id?.toString() || userData.id;
+        
+        console.log(`🔍 [${debugContext}] Object ID extraction:`, {
+          _id: userData._id,
+          _idType: typeof userData._id,
+          _idToString: userData._id?.toString(),
+          id: userData.id,
+          idType: typeof userData.id,
+          idToString: userData.id?.toString(),
+          finalExtractedId: extractedId
+        });
+        
+        if (!extractedId) {
+          console.error(`❌ [${debugContext}] Could not extract ID from object:`, userData);
+          return null;
+        }
+        
+        return {
+          id: extractedId,
+          _id: extractedId,
+          name: userData.name || userData.userName || fallbackName,
+          avatar: userData.avatar,
+          trustScore: userData.trustScore || 0,
+          // Preserve original object for debugging
+          _original: userData
+        };
+      }
+      
+      console.error(`❌ [${debugContext}] Unexpected userData type:`, typeof userData, userData);
+      return null;
+    };
+    
+    // Transform participant data using enhanced extraction with context
+    merchantData = extractUserId(merchantData, 'Merchant', 'MERCHANT');
+    buyerData = extractUserId(buyerData, 'Buyer', 'BUYER');
+    
+    console.log('🔍 [FXService] PROCESSED participant debug:', {
+      tradeId: safeId,
+      merchantProcessed: merchantData ? {
+        id: merchantData.id,
+        _id: merchantData._id,
+        name: merchantData.name,
+        hasId: !!merchantData.id,
+        has_Id: !!merchantData._id
+      } : null,
+      buyerProcessed: buyerData ? {
+        id: buyerData.id,
+        _id: buyerData._id,
+        name: buyerData.name,
+        hasId: !!buyerData.id,
+        has_Id: !!buyerData._id
+      } : null
+    });
+    
+    // Validation: Ensure we have valid participant IDs
+    if (!merchantData?.id && !merchantData?._id) {
+      console.error('❌ [FXService] CRITICAL: merchantData missing ID:', {
+        tradeId: safeId,
+        merchantData,
+        originalMerchant: backendTrade.merchant
+      });
+    }
+    
+    if (!buyerData?.id && !buyerData?._id) {
+      console.error('❌ [FXService] CRITICAL: buyerData missing ID:', {
+        tradeId: safeId,
+        buyerData,
+        originalBuyer: backendTrade.buyer
+      });
+    }
 
     return {
       id: safeId,
       offerId: safeOfferId,
+      // ENHANCED participant objects with robust ID handling
       maker: {
-        id: merchantData?.id || merchantData?._id || backendTrade.makerId,
-        name: merchantData?.name || merchantData?.userName || 'Merchant',
+        id: merchantData?.id || merchantData?._id,
+        name: merchantData?.name || 'Merchant',
         avatar: merchantData?.avatar || '/api/placeholder/40/40',
         trustScore: merchantData?.trustScore || 0,
         trustBadge: this.getTrustBadge(merchantData?.trustScore || 0),
@@ -1078,14 +1325,31 @@ class FXService {
         onlineStatus: merchantData?.isOnline ? 'online' : 'offline',
       },
       taker: {
-        id: buyerData?.id || buyerData?._id || backendTrade.takerId,
-        name: buyerData?.name || buyerData?.userName || 'You',
+        id: buyerData?.id || buyerData?._id,
+        name: buyerData?.name || 'Buyer',
         trustScore: buyerData?.trustScore || 0,
+      },
+      // Direct merchant/buyer references - CRITICAL for TradeRoom
+      merchant: {
+        id: merchantData?.id || merchantData?._id,
+        name: merchantData?.name || 'Merchant',
+        avatar: merchantData?.avatar || '/api/placeholder/40/40',
+        trustScore: merchantData?.trustScore || 0,
+        trustBadge: this.getTrustBadge(merchantData?.trustScore || 0),
+        completedTrades: merchantData?.completedTrades || 0,
+        responseTime: merchantData?.responseTime || '~5 minutes',
+        onlineStatus: merchantData?.isOnline ? 'online' : 'offline'
+      },
+      buyer: {
+        id: buyerData?.id || buyerData?._id,
+        name: buyerData?.name || 'Buyer',
+        trustScore: buyerData?.trustScore || 0,
+        avatar: buyerData?.avatar || '/api/placeholder/40/40'
       },
       sellCurrency: this.transformCurrency(backendTrade.fromCurrency || backendTrade.sellCurrency),
       buyCurrency: this.transformCurrency(backendTrade.toCurrency || backendTrade.buyCurrency),
-      sellAmount: backendTrade.sellAmount || backendTrade.fromAmount || 0,
-      buyAmount: backendTrade.buyAmount || backendTrade.toAmount || 0,
+      sellAmount: backendTrade.fromAmount || backendTrade.sellAmount || 0,
+      buyAmount: backendTrade.toAmount || backendTrade.buyAmount || 0,
       exchangeRate: backendTrade.exchangeRate || 0,
       paymentMethod: this.transformPaymentMethod(backendTrade.paymentMethod || backendTrade.paymentDetails),
       escrowAmount: safeEscrowAmount,
@@ -1094,9 +1358,17 @@ class FXService {
       createdAt: safeCreatedAt,
       quoteLockExpiry: new Date(backendTrade.quoteLockExpiry || Date.now() + 10 * 60 * 1000),
       paymentWindow: {
-        start: backendTrade?.paymentWindow?.start ? new Date(backendTrade.paymentWindow.start) : safeCreatedAt,
-        end: new Date(backendTrade.paymentWindow?.end || Date.now() + 30 * 60 * 1000),
+        start: backendTrade?.paymentWindow?.start || backendTrade?.timeWindows?.acceptedAt ? 
+          new Date(backendTrade.paymentWindow?.start || backendTrade.timeWindows.acceptedAt) : safeCreatedAt,
+        end: backendTrade?.paymentWindow?.end || backendTrade?.timeWindows?.paymentDeadline ? 
+          new Date(backendTrade.paymentWindow?.end || backendTrade.timeWindows.paymentDeadline) : 
+          new Date(Date.now() + 30 * 60 * 1000),
       },
+      timeWindows: backendTrade?.timeWindows ? {
+        acceptanceDeadline: backendTrade.timeWindows.acceptanceDeadline ? new Date(backendTrade.timeWindows.acceptanceDeadline) : undefined,
+        acceptedAt: backendTrade.timeWindows.acceptedAt ? new Date(backendTrade.timeWindows.acceptedAt) : undefined,
+        paymentDeadline: backendTrade.timeWindows.paymentDeadline ? new Date(backendTrade.timeWindows.paymentDeadline) : undefined,
+      } : undefined,
       chatRoomId: safeChatRoomId,
       paymentProofUrl: backendTrade.paymentProofUrl as any, // Type assertion for payment proof URL
       disputeReason: backendTrade.disputeReason,

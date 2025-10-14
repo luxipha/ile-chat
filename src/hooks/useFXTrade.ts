@@ -2,7 +2,7 @@ import { useFXContext } from '../contexts/FXContext';
 import { useFXNavigation } from './useFXNavigation';
 import { FXOffer, FXTrade } from '../types/fx';
 import fxService from '../services/fxService';
-import { createTradeConversationId } from '../services/chatService';
+import { useEffect } from 'react';
 
 export const useFXTrade = () => {
   const {
@@ -15,6 +15,46 @@ export const useFXTrade = () => {
   } = useFXContext();
 
   const { navigateToTradeRoom, navigateToMarketplace } = useFXNavigation();
+
+  // Real-time trade status synchronization
+  useEffect(() => {
+    if (!currentTrade?.id || currentTrade.id.startsWith('mock_')) return;
+
+    let statusCheckInterval: ReturnType<typeof setInterval>;
+    
+    const syncTradeStatus = async () => {
+      try {
+        const response = await fxService.getUserTrades({ limit: 1, offset: 0 });
+        if (response.success) {
+          const updatedTrade = response.trades.find(t => t.id === currentTrade.id);
+          if (updatedTrade && updatedTrade.status !== currentTrade.status) {
+            console.log('✅ [FXContainer] Trade status updated:', {
+              tradeId: currentTrade.id,
+              oldStatus: currentTrade.status,
+              newStatus: updatedTrade.status
+            });
+            setCurrentTrade(updatedTrade);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to sync trade status:', error);
+      }
+    };
+
+    // Check for status updates every 5 seconds for active trades
+    const activeStatuses = ['accepted', 'payment_pending', 'payment_sent', 'buyer_payment_sent', 'merchant_payment_sent', 'both_payments_sent'];
+    if (activeStatuses.includes(currentTrade.status)) {
+      statusCheckInterval = setInterval(syncTradeStatus, 5000);
+      console.log('🎯 [FXContainer] Started trade status polling for:', currentTrade.id);
+    }
+
+    return () => {
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+        console.log('🛑 [FXContainer] Stopped trade status polling');
+      }
+    };
+  }, [currentTrade?.id, currentTrade?.status, setCurrentTrade]);
 
   // Merchant-specific handlers
   const handleEditOffer = (offer: FXOffer) => {
@@ -213,11 +253,34 @@ export const useFXTrade = () => {
       const response = await fxService.updateTradeStatus(currentTrade.id, status);
       
       if (response.success) {
-        // Update local trade state
+        console.log('✅ [useFXTrade] Trade status updated successfully:', {
+          tradeId: currentTrade.id,
+          oldStatus: currentTrade.status,
+          newStatus: status
+        });
+        
+        // Update local trade state immediately
         setCurrentTrade({
           ...currentTrade,
           status: status,
         });
+        
+        // Trigger a sync to get the latest data from backend
+        setTimeout(async () => {
+          try {
+            const syncResponse = await fxService.getUserTrades({ limit: 1, offset: 0 });
+            if (syncResponse.success) {
+              const latestTrade = syncResponse.trades.find(t => t.id === currentTrade.id);
+              if (latestTrade) {
+                setCurrentTrade(latestTrade);
+              }
+            }
+          } catch (syncError) {
+            console.warn('⚠️ Failed to sync after status update:', syncError);
+          }
+        }, 1000);
+      } else {
+        console.error('❌ Failed to update trade status:', response.error);
       }
     } catch (error) {
       console.error('❌ Failed to update trade status:', error);
@@ -293,37 +356,35 @@ export const useFXTrade = () => {
       }
     }
     
-    // If no existing trade, create a mock trade context for discussion
+    // If no existing trade, create a real trade instead of mock
     if (!tradeForOffer && currentUser) {
-      console.log('🆕 [useFXTrade] Creating mock trade context for offer discussion');
-      tradeForOffer = {
-        id: `mock_${selectedOffer.id}_${Date.now()}`,
-        offerId: selectedOffer.id,
-        maker: selectedOffer.maker,
-        taker: {
-          id: currentUser.id,
-          name: currentUser.name,
-          avatar: currentUser.avatar,
-          trustScore: currentUser.trustScore || 0 // Use user's trust score or default to 0
-        },
-        sellCurrency: selectedOffer.sellCurrency,
-        buyCurrency: selectedOffer.buyCurrency,
-        sellAmount: selectedOffer.sellAmount,
-        buyAmount: selectedOffer.buyAmount,
-        exchangeRate: selectedOffer.exchangeRate,
-        paymentMethod: selectedOffer.paymentMethods[0], // Use first payment method
-        escrowAmount: 0,
-        escrowCurrency: 'USDC',
-        status: 'pending',
-        createdAt: new Date(),
-        quoteLockExpiry: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes from now
-        paymentWindow: {
-          start: new Date(),
-          end: new Date(Date.now() + selectedOffer.paymentWindow * 60 * 1000)
-        },
-        chatRoomId: createTradeConversationId(selectedOffer.id, currentUser.id),
-        offer: selectedOffer
-      } as FXTrade;
+      console.log('🆕 [useFXTrade] No existing trade found, creating new trade for offer');
+      try {
+        setIsLoadingGeneral(true);
+        
+        // Create a real trade with minimum amount to start discussion
+        const minAmount = selectedOffer.minTrade || 1;
+        const response = await fxService.createTrade(
+          selectedOffer.id,
+          minAmount,
+          selectedOffer.paymentMethods[0],
+          currentUser.id
+        );
+        
+        if (response.success && response.trade) {
+          console.log('✅ [useFXTrade] Real trade created for discussion:', response.trade.id);
+          tradeForOffer = response.trade;
+        } else {
+          console.error('❌ [useFXTrade] Failed to create trade:', response.error);
+          // If trade creation fails, return early to avoid creating mock trade
+          return;
+        }
+      } catch (error) {
+        console.error('❌ [useFXTrade] Exception creating trade:', error);
+        return;
+      } finally {
+        setIsLoadingGeneral(false);
+      }
     }
     
     // Set the trade context and navigate to trade room

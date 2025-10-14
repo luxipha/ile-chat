@@ -148,8 +148,23 @@ const chatService = {
         isEmpty: querySnapshot.empty
       });
       
+      // Filter out trade room conversations from public chat list
+      const filteredDocs = querySnapshot.docs.filter(doc => {
+        const conversationId = doc.id;
+        const isTradeRoom = conversationId.startsWith('chat_') || 
+                           conversationId.startsWith('trade_') || 
+                           conversationId.startsWith('traderoom_');
+        return !isTradeRoom;
+      });
+      
+      console.log('🔍 Filtered conversations:', {
+        total: querySnapshot.docs.length,
+        filtered: filteredDocs.length,
+        excluded: querySnapshot.docs.length - filteredDocs.length
+      });
+      
       const conversations: Conversation[] = await Promise.all(
-        querySnapshot.docs.map(async (doc) => {
+        filteredDocs.map(async (doc) => {
           const data = doc.data();
           console.log('📋 Conversation data:', { 
             id: doc.id, 
@@ -165,12 +180,28 @@ const chatService = {
           // Generate a display name using user lookup
           let displayName = 'Chat';
           if (data.type === 'direct' && otherParticipantId) {
-            try {
-              const profileResult = await profileService.getUserProfile(otherParticipantId);
-              displayName = profileResult.success && profileResult.profile ? profileResult.profile.name : `User ${otherParticipantId.slice(-6)}`;
-            } catch (error) {
-              console.error('Failed to get user profile for chat:', error);
-              displayName = `User ${otherParticipantId.slice(-6)}`;
+            // Validate user ID format before making API call
+            const isValidUserId = otherParticipantId.length >= 12 && /^[a-zA-Z0-9]+$/.test(otherParticipantId);
+            
+            if (isValidUserId) {
+              try {
+                const profileResult = await profileService.getUserProfile(otherParticipantId);
+                displayName = profileResult.success && profileResult.profile ? profileResult.profile.name : `User ${otherParticipantId.slice(-6)}`;
+              } catch (error) {
+                console.error('Failed to get user profile for chat:', {
+                  error,
+                  otherParticipantId,
+                  conversationId: doc.id
+                });
+                displayName = `User ${otherParticipantId.slice(-6)}`;
+              }
+            } else {
+              console.warn('Invalid user ID format in conversation:', {
+                otherParticipantId,
+                conversationId: doc.id,
+                participants: data.participants
+              });
+              displayName = `User ${otherParticipantId?.slice(-6) || 'Unknown'}`;
             }
           } else if (data.name) {
             displayName = data.name; // For group chats
@@ -189,10 +220,19 @@ const chatService = {
         })
       );
       
+      // Filter out trade conversations from normal chat list
+      const normalConversations = conversations.filter(conv => !isTradeConversation(conv.id));
+      
+      console.log('🔍 Filtered conversations:', {
+        total: conversations.length,
+        tradeConversations: conversations.length - normalConversations.length,
+        normalConversations: normalConversations.length
+      });
+      
       // Deduplicate conversations that might exist with different ID orders
       const conversationMap = new Map<string, Conversation>();
       
-      conversations.forEach(conv => {
+      normalConversations.forEach(conv => {
         // Extract participant IDs from conversation ID
         const participantIds = conv.id.split('_');
         if (participantIds.length === 2) {
@@ -248,30 +288,58 @@ const chatService = {
       messageType,
       senderName: sender.name,
       messagePreview: messageText.slice(0, 50) + '...',
-      hasMetadata: !!metadata
+      hasMetadata: !!metadata,
+      senderId: sender._id
     });
+    
+    // Clean sender data to prevent Firebase undefined errors
+    const cleanSender = {
+      _id: sender._id,
+      name: sender.name,
+      // Only include avatar if it has a valid value
+      ...(sender.avatar ? { avatar: sender.avatar } : {})
+    };
     
     const messageData = {
       text: messageText,
       createdAt: serverTimestamp(),
-      user: sender,
+      user: cleanSender,
       type: messageType,
       ...metadata, // Include payment data, etc.
     };
 
-    // Add the message to the messages subcollection
-    const messagesRef = messagesCollection(conversationId);
-    const messageDoc = await addDoc(messagesRef, messageData);
-    
-    console.log('✅ ChatService: Message sent successfully:', {
-      messageId: messageDoc.id,
-      conversationId,
-      messageType
-    });
+    try {
+      // Add the message to the messages subcollection
+      const messagesRef = messagesCollection(conversationId);
+      console.log('🔥 ChatService: About to call addDoc with:', {
+        conversationId,
+        messageData,
+        messagesRefPath: `conversations/${conversationId}/messages`
+      });
+      
+      const messageDoc = await addDoc(messagesRef, messageData);
+      
+      console.log('✅ ChatService: Message sent successfully:', {
+        messageId: messageDoc.id,
+        conversationId,
+        messageType
+      });
+    } catch (addDocError) {
+      console.error('❌ ChatService: FAILED to add message to Firestore:', {
+        error: addDocError,
+        conversationId,
+        senderId: sender._id,
+        senderName: sender.name,
+        messageText
+      });
+      throw addDocError; // Re-throw to prevent silent failures
+    }
 
     // Update or create the parent conversation document with the last message
     const conversationRef = doc(db, 'conversations', conversationId);
     try {
+      console.log('📝 ChatService: Updating conversation document:', conversationId);
+      
       await updateDoc(conversationRef, {
         lastMessage: {
           text: messageText,
@@ -280,31 +348,52 @@ const chatService = {
         },
         updatedAt: serverTimestamp(),
       });
+      
+      console.log('✅ ChatService: Conversation updated successfully');
     } catch (error: any) {
+      console.log('🔍 ChatService: Conversation update failed, error:', {
+        errorCode: error.code,
+        errorMessage: error.message,
+        conversationId,
+        senderId: sender._id
+      });
+      
       // If conversation doesn't exist, create it
       if (error.code === 'not-found') {
-        console.log('📝 Creating new conversation document:', conversationId);
+        console.log('📝 ChatService: Creating new conversation document:', conversationId);
         
         // Extract participants from conversationId (format: userId1_userId2)
         const participants = conversationId.includes('_') 
           ? conversationId.split('_')
           : [sender._id, recipientId].filter(Boolean);
         
-        console.log('👥 Conversation participants:', participants);
+        console.log('👥 ChatService: Conversation participants:', participants);
         
-        await setDoc(conversationRef, {
-          participants: participants,
-          type: 'direct',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          lastMessage: {
-            text: messageText,
+        try {
+          await setDoc(conversationRef, {
+            participants: participants,
+            type: 'direct',
             createdAt: serverTimestamp(),
-            senderId: sender._id,
-          },
-        });
+            updatedAt: serverTimestamp(),
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            lastMessage: {
+              text: messageText,
+              createdAt: serverTimestamp(),
+              senderId: sender._id,
+            },
+          });
+          
+          console.log('✅ ChatService: New conversation created successfully');
+        } catch (createError) {
+          console.error('❌ ChatService: FAILED to create conversation:', {
+            error: createError,
+            conversationId,
+            participants
+          });
+          throw createError;
+        }
       } else {
+        console.error('❌ ChatService: Unexpected conversation update error:', error);
         throw error; // Re-throw other errors
       }
     }

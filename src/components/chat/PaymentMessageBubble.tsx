@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import { Colors, Shadows } from '../../theme';
@@ -14,6 +14,8 @@ export interface PaymentMessageData {
   recipientName?: string;
   note?: string;
   transactionId?: string;
+  receipt?: string; // Image URL for payment proof
+  method?: string;
 }
 
 interface PaymentMessageBubbleProps {
@@ -29,6 +31,7 @@ export const PaymentMessageBubble: React.FC<PaymentMessageBubbleProps> = ({
   timestamp,
   onPress,
 }) => {
+  const [showImageModal, setShowImageModal] = useState(false);
   const formatAmount = (amount: number, currency: string) => {
     if (currency === 'NGN') {
       return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
@@ -171,6 +174,35 @@ export const PaymentMessageBubble: React.FC<PaymentMessageBubbleProps> = ({
           </Typography>
         </View>
 
+        {/* Payment Method */}
+        {paymentData.method && (
+          <View style={styles.methodContainer}>
+            <Typography variant="caption" style={styles.methodText}>
+              Method: {paymentData.method}
+            </Typography>
+          </View>
+        )}
+
+        {/* Payment Proof Image */}
+        {paymentData.receipt && (
+          <TouchableOpacity 
+            style={styles.imageContainer}
+            onPress={() => setShowImageModal(true)}
+          >
+            <Image 
+              source={{ uri: paymentData.receipt }} 
+              style={styles.proofImage}
+              resizeMode="cover"
+            />
+            <View style={styles.imageOverlay}>
+              <MaterialIcons name="zoom-in" size={16} color="white" />
+              <Typography variant="caption" style={styles.imageOverlayText}>
+                Tap to view
+              </Typography>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* Transaction ID for completed payments */}
         {isCompleted && paymentData.transactionId && (
           <View style={styles.transactionIdContainer}>
@@ -185,6 +217,44 @@ export const PaymentMessageBubble: React.FC<PaymentMessageBubbleProps> = ({
       <View style={[styles.decorativeCircle, styles.decorativeCircle1]} />
       <View style={[styles.decorativeCircle, styles.decorativeCircle2]} />
       <View style={[styles.decorativeCircle, styles.decorativeCircle3]} />
+
+      {/* Full-screen image modal */}
+      {paymentData.receipt && (
+        <Modal
+          visible={showImageModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowImageModal(false)}
+        >
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowImageModal(false)}
+          >
+            <View style={styles.modalContainer}>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowImageModal(false)}
+              >
+                <MaterialIcons name="close" size={24} color="white" />
+              </TouchableOpacity>
+              <Image 
+                source={{ uri: paymentData.receipt }} 
+                style={styles.fullScreenImage}
+                resizeMode="contain"
+              />
+              <View style={styles.modalFooter}>
+                <Typography variant="body2" style={styles.modalText}>
+                  Payment Proof - {paymentData.method || 'Unknown Method'}
+                </Typography>
+                <Typography variant="caption" style={styles.modalSubText}>
+                  Transaction ID: {paymentData.transactionId}
+                </Typography>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </TouchableOpacity>
   );
 };
@@ -299,5 +369,85 @@ const styles = StyleSheet.create({
     height: 8,
     top: 40,
     right: 25,
+  },
+  methodContainer: {
+    marginTop: ChatSpacing.xs,
+    paddingTop: ChatSpacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: Colors.overlayMedium,
+  },
+  methodText: {
+    color: Colors.overlayTextSecondary,
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  imageContainer: {
+    marginTop: ChatSpacing.sm,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  proofImage: {
+    width: '100%',
+    height: 80,
+    backgroundColor: Colors.overlayMedium,
+  },
+  imageOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: Colors.overlayDark,
+    paddingVertical: ChatSpacing.xs,
+    paddingHorizontal: ChatSpacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageOverlayText: {
+    color: 'white',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: ChatSpacing.lg,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 1,
+    backgroundColor: Colors.overlayDark,
+    borderRadius: 20,
+    padding: ChatSpacing.sm,
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '70%',
+    backgroundColor: Colors.overlayMedium,
+  },
+  modalFooter: {
+    marginTop: ChatSpacing.lg,
+    alignItems: 'center',
+  },
+  modalText: {
+    color: 'white',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  modalSubText: {
+    color: Colors.overlayText,
+    textAlign: 'center',
+    marginTop: ChatSpacing.xs,
   },
 });

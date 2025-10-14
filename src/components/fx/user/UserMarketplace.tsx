@@ -19,13 +19,15 @@ import { Card } from '../../ui/Card';
 import { Button } from '../../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../../theme';
 import { FXTheme, FXColors } from '../../../theme/fxTheme';
-import { FXOffer, FXFilter, Currency, PaymentMethod } from '../../../types/fx';
+import { FXOffer, FXFilter, Currency, PaymentMethod, FXTrade } from '../../../types/fx';
 import fxService, { FXDebugUtils } from '../../../services/fxService';
 import authService from '../../../services/authService';
 
 interface UserMarketplaceProps {
   onOfferSelect: (offer: FXOffer) => void;
   onBack?: () => void;
+  onTradeRoomNavigate?: (offerId: string) => void;
+  userActiveTrades?: FXTrade[];
 }
 
 // Enhanced filter interface for users
@@ -86,6 +88,8 @@ const PAYMENT_METHODS: PaymentMethod[] = [
 export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   onOfferSelect,
   onBack,
+  onTradeRoomNavigate,
+  userActiveTrades = [],
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -247,6 +251,13 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
     });
   }, [offers, searchQuery]);
 
+  const getActiveTradeForOffer = (offerId: string): FXTrade | undefined => {
+    return userActiveTrades.find(trade => 
+      trade.offerId === offerId && 
+      ['accepted', 'payment_pending', 'payment_sent', 'payment_confirmed'].includes(trade.status)
+    );
+  };
+
   const renderTrustBadge = (badge: string | null | undefined) => {
     if (!badge) return null;
     
@@ -267,6 +278,8 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   };
 
   const renderOfferCard = ({ item: offer }: { item: FXOffer }) => {
+    const activeTrade = getActiveTradeForOffer(offer.id);
+    
     return (
       <Card style={[FXTheme.cards.base, { padding: Spacing.lg }]}>
         {/* Header with user info and timestamp */}
@@ -418,25 +431,49 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
           </View>
         </View>
 
-        {/* Trade button */}
-        <TouchableOpacity
-          style={[
-            FXTheme.buttons.primary,
-            {
-              backgroundColor: Colors.primary,
-              paddingVertical: Spacing.sm,
-              paddingHorizontal: Spacing.lg,
-              borderRadius: BorderRadius.md,
-              alignSelf: 'flex-end',
-              minWidth: 100,
-            }
-          ]}
-          onPress={() => onOfferSelect(offer)}
-        >
-          <Typography variant="body2" style={{ color: Colors.white, fontWeight: '600' }}>
-            Trade Now
-          </Typography>
-        </TouchableOpacity>
+        {/* Trade button and trade room icon */}
+        <View style={[FXTheme.layouts.row, { alignItems: 'center', justifyContent: 'flex-end' }]}>
+          {/* Trade Room Icon - show only if user has active trade with this merchant */}
+          {activeTrade && onTradeRoomNavigate && (
+            <TouchableOpacity
+              style={[
+                {
+                  backgroundColor: Colors.success + '20',
+                  borderColor: Colors.success,
+                  borderWidth: 1,
+                  borderRadius: BorderRadius.md,
+                  padding: Spacing.sm,
+                  marginRight: Spacing.sm,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 44,
+                  minHeight: 44,
+                }
+              ]}
+              onPress={() => onTradeRoomNavigate(offer.id)}
+            >
+              <MaterialIcons name="chat" size={20} color={Colors.success} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              FXTheme.buttons.primary,
+              {
+                backgroundColor: activeTrade ? Colors.warning : Colors.primary,
+                paddingVertical: Spacing.sm,
+                paddingHorizontal: Spacing.lg,
+                borderRadius: BorderRadius.md,
+                minWidth: 100,
+              }
+            ]}
+            onPress={() => onOfferSelect(offer)}
+          >
+            <Typography variant="body2" style={{ color: Colors.white, fontWeight: '600' }}>
+              {activeTrade ? 'View Trade' : 'Trade Now'}
+            </Typography>
+          </TouchableOpacity>
+        </View>
       </Card>
     );
   };

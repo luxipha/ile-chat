@@ -22,10 +22,9 @@ interface UserOfferDetailProps {
   onBack: () => void;
   onStartTrade: (amount: number) => void;
   onContactTrader: () => void;
-  onSaveOffer: () => void;
-  onReportOffer: () => void;
+  onTradeRoomNavigate?: () => void;
   currentTrade?: FXTrade | null;
-  isSaved?: boolean;
+  userActiveTrades?: FXTrade[];
 }
 
 export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
@@ -33,20 +32,16 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
   onBack,
   onStartTrade,
   onContactTrader,
-  onSaveOffer,
-  onReportOffer,
+  onTradeRoomNavigate,
   currentTrade,
-  isSaved = false,
+  userActiveTrades = [],
 }) => {
   const [tradeAmount, setTradeAmount] = useState('');
   const [activeTab, setActiveTab] = useState<'details' | 'terms' | 'profile' | 'reviews'>('details');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showCalculator, setShowCalculator] = useState(true);
-  const [favoriteOffers, setFavoriteOffers] = useState<string[]>([]);
-
   useEffect(() => {
     loadCurrentUser();
-    loadFavoriteOffers();
   }, []);
 
   const loadCurrentUser = async () => {
@@ -55,31 +50,6 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
       setCurrentUser(user);
     } catch (error) {
       console.error('Failed to load current user:', error);
-    }
-  };
-
-  const loadFavoriteOffers = async () => {
-    try {
-      const saved = await AsyncStorage.getItem('favoriteOffers');
-      if (saved) {
-        setFavoriteOffers(JSON.parse(saved));
-      }
-    } catch (error) {
-      console.error('Failed to load favorite offers:', error);
-    }
-  };
-
-  const handleSaveOffer = async () => {
-    try {
-      const updatedFavorites = isSaved 
-        ? favoriteOffers.filter(id => id !== offer.id)
-        : [...favoriteOffers, offer.id];
-      
-      await AsyncStorage.setItem('favoriteOffers', JSON.stringify(updatedFavorites));
-      setFavoriteOffers(updatedFavorites);
-      onSaveOffer();
-    } catch (error) {
-      console.error('Failed to save offer:', error);
     }
   };
 
@@ -133,26 +103,40 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
     );
   };
 
-  const renderHeader = () => (
-    <View style={FXTheme.headers.withBorder}>
-      <TouchableOpacity onPress={onBack} style={FXTheme.buttons.back}>
-        <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
-      </TouchableOpacity>
-      <Typography variant="h3">Offer Details</Typography>
-      <View style={FXTheme.layouts.row}>
-        <TouchableOpacity onPress={handleSaveOffer} style={FXTheme.buttons.icon}>
-          <MaterialIcons 
-            name={isSaved ? "bookmark" : "bookmark-border"} 
-            size={24} 
-            color={isSaved ? Colors.warning : Colors.textPrimary} 
-          />
+  const renderHeader = () => {
+    // Check if user has any active trades to show trade room icon
+    const hasActiveTrades = userActiveTrades && userActiveTrades.length > 0;
+    
+    return (
+      <View style={FXTheme.headers.main}>
+        <TouchableOpacity onPress={onBack} style={FXTheme.buttons.back}>
+          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={onReportOffer} style={FXTheme.buttons.icon}>
-          <MaterialIcons name="flag" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        <View style={FXTheme.headers.content}>
+          <Typography variant="h2">Offer Details</Typography>
+          <Typography variant="body2" color="textSecondary">
+            Review offer and start trading
+          </Typography>
+        </View>
+        <View style={FXTheme.layouts.rowGap}>
+          {hasActiveTrades && onTradeRoomNavigate && (
+            <TouchableOpacity 
+              onPress={onTradeRoomNavigate} 
+              style={{
+                padding: Spacing.sm,
+                borderRadius: BorderRadius.md,
+                backgroundColor: Colors.primary + '20',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialIcons name="chat" size={24} color={Colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderOfferSummary = () => (
     <Card style={FXTheme.cards.section}>
@@ -306,15 +290,16 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
           );
         case 'accepted':
         case 'quote_locked':
-        case 'escrow_pending':
-        case 'escrow_locked':
         case 'payment_pending':
         case 'payment_sent':
+        case 'buyer_payment_sent':
+        case 'merchant_payment_sent':
+        case 'both_payments_sent':
         case 'payment_confirmed':
           return (
             <Button
               title="View Trade Room"
-              onPress={() => {}}
+              onPress={onContactTrader}
               style={{ width: '100%' }}
             />
           );
@@ -447,9 +432,9 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
             </Typography>
           </View>
           <View style={[FXTheme.layouts.row, { marginBottom: Spacing.md, alignItems: 'flex-start' }]}>
-            <MaterialIcons name="security" size={16} color={Colors.success} style={{ marginTop: 2, marginRight: Spacing.sm }} />
+            <MaterialIcons name="swap-horiz" size={16} color={Colors.primary} style={{ marginTop: 2, marginRight: Spacing.sm }} />
             <Typography variant="body2" style={{ flex: 1, lineHeight: 20 }}>
-              Your funds are protected by our escrow service
+              Peer-to-peer exchange: both parties send money directly to each other
             </Typography>
           </View>
           <View style={[FXTheme.layouts.row, { marginBottom: Spacing.md, alignItems: 'flex-start' }]}>

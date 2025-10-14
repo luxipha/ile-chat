@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View } from 'react-native';
+import { View, Alert } from 'react-native';
 import { FXMarketplace } from './FXMarketplace';
 import { UserMarketplace } from './user/UserMarketplace';
 import { UserOfferDetail } from './user/UserOfferDetail';
@@ -10,7 +10,6 @@ import { PendingTradesScreen } from './merchant/PendingTradesScreen';
 import { TradeRoom } from './TradeRoom';
 import { CreateFXOffer } from './CreateFXOffer';
 import fxService from '../../services/fxService';
-import { createTradeConversationId } from '../../services/chatService';
 import { FXOffer, FXTrade } from '../../types/fx';
 import { User } from '../../services/authService';
 import { FXTheme } from '../../theme/fxTheme';
@@ -50,12 +49,19 @@ export const FXContainer: React.FC<FXContainerProps> = ({
 
   // Poll for trade status updates if there's a pending trade
   useEffect(() => {
-    let pollInterval: NodeJS.Timeout;
+    let pollInterval: ReturnType<typeof setInterval>;
+    let isPolling = false; // Prevent concurrent polling
     
     if (currentTrade && currentTrade.status === 'pending_acceptance') {
       console.log('🔄 [FXContainer] Starting trade status polling for pending trade:', currentTrade.id);
       
       pollInterval = setInterval(async () => {
+        if (isPolling) {
+          console.log('⏸️ [FXContainer] Skipping poll - already in progress');
+          return;
+        }
+        
+        isPolling = true;
         try {
           const response = await fxService.getTradeById(currentTrade.id);
           if (response.success && response.trade) {
@@ -74,9 +80,12 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             }
           }
         } catch (error) {
-          console.warn('Failed to poll trade status:', error);
+          console.warn('⚠️ [FXContainer] Failed to poll trade status (server may be restarting):', error);
+          // Don't update state on error to prevent corruption
+        } finally {
+          isPolling = false;
         }
-      }, 5000); // Poll every 5 seconds
+      }, 8000); // Increase to 8 seconds to reduce server load
     }
     
     return () => {
@@ -219,13 +228,31 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       
       if (response.success) {
         console.log('✅ Payment proof uploaded successfully');
-        // Update trade status
-        await updateTradeStatus('payment_sent');
+        
+        // Refresh trade data to get the updated status from backend
+        try {
+          const updatedTradeResponse = await fxService.getTradeById(currentTrade.id);
+          if (updatedTradeResponse.success && updatedTradeResponse.trade) {
+            setCurrentTrade(updatedTradeResponse.trade);
+            console.log('🔄 Trade data refreshed after payment proof upload:', {
+              newStatus: updatedTradeResponse.trade.status,
+              tradeId: currentTrade.id,
+              hasBuyerProof: !!updatedTradeResponse.trade.buyerPaymentProof,
+              hasMerchantProof: !!updatedTradeResponse.trade.merchantPaymentProof
+            });
+          } else {
+            console.warn('⚠️ [FXContainer] Failed to refresh trade data after upload:', updatedTradeResponse.error);
+          }
+        } catch (refreshError) {
+          console.warn('⚠️ [FXContainer] Error refreshing trade data after upload:', refreshError);
+        }
       } else {
         console.error('❌ Failed to upload payment proof:', response.error);
+        Alert.alert('Upload Failed', response.error || 'Failed to upload payment proof');
       }
     } catch (error) {
       console.error('❌ Exception uploading payment proof:', error);
+      Alert.alert('Upload Error', 'An error occurred while uploading the payment proof');
     } finally {
       setIsLoadingGeneral(false);
     }
@@ -241,10 +268,39 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       const response = await fxService.confirmPayment(currentTrade.id);
       
       if (response.success) {
-        console.log('✅ Payment confirmed successfully');
-        await updateTradeStatus('payment_confirmed');
+        console.log('✅ Payment confirmed successfully:', {
+          message: response.message,
+          tradeId: currentTrade.id
+        });
+        
+        // Refresh trade data to get the updated status from backend
+        if (currentTrade) {
+          try {
+            const updatedTradeResponse = await fxService.getTradeById(currentTrade.id);
+            if (updatedTradeResponse.success && updatedTradeResponse.trade) {
+              setCurrentTrade(updatedTradeResponse.trade);
+              console.log('🔄 Trade data refreshed:', {
+                newStatus: updatedTradeResponse.trade.status,
+                tradeId: currentTrade.id
+              });
+            } else {
+              console.warn('⚠️ [FXContainer] Failed to refresh trade data:', updatedTradeResponse.error);
+            }
+          } catch (refreshError) {
+            console.warn('⚠️ [FXContainer] Error refreshing trade data (server may be restarting):', refreshError);
+            // Don't update state on error to prevent corruption
+          }
+        }
+        
+        // Since buyer confirmation completes the trade, always show completion message
+        Alert.alert(
+          'Trade Completed! 🎉',
+          'Payment confirmed! The trade is now complete. You can rate your trading partner.',
+          [{ text: 'Great!', onPress: () => {} }]
+        );
       } else {
         console.error('❌ Failed to confirm payment:', response.error);
+        Alert.alert('Error', response.error || 'Failed to confirm payment');
       }
     } catch (error) {
       console.error('❌ Exception confirming payment:', error);
@@ -351,8 +407,6 @@ export const FXContainer: React.FC<FXContainerProps> = ({
     });
     
     const currentUserId = currentUser?.id || (currentUser as any)?._id;
-    const makerId = selectedOffer.maker.id;
-    const makerName = selectedOffer.maker.name;
     
     // First, try to find an existing trade for this offer
     let tradeForOffer = currentTrade;
@@ -369,15 +423,17 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             (t) => {
               const isForThisOffer = t.offerId === selectedOffer.id;
               const isActiveStatus = t.status !== 'completed' && t.status !== 'cancelled';
-              const isUserInvolved = t.maker.id === currentUserId || t.taker.id === currentUserId;
+              const merchant = t.merchant || t.maker;
+              const buyer = t.buyer || t.taker;
+              const isUserInvolved = merchant?.id === currentUserId || buyer?.id === currentUserId;
               
               console.log('🔍 [FXContainer] Trade check:', {
                 tradeId: t.id,
                 offerId: t.offerId,
                 selectedOfferId: selectedOffer.id,
                 status: t.status,
-                makerId: t.maker.id,
-                takerId: t.taker.id,
+                merchantId: merchant?.id,
+                buyerId: buyer?.id,
                 currentUserId,
                 isForThisOffer,
                 isActiveStatus,
@@ -388,10 +444,11 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             }
           ) || null;
           if (tradeForOffer) {
+            const tradeMerchant = tradeForOffer.merchant || tradeForOffer.maker;
             console.log('✅ [FXContainer] Found existing trade for offer', { 
               tradeId: tradeForOffer.id,
               status: tradeForOffer.status,
-              userRole: tradeForOffer.maker.id === currentUserId ? 'merchant' : 'buyer'
+              userRole: tradeMerchant?.id === currentUserId ? 'merchant' : 'buyer'
             });
           } else {
             console.log('❌ [FXContainer] No existing trade found for offer', { 
@@ -405,38 +462,8 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       }
     }
     
-    // If no existing trade, create a mock trade context for discussion
-    if (!tradeForOffer && currentUser) {
-      console.log('🆕 [FXContainer] Creating mock trade context for offer discussion');
-      tradeForOffer = {
-        id: `mock_${selectedOffer.id}_${Date.now()}`,
-        offerId: selectedOffer.id,
-        maker: selectedOffer.maker,
-        taker: {
-          id: currentUser.id,
-          name: currentUser.name,
-          avatar: currentUser.avatar,
-          trustScore: currentUser.trustScore || 0 // Use user's trust score or default to 0
-        },
-        sellCurrency: selectedOffer.sellCurrency,
-        buyCurrency: selectedOffer.buyCurrency,
-        sellAmount: selectedOffer.sellAmount,
-        buyAmount: selectedOffer.buyAmount,
-        exchangeRate: selectedOffer.exchangeRate,
-        paymentMethod: selectedOffer.paymentMethods[0], // Use first payment method
-        escrowAmount: 0,
-        escrowCurrency: 'USDC',
-        status: 'pending',
-        createdAt: new Date(),
-        quoteLockExpiry: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes from now
-        paymentWindow: {
-          start: new Date(),
-          end: new Date(Date.now() + selectedOffer.paymentWindow * 60 * 1000)
-        },
-        chatRoomId: createTradeConversationId(selectedOffer.id, currentUser.id),
-        offer: selectedOffer
-      } as FXTrade;
-    }
+    // If no existing trade, the useFXTrade hook will create a real trade
+    // No mock trade creation here - let the proper trade creation flow handle it
     
     // Set the trade context and navigate to trade room
     if (tradeForOffer) {
@@ -468,17 +495,20 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             (t) => {
               const isForThisOffer = t.offerId === offer.id;
               const isActiveStatus = t.status !== 'completed' && t.status !== 'cancelled';
-              const isUserInvolved = t.maker.id === currentUserId || t.taker.id === currentUserId;
+              const merchant = t.merchant || t.maker;
+              const buyer = t.buyer || t.taker;
+              const isUserInvolved = merchant?.id === currentUserId || buyer?.id === currentUserId;
               
               return isForThisOffer && isActiveStatus && isUserInvolved;
             }
           );
           
           if (existingTrade) {
+            const tradeMerchant = existingTrade.merchant || existingTrade.maker;
             console.log('✅ [FXContainer] Found existing trade for offer', { 
               tradeId: existingTrade.id,
               status: existingTrade.status,
-              userRole: existingTrade.maker.id === currentUserId ? 'merchant' : 'buyer'
+              userRole: tradeMerchant?.id === currentUserId ? 'merchant' : 'buyer'
             });
             setCurrentTrade(existingTrade);
           } else {
@@ -502,12 +532,8 @@ export const FXContainer: React.FC<FXContainerProps> = ({
     setCurrentFXScreen('create_offer');
   };
 
-  const handleOfferCreated = (offer: Partial<FXOffer>) => {
+  const handleOfferCreated = () => {
     setCurrentFXScreen('marketplace');
-  };
-
-  const handleViewUserTrades = () => {
-    setCurrentFXScreen('user_trades');
   };
 
   const handleViewPendingTrades = () => {
@@ -570,10 +596,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
                 onBack={handleBackToMarketplace}
                 onStartTrade={handleStartTrade}
                 onContactTrader={handleContactTrader}
-                onSaveOffer={() => {}} // TODO: Implement save offer functionality
-                onReportOffer={() => {}} // TODO: Implement report offer functionality
                 currentTrade={currentTrade}
-                isSaved={false} // TODO: Implement saved offer state
               />
             );
           }

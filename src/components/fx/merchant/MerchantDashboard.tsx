@@ -157,10 +157,11 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
       const response = await fxService.getUserTrades({ limit: 50, offset: 0 });
       
       if (response.success) {
-        const merchantPendingTrades = response.trades.filter(trade => 
-          trade.maker.id === currentUser.id && 
-          trade.status === 'pending_acceptance'
-        );
+        const merchantPendingTrades = response.trades.filter(trade => {
+          const isMyTrade = trade.maker.id === currentUser.id;
+          const isActiveTrade = ['pending_acceptance', 'accepted', 'payment_pending', 'payment_sent'].includes(trade.status);
+          return isMyTrade && isActiveTrade;
+        });
         
         console.log('📋 [MerchantDashboard] Loaded pending trades:', {
           totalTrades: response.trades.length,
@@ -185,8 +186,10 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
       const response = await fxService.updateTradeStatus(trade.id, 'accepted');
       
       if (response.success) {
-        // Remove from pending trades and refresh
+        // Remove from pending trades and refresh both lists
         setPendingTrades(prev => prev.filter(t => t.id !== trade.id));
+        // Refresh pending trades to show updated status
+        await loadPendingTrades();
         Alert.alert('Success', 'Trade request accepted successfully!');
       } else {
         Alert.alert('Error', response.error || 'Failed to accept trade request');
@@ -205,8 +208,9 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
       const response = await fxService.updateTradeStatus(trade.id, 'cancelled');
       
       if (response.success) {
-        // Remove from pending trades
+        // Remove from pending trades and refresh
         setPendingTrades(prev => prev.filter(t => t.id !== trade.id));
+        await loadPendingTrades();
         Alert.alert('Success', 'Trade request declined');
       } else {
         Alert.alert('Error', response.error || 'Failed to decline trade request');

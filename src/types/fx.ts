@@ -91,9 +91,27 @@ export interface FXTrade {
   id: string;
   offerId: string;
   
-  // Participants
-  maker: FXOffer['maker'];
-  taker: {
+  // Participants - using consistent merchant/buyer naming
+  merchant: {
+    id: string;
+    name: string;
+    avatar?: string;
+    trustScore: number;
+    trustBadge?: 'verified' | 'premium' | 'pro' | null;
+    completedTrades: number;
+    responseTime: string;
+    onlineStatus: 'online' | 'offline' | 'away';
+  };
+  buyer: {
+    id: string;
+    name: string;
+    avatar?: string;
+    trustScore: number;
+  };
+  
+  // Legacy fields for backward compatibility - will be removed
+  maker?: FXOffer['maker'];
+  taker?: {
     id: string;
     name: string;
     avatar?: string;
@@ -109,12 +127,23 @@ export interface FXTrade {
   
   // Payment
   paymentMethod: PaymentMethod;
-  escrowAmount: number;
-  escrowCurrency: string; // Usually USDC
-  escrowTxHash?: string;
   
-  // Status and timeline
-  status: 'pending' | 'pending_acceptance' | 'accepted' | 'quote_locked' | 'escrow_pending' | 'escrow_locked' | 'payment_pending' | 'payment_sent' | 'payment_confirmed' | 'completed' | 'disputed' | 'cancelled';
+  // P2P Payment Proofs (dual-track system)
+  buyerPaymentProof?: {
+    transactionId?: string;
+    screenshotUrl?: string;
+    notes?: string;
+    uploadedAt?: Date;
+  };
+  merchantPaymentProof?: {
+    transactionId?: string;
+    screenshotUrl?: string;
+    notes?: string;
+    uploadedAt?: Date;
+  };
+  
+  // Status and timeline - P2P dual-track system
+  status: 'pending' | 'pending_acceptance' | 'accepted' | 'quote_locked' | 'payment_pending' | 'payment_sent' | 'buyer_payment_sent' | 'merchant_payment_sent' | 'both_payments_sent' | 'payment_confirmed' | 'completed' | 'disputed' | 'cancelled';
   
   // Timestamps
   createdAt: Date;
@@ -122,6 +151,11 @@ export interface FXTrade {
   paymentWindow: {
     start: Date;
     end: Date;
+  };
+  timeWindows?: {
+    acceptanceDeadline?: Date;
+    acceptedAt?: Date;
+    paymentDeadline?: Date;
   };
   completedAt?: Date;
   
@@ -148,7 +182,7 @@ export interface TradeMessage {
   timestamp: Date;
   
   // For system messages
-  systemEventType?: 'escrow_locked' | 'payment_window_started' | 'payment_sent' | 'payment_confirmed' | 'trade_completed' | 'dispute_opened';
+  systemEventType?: 'payment_window_started' | 'payment_sent' | 'buyer_payment_sent' | 'merchant_payment_sent' | 'both_payments_sent' | 'payment_confirmed' | 'trade_completed' | 'dispute_opened';
   
   // For payment proof
   paymentProof?: {
