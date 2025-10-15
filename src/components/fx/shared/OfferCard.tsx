@@ -3,6 +3,7 @@ import { View, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../../ui/Typography';
 import { Card } from '../../ui/Card';
+import { StarRating } from '../../ui/StarRating';
 import { Colors, Spacing } from '../../../theme';
 import { FXTheme } from '../../../theme/fxTheme';
 import { FXOffer } from '../../../types/fx';
@@ -99,8 +100,14 @@ export const OfferCard: React.FC<OfferCardProps> = ({
               </Typography>
               <View style={FXTheme.layouts.row}>
                 <Typography variant="caption" color="textSecondary">
-                  {offer.maker.completedTrades} trades • {offer.maker.trustScore}⭐
+                  {offer.maker.completedTrades} trades •{' '}
                 </Typography>
+                <StarRating
+                  initialRating={offer.maker.trustScore || 0}
+                  readonly={true}
+                  size={12}
+                  showText={false}
+                />
               </View>
             </View>
           </View>

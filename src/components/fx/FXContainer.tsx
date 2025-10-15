@@ -63,8 +63,9 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             const isUserBuyer = buyer?.id === currentUserId;
             const isActiveStatus = !['completed', 'cancelled', 'disputed'].includes(trade.status);
             
-            // Also exclude expired trades
-            const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+            // Also exclude expired trades (but only check expiry for active statuses)
+            const canExpire = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+            const isExpired = canExpire && trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
             
             return isUserBuyer && isActiveStatus && !isExpired;
           });
@@ -453,11 +454,26 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       
       if (response.success) {
         console.log('✅ Rating submitted successfully');
-        // Navigate back to marketplace
-        setCurrentTrade(null);
-        setCurrentFXScreen('marketplace');
+        
+        // Refresh trade data to show the new rating
+        try {
+          const updatedTradeResponse = await fxService.getTradeById(currentTrade.id);
+          if (updatedTradeResponse.success && updatedTradeResponse.trade) {
+            setCurrentTrade(updatedTradeResponse.trade);
+            console.log('🔄 Trade data refreshed after rating submission');
+          }
+        } catch (refreshError) {
+          console.warn('⚠️ Failed to refresh trade data after rating:', refreshError);
+        }
+        
+        Alert.alert(
+          'Rating Submitted! ⭐',
+          'Thank you for rating your trading partner. This helps build trust in our community.',
+          [{ text: 'OK' }]
+        );
       } else {
         console.error('❌ Failed to submit rating:', response.error);
+        Alert.alert('Error', response.error || 'Failed to submit rating');
       }
     } catch (error) {
       console.error('❌ Exception submitting rating:', error);

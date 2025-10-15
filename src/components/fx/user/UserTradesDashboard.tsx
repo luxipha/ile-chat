@@ -14,6 +14,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../../ui/Typography';
 import { Card } from '../../ui/Card';
 import { Button } from '../../ui/Button';
+import { StarRating } from '../../ui/StarRating';
 import { Colors, Spacing, BorderRadius } from '../../../theme';
 import { FXTheme, FXColors } from '../../../theme/fxTheme';
 import { FXTrade, Currency } from '../../../types/fx';
@@ -30,7 +31,7 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
   onBack,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('active');
   const [trades, setTrades] = useState<FXTrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +135,11 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
       }
 
       // Status filter
-      if (statusFilter !== 'all' && trade.status !== statusFilter) {
+      if (statusFilter === 'active' && ['completed', 'cancelled', 'disputed'].includes(trade.status)) {
+        return false;
+      } else if (statusFilter === 'completed' && trade.status !== 'completed') {
+        return false;
+      } else if (statusFilter === 'cancelled' && !['cancelled', 'disputed'].includes(trade.status)) {
         return false;
       }
 
@@ -268,12 +273,12 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
               <Typography variant="body2" style={[FXTheme.spacing.marginHorizontal('sm'), { flex: 1 }]}>
                 Traded with {trade.maker.name}
               </Typography>
-              <View style={FXTheme.layouts.row}>
-                <MaterialIcons name="star" size={12} color={Colors.warning} />
-                <Typography variant="caption" style={{ color: Colors.gray600, marginLeft: 2 }}>
-                  {trade.maker.trustScore}%
-                </Typography>
-              </View>
+              <StarRating
+                initialRating={trade.maker.trustScore || 0}
+                readonly={true}
+                size={12}
+                showText={false}
+              />
             </View>
 
             {/* Payment Method */}
@@ -296,10 +301,17 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
       style={FXTheme.stats.container}
     >
       {[
-        { key: 'all', label: 'All', count: trades.length },
+        { 
+          key: 'active', 
+          label: 'Active', 
+          count: trades.filter(t => !['completed', 'cancelled', 'disputed'].includes(t.status)).length 
+        },
         { key: 'completed', label: 'Completed', count: trades.filter(t => t.status === 'completed').length },
-        { key: 'payment_pending', label: 'Pending', count: trades.filter(t => t.status === 'payment_pending').length },
-        { key: 'disputed', label: 'Disputed', count: trades.filter(t => t.status === 'disputed').length },
+        { 
+          key: 'cancelled', 
+          label: 'Cancelled', 
+          count: trades.filter(t => ['cancelled', 'disputed'].includes(t.status)).length 
+        },
       ].map((filter) => (
         <TouchableOpacity
           key={filter.key}
@@ -413,9 +425,9 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
               No trades yet
             </Typography>
             <Typography variant="body2" style={[FXTheme.states.emptyText, { color: Colors.gray600 }]}>
-              {statusFilter === 'all' 
-                ? "You haven't made any trades yet. Start trading to see your history here."
-                : `No ${statusFilter.replace('_', ' ')} trades found.`
+              {statusFilter === 'active' 
+                ? "You haven't made any active trades yet. Start trading to see your history here."
+                : `No ${statusFilter} trades found.`
               }
             </Typography>
           </View>

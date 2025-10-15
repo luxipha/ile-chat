@@ -258,8 +258,9 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
       const matchesOffer = trade.offerId === offerId;
       const isActiveStatus = ['accepted', 'payment_pending', 'payment_sent', 'payment_confirmed'].includes(trade.status);
       
-      // Double-check that trade is not expired (safety check)
-      const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+      // Double-check that trade is not expired (safety check) - only for trades that can expire
+      const canExpire = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+      const isExpired = canExpire && trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
       
       return matchesOffer && isActiveStatus && !isExpired;
     });

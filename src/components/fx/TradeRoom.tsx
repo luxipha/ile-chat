@@ -17,6 +17,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { RatingModal } from '../ui/RatingModal';
+import { StarRating } from '../ui/StarRating';
 import { PaymentMessageBubble } from '../chat/PaymentMessageBubble';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { FXTheme } from '../../theme/fxTheme';
@@ -28,7 +30,7 @@ import fxService from '../../services/fxService';
 interface TradeRoomProps {
   trade: FXTrade;
   onBack: () => void;
-  onUploadPaymentProof: (file: any) => void;
+  onUploadPaymentProof: (file: any) => Promise<{ success: boolean; fileUrl?: string; error?: string }>;
   onConfirmPayment: () => void;
   onSignRelease: () => void;
   onOpenDispute: (reason: string) => void;
@@ -54,6 +56,7 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   const [isCurrentUserMerchant, setIsCurrentUserMerchant] = useState(false);
   const [chatExpiresAt, setChatExpiresAt] = useState<Date | undefined>(undefined);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   // OPTIMIZED participant resolution
@@ -76,6 +79,34 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   const isUserMerchant = currentUser?.id === merchant?.id;
   const isUserBuyer = currentUser?.id === buyer?.id;
   const otherParty = isUserMerchant ? buyer : merchant;
+
+  // Helper functions for rating checks
+  const hasUserRated = () => {
+    if (isUserBuyer) {
+      return !!(trade as any).ratings?.buyerRating;
+    } else if (isUserMerchant) {
+      return !!(trade as any).ratings?.merchantRating;
+    }
+    return false;
+  };
+
+  const getUserRating = () => {
+    if (isUserBuyer) {
+      return (trade as any).ratings?.buyerRating;
+    } else if (isUserMerchant) {
+      return (trade as any).ratings?.merchantRating;
+    }
+    return null;
+  };
+
+  const getOtherPartyRating = () => {
+    if (isUserBuyer) {
+      return (trade as any).ratings?.merchantRating;
+    } else if (isUserMerchant) {
+      return (trade as any).ratings?.buyerRating;
+    }
+    return null;
+  };
 
   // User role detection
   useEffect(() => {
@@ -802,8 +833,8 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
                           [
                             { text: 'Cancel', style: 'cancel' },
                             { text: 'Mark Complete', onPress: () => {
-                              // Call complete trade handler
-                              onCompleteRating(5, 'Trade completed after expiration');
+                              // Mark as complete and open rating modal
+                              setShowRatingModal(true);
                             }}
                           ]
                         );
@@ -872,21 +903,59 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
             </Typography>
           </View>
           <View style={{ marginTop: Spacing.lg }}>
+            {/* Rating Section */}
+            {hasUserRated() ? (
+              <View style={{ marginBottom: Spacing.md }}>
+                <Typography variant="body2" style={[FXTheme.text.bold, { textAlign: 'center', marginBottom: Spacing.sm }]}>
+                  Your Rating for {otherParty?.name}
+                </Typography>
+                <View style={[FXTheme.layouts.center]}>
+                  <StarRating
+                    initialRating={getUserRating()?.score || 0}
+                    readonly={true}
+                    size={24}
+                    showText={true}
+                  />
+                  {getUserRating()?.comment && (
+                    <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs, textAlign: 'center' }}>
+                      "{getUserRating()?.comment}"
+                    </Typography>
+                  )}
+                </View>
+              </View>
+            ) : (
+              <View style={{ marginBottom: Spacing.md }}>
+                <Button
+                  title={`Rate ${otherParty?.name || 'Trading Partner'}`}
+                  onPress={() => setShowRatingModal(true)}
+                  style={{ width: '100%' }}
+                />
+              </View>
+            )}
+
+            {/* Other Party Rating (if available) */}
+            {getOtherPartyRating() && (
+              <View style={{ marginBottom: Spacing.md }}>
+                <Typography variant="body2" style={[FXTheme.text.bold, { textAlign: 'center', marginBottom: Spacing.sm }]}>
+                  {otherParty?.name}'s Rating for You
+                </Typography>
+                <View style={[FXTheme.layouts.center]}>
+                  <StarRating
+                    initialRating={getOtherPartyRating()?.score || 0}
+                    readonly={true}
+                    size={24}
+                    showText={true}
+                  />
+                  {getOtherPartyRating()?.comment && (
+                    <Typography variant="caption" color="textSecondary" style={{ marginTop: Spacing.xs, textAlign: 'center' }}>
+                      "{getOtherPartyRating()?.comment}"
+                    </Typography>
+                  )}
+                </View>
+              </View>
+            )}
+
             <View style={FXTheme.layouts.rowGap}>
-              <Button
-                title="Rate Trading Partner"
-                onPress={() => {
-                  Alert.alert(
-                    'Rate Trading Partner',
-                    `How was your experience trading with ${otherParty?.name}?`,
-                    [
-                      { text: 'Skip', style: 'cancel' },
-                      { text: 'Rate Now', onPress: () => onCompleteRating(5, 'Great trade!') }
-                    ]
-                  );
-                }}
-                style={{ flex: 1 }}
-              />
               <Button
                 title="Back to Marketplace"
                 onPress={onBack}
@@ -1213,10 +1282,13 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
     );
   };
 
-  const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+  // Only check expiry for trades that can actually expire (exclude completed trades)
+  const canExpire = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+  const isExpired = canExpire && trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
   const chatExpired = chatExpiresAt && new Date() >= chatExpiresAt;
   const isCancelled = trade.status === 'cancelled';
-  const inputDisabled = isExpired || chatExpired || isCancelled;
+  const isCompleted = trade.status === 'completed';
+  const inputDisabled = isExpired || chatExpired || isCancelled || isCompleted;
 
   return (
     <KeyboardAvoidingView 
@@ -1225,34 +1297,10 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {renderTradeHeader()}
-      {renderTradeProgress()}
-      
-      {(isExpired || isCancelled) && (
-        <View style={{
-          backgroundColor: Colors.error + '10',
-          borderColor: Colors.error + '30',
-          borderWidth: 1,
-          margin: Spacing.lg,
-          marginTop: 0,
-          padding: Spacing.md,
-          borderRadius: BorderRadius.md,
-        }}>
-          <View style={[FXTheme.layouts.row, { alignItems: 'center' }]}>
-            <MaterialIcons name={isCancelled ? "cancel" : "error"} size={20} color={Colors.error} />
-            <Typography variant="body2" color="error" style={{ marginLeft: Spacing.sm, flex: 1 }}>
-              {isCancelled 
-                ? 'This trade has been cancelled. You can start a new trade from the marketplace.'
-                : `This trade has expired. Payment deadline was ${trade.timeWindows?.paymentDeadline ? new Date(trade.timeWindows.paymentDeadline).toLocaleString() : 'N/A'}`
-              }
-            </Typography>
-          </View>
-        </View>
-      )}
       
       <View style={{
         flex: 1,
         margin: Spacing.lg,
-        marginTop: isExpired ? 0 : Spacing.md,
       }}>
         <FlatList
           ref={flatListRef}
@@ -1265,6 +1313,32 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
             flexGrow: 1,
           }}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={() => (
+            <View>
+              {renderTradeProgress()}
+              
+              {(isExpired || isCancelled) && (
+                <View style={{
+                  backgroundColor: Colors.error + '10',
+                  borderColor: Colors.error + '30',
+                  borderWidth: 1,
+                  marginBottom: Spacing.lg,
+                  padding: Spacing.md,
+                  borderRadius: BorderRadius.md,
+                }}>
+                  <View style={[FXTheme.layouts.row, { alignItems: 'center' }]}>
+                    <MaterialIcons name={isCancelled ? "cancel" : "error"} size={20} color={Colors.error} />
+                    <Typography variant="body2" color="error" style={{ marginLeft: Spacing.sm, flex: 1 }}>
+                      {isCancelled 
+                        ? 'This trade has been cancelled. You can start a new trade from the marketplace.'
+                        : `This trade has expired. Payment deadline was ${trade.timeWindows?.paymentDeadline ? new Date(trade.timeWindows.paymentDeadline).toLocaleString() : 'N/A'}`
+                      }
+                    </Typography>
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
         />
 
         <View style={[{
@@ -1398,6 +1472,18 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Rating Modal */}
+      <RatingModal
+        visible={showRatingModal}
+        onClose={() => setShowRatingModal(false)}
+        onSubmit={(rating) => {
+          onCompleteRating(rating, '');
+        }}
+        title={`Rate ${otherParty?.name || 'Trading Partner'}`}
+        subtitle="How was your trading experience?"
+        hideUserInfo={true}
+      />
     </KeyboardAvoidingView>
   );
 };

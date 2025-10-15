@@ -763,7 +763,7 @@ class FXService {
       }
 
       const endpoint = `/api/fx/trades/${tradeId}/rating`;
-      const payload = { rating, review };
+      const payload = { rating, comment: review };
 
       this.debugger.log('SUBMIT_RATING_API_CALL', { endpoint, payload });
 
@@ -926,9 +926,15 @@ class FXService {
         this.transformTradeFromBackend(trade)
       );
 
-      // Check for expired trades and auto-cancel them
+      // Check for expired trades and auto-cancel them (skip completed/cancelled trades)
       const checkedTrades = await Promise.all(
         transformedTrades.map(async (trade: FXTrade) => {
+          // Skip expiration check for trades that cannot expire
+          const nonExpirableStatuses = ['completed', 'cancelled', 'disputed'];
+          if (nonExpirableStatuses.includes(trade.status)) {
+            return trade;
+          }
+          
           const expirationCheck = await this.checkAndCancelExpiredTrade(trade);
           return expirationCheck.trade || trade;
         })

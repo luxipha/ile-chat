@@ -151,7 +151,9 @@ export const PendingTradesScreen: React.FC<PendingTradesScreenProps> = ({
   }, [currentUser]);
 
   const renderTradeCard = (trade: FXTrade) => {
-    const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+    // Only check expiry for trades that can actually expire (exclude completed trades)
+    const canExpire = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+    const isExpired = canExpire && trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
     const isPendingAcceptance = trade.status === 'pending_acceptance';
     const isCompleted = trade.status === 'completed';
     const isCancelled = ['cancelled', 'disputed'].includes(trade.status);
