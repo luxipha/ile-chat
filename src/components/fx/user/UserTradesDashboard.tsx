@@ -41,11 +41,16 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
   useEffect(() => {
     const loadUser = async () => {
       try {
-        // TODO: Replace with actual getCurrentUser method when available
-        const user = { id: '2', name: 'Current User' }; // Mock user for now
+        const user = await authService.getCachedUser();
         setCurrentUser(user);
+        console.log('🎯 [UserTradesDashboard] Loaded current user:', {
+          userId: user?.id,
+          userName: user?.name,
+          userRole: user?.role
+        });
       } catch (error) {
         console.error('Failed to load user:', error);
+        setError('Failed to load user data');
       }
     };
     loadUser();
@@ -59,145 +64,40 @@ export const UserTradesDashboard: React.FC<UserTradesDashboardProps> = ({
       setLoading(true);
       setError(null);
       
-      // TODO: Replace with actual API call to get user's trades
-      // For now, using mock data filtered by current user
-      const mockTrades: FXTrade[] = [
-        {
-          id: 'trade_1',
-          offerId: 'offer_1',
-          maker: {
-            id: '1',
-            name: 'Alice Chen',
-            avatar: undefined,
-            trustScore: 95,
-            trustBadge: 'verified',
-            completedTrades: 127,
-            responseTime: '~5 minutes',
-            onlineStatus: 'online',
-          },
-          taker: {
-            id: currentUser.id,
-            name: currentUser.name,
-            avatar: undefined,
-            trustScore: 85,
-          },
-          sellCurrency: { code: 'USD', name: 'US Dollar', symbol: '$', flag: '🇺🇸', type: 'fiat' },
-          buyCurrency: { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', flag: '🇳🇬', type: 'fiat' },
-          sellAmount: 1000,
-          buyAmount: 750000,
-          exchangeRate: 750,
-          paymentMethod: {
-            id: 'bank_ng',
-            name: 'Nigerian Bank',
-            type: 'bank',
-            icon: 'account-balance-wallet',
-            processingTime: '5-15 minutes',
-            limits: { min: 1000, max: 5000000 },
-          },
-          escrowAmount: 1000,
-          escrowCurrency: 'USDC',
-          status: 'completed',
-          createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-          quoteLockExpiry: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
-          paymentWindow: {
-            start: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-            end: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
-          },
-          completedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 25 * 60 * 1000),
-          chatRoomId: 'chat_trade_1',
-        },
-        {
-          id: 'trade_2',
-          offerId: 'offer_2',
-          maker: {
-            id: '3',
-            name: 'Bob Wilson',
-            avatar: undefined,
-            trustScore: 88,
-            trustBadge: 'premium',
-            completedTrades: 89,
-            responseTime: '~8 minutes',
-            onlineStatus: 'online',
-          },
-          taker: {
-            id: currentUser.id,
-            name: currentUser.name,
-            avatar: undefined,
-            trustScore: 85,
-          },
-          sellCurrency: { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', flag: '🇨🇳', type: 'fiat' },
-          buyCurrency: { code: 'USDC', name: 'USD Coin', symbol: 'USDC', flag: '💰', type: 'crypto' },
-          sellAmount: 5000,
-          buyAmount: 700,
-          exchangeRate: 0.14,
-          paymentMethod: {
-            id: 'alipay',
-            name: 'Alipay',
-            type: 'digital_wallet',
-            icon: 'payment',
-            processingTime: '1-5 minutes',
-            limits: { min: 100, max: 50000 },
-          },
-          escrowAmount: 700,
-          escrowCurrency: 'USDC',
-          status: 'payment_pending',
-          createdAt: new Date(Date.now() - 30 * 60 * 1000), // 30 minutes ago
-          quoteLockExpiry: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes from now
-          paymentWindow: {
-            start: new Date(Date.now() - 30 * 60 * 1000),
-            end: new Date(Date.now() + 30 * 60 * 1000),
-          },
-          chatRoomId: 'chat_trade_2',
-        },
-        {
-          id: 'trade_3',
-          offerId: 'offer_3',
-          maker: {
-            id: '4',
-            name: 'Carol Davis',
-            avatar: undefined,
-            trustScore: 92,
-            trustBadge: 'pro',
-            completedTrades: 156,
-            responseTime: '~3 minutes',
-            onlineStatus: 'away',
-          },
-          taker: {
-            id: currentUser.id,
-            name: currentUser.name,
-            avatar: undefined,
-            trustScore: 85,
-          },
-          sellCurrency: { code: 'EUR', name: 'Euro', symbol: '€', flag: '🇪🇺', type: 'fiat' },
-          buyCurrency: { code: 'USD', name: 'US Dollar', symbol: '$', flag: '🇺🇸', type: 'fiat' },
-          sellAmount: 800,
-          buyAmount: 850,
-          exchangeRate: 1.0625,
-          paymentMethod: {
-            id: 'bank_us',
-            name: 'US Bank Wire',
-            type: 'bank',
-            icon: 'account-balance',
-            processingTime: '30-60 minutes',
-            limits: { min: 500, max: 100000 },
-          },
-          escrowAmount: 850,
-          escrowCurrency: 'USDC',
-          status: 'disputed',
-          createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-          quoteLockExpiry: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
-          paymentWindow: {
-            start: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-            end: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
-          },
-          chatRoomId: 'chat_trade_3',
-          disputeReason: 'Payment not received',
-        },
-      ];
-
-      setTrades(mockTrades);
+      console.log('🔄 [UserTradesDashboard] Loading user trades...');
+      
+      // Use real API to get user's trades
+      const response = await fxService.getUserTrades({ limit: 50, offset: 0 });
+      
+      if (response.success) {
+        console.log('✅ [UserTradesDashboard] Trades loaded successfully:', {
+          tradesCount: response.trades.length,
+          userId: currentUser.id || currentUser._id
+        });
+        
+        // Filter to show only trades where current user is the buyer/taker
+        const currentUserId = currentUser.id || currentUser._id;
+        const userTrades = response.trades.filter(trade => {
+          const merchant = trade.merchant || trade.maker;
+          const buyer = trade.buyer || trade.taker;
+          
+          // Show trades where current user is the buyer (taker)
+          return buyer?.id === currentUserId;
+        });
+        
+        console.log('🎯 [UserTradesDashboard] User trades filtered:', {
+          totalTrades: response.trades.length,
+          userTrades: userTrades.length,
+          currentUserId
+        });
+        
+        setTrades(userTrades);
+      } else {
+        console.error('❌ [UserTradesDashboard] Failed to load trades:', response.error);
+        setError(response.error || 'Failed to load trades');
+      }
     } catch (err) {
-      console.error('Failed to load trades:', err);
+      console.error('❌ [UserTradesDashboard] Exception loading trades:', err);
       setError('Failed to load trades. Please try again.');
     } finally {
       setLoading(false);

@@ -431,6 +431,8 @@ class FXService {
       const statusToEndpointMap: Record<string, string> = {
         'accepted': 'accept',
         'payment_sent': 'payment-sent',
+        'buyer_payment_sent': 'payment-sent',
+        'merchant_payment_sent': 'payment-sent', 
         'payment_confirmed': 'confirm-payment',
         'completed': 'complete',
         'cancelled': 'cancel',
@@ -512,33 +514,82 @@ class FXService {
    * Upload payment proof for a trade
    * @param tradeId - The trade ID
    * @param file - The payment proof file
+   * @param userRole - Whether user is 'buyer' or 'merchant' (auto-detected if not provided)
    * @returns Promise with upload result
    */
-  async uploadPaymentProof(tradeId: string, file: any): Promise<{ success: boolean; fileUrl?: string; error?: string }> {
+  async uploadPaymentProof(tradeId: string, file: any, userRole?: 'buyer' | 'merchant'): Promise<{ success: boolean; fileUrl?: string; error?: string; tradeStatus?: string }> {
     const startTime = Date.now();
-    this.debugger.log('UPLOAD_PAYMENT_PROOF_START', { tradeId, file: file?.uri });
+    this.debugger.log('UPLOAD_PAYMENT_PROOF_START', { tradeId, file: file?.uri, userRole });
     
     try {
       if (!file) {
         return { success: false, error: 'No file provided' };
       }
 
-      // Upload to Firebase using the working endpoint
+      // Get current user to determine role if not provided
+      let currentUser = null;
+      try {
+        const userData = await AsyncStorage.getItem('userData');
+        currentUser = userData ? JSON.parse(userData) : null;
+      } catch (e) {
+        console.warn('Failed to get user data:', e);
+      }
+
+      // Determine user role if not provided
+      if (!userRole && currentUser) {
+        // Get trade details to determine user role
+        const tradeResponse = await this.getTradeById(tradeId);
+        if (tradeResponse.success && tradeResponse.trade) {
+          const trade = tradeResponse.trade;
+          const currentUserId = currentUser.id || currentUser._id;
+          const merchant = trade.merchant || trade.maker;
+          const buyer = trade.buyer || trade.taker;
+          
+          if (merchant?.id === currentUserId) {
+            userRole = 'merchant';
+          } else if (buyer?.id === currentUserId) {
+            userRole = 'buyer';
+          }
+        }
+      }
+
+      if (!userRole) {
+        return { success: false, error: 'Could not determine user role for upload' };
+      }
+
+      this.debugger.log('UPLOAD_PAYMENT_PROOF_USER_ROLE', { tradeId, userRole, currentUserId: currentUser?.id });
+
+      // Prepare file for upload
       const formData = new FormData();
       const fileToUpload = {
         uri: file.uri,
         type: file.type || 'image/jpeg',
-        name: file.name || `payment_proof_${tradeId}_${Date.now()}.jpg`,
+        name: file.name || `payment_proof_${userRole}_${tradeId}_${Date.now()}.jpg`,
       };
       
-      formData.append('image', fileToUpload as any);
-      
+      formData.append('paymentProof', fileToUpload as any);
+
+      // Optional: Add transaction ID and notes
+      if (file.transactionId) {
+        formData.append('transactionId', file.transactionId);
+      }
+      if (file.notes) {
+        formData.append('notes', file.notes);
+      }
+
       const token = await this.getAuthToken();
       if (!token) {
         return { success: false, error: 'Authentication required' };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/firebase-auth/upload-image`, {
+      // Use the correct backend endpoint based on user role
+      const endpoint = userRole === 'buyer' 
+        ? `/api/fx/trades/${tradeId}/payment-proof`
+        : `/api/fx/trades/${tradeId}/merchant-payment-proof`;
+
+      this.debugger.log('UPLOAD_PAYMENT_PROOF_ENDPOINT', { endpoint, userRole });
+
+      const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -548,26 +599,31 @@ class FXService {
 
       const responseData = await response.json();
       
+      const responseTime = Date.now() - startTime;
+      this.debugger.log('UPLOAD_PAYMENT_PROOF_RESPONSE', { 
+        tradeId,
+        userRole,
+        responseTime,
+        success: responseData.success,
+        status: responseData.data?.trade?.status,
+        fileUrl: responseData.data?.fileUrl
+      });
+
       if (!response.ok || !responseData.success) {
         return {
           success: false,
-          error: responseData.error || 'Failed to upload image'
+          error: responseData.error || responseData.message || 'Failed to upload payment proof'
         };
       }
 
-      const responseTime = Date.now() - startTime;
-      this.debugger.log('UPLOAD_PAYMENT_PROOF_SUCCESS', { 
-        tradeId,
-        responseTime,
-        fileUrl: responseData.imageUrl || responseData.url
-      });
-
       return {
         success: true,
-        fileUrl: responseData.imageUrl || responseData.url || file.uri
+        fileUrl: responseData.data?.fileUrl || responseData.screenshotUrl || responseData.imageUrl || file.uri,
+        tradeStatus: responseData.data?.trade?.status
       };
     } catch (error) {
-      this.debugger.log('UPLOAD_PAYMENT_PROOF_ERROR', { error }, error);
+      const responseTime = Date.now() - startTime;
+      this.debugger.log('UPLOAD_PAYMENT_PROOF_ERROR', { error, responseTime }, error);
       return { 
         success: false,
         error: error instanceof Error ? error.message : 'Upload failed'

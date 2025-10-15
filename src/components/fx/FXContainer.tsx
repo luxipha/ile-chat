@@ -10,6 +10,7 @@ import { PendingTradesScreen } from './merchant/PendingTradesScreen';
 import { TradeRoom } from './TradeRoom';
 import { CreateFXOffer } from './CreateFXOffer';
 import fxService from '../../services/fxService';
+import authService from '../../services/authService';
 import { FXOffer, FXTrade } from '../../types/fx';
 import { User } from '../../services/authService';
 import { FXTheme } from '../../theme/fxTheme';
@@ -33,6 +34,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
   const [currentFXScreen, setCurrentFXScreen] = useState<FXScreen>('marketplace');
   const [selectedOffer, setSelectedOffer] = useState<FXOffer | null>(null);
   const [currentTrade, setCurrentTrade] = useState<FXTrade | null>(null);
+  const [userActiveTrades, setUserActiveTrades] = useState<FXTrade[]>([]);
 
   // Debug logging for user data
   useEffect(() => {
@@ -45,6 +47,36 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       merchantProfile: currentUser?.merchantProfile ? Object.keys(currentUser.merchantProfile) : null,
       fullUser: currentUser
     });
+  }, [currentUser]);
+
+  // Load user active trades for counter badge
+  useEffect(() => {
+    const loadUserActiveTrades = async () => {
+      if (!currentUser || isMerchant()) return; // Only load for buyers
+      
+      try {
+        const response = await fxService.getUserTrades({ limit: 50, offset: 0 });
+        if (response.success) {
+          const currentUserId = currentUser.id || (currentUser as any)?._id;
+          const activeTrades = response.trades.filter(trade => {
+            const buyer = trade.buyer || trade.taker;
+            const isUserBuyer = buyer?.id === currentUserId;
+            const isActiveStatus = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+            
+            // Also exclude expired trades
+            const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+            
+            return isUserBuyer && isActiveStatus && !isExpired;
+          });
+          setUserActiveTrades(activeTrades);
+          console.log('🔍 [FXContainer] Loaded user active trades:', activeTrades.length);
+        }
+      } catch (error) {
+        console.warn('Failed to load user active trades:', error);
+      }
+    };
+
+    loadUserActiveTrades();
   }, [currentUser]);
 
   // Poll for trade status updates if there's a pending trade
@@ -173,6 +205,44 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       const currentUserId = currentUser.id || (currentUser as any)?._id;
       const isOfferMaker = selectedOffer.maker.id === currentUserId;
 
+      // ONE-TRADE-AT-A-TIME LIMIT FOR BUYERS
+      if (!isOfferMaker) {
+        console.log('🔍 Checking for existing active trades (buyer limitation)...');
+        
+        try {
+          const existingTradesResponse = await fxService.getUserTrades({ limit: 50, offset: 0 });
+          if (existingTradesResponse.success) {
+            // Check for active trades (not completed, cancelled, or disputed)
+            const activeTrades = existingTradesResponse.trades.filter(trade => {
+              const merchant = trade.merchant || trade.maker;
+              const buyer = trade.buyer || trade.taker;
+              const isUserBuyer = buyer?.id === currentUserId;
+              const isActiveStatus = !['completed', 'cancelled', 'disputed'].includes(trade.status);
+              
+              return isUserBuyer && isActiveStatus;
+            });
+
+            if (activeTrades.length > 0) {
+              console.log('❌ Buyer already has active trade(s):', activeTrades.map(t => ({ id: t.id, status: t.status })));
+              Alert.alert(
+                'One Trade at a Time',
+                `You already have ${activeTrades.length} active trade${activeTrades.length > 1 ? 's' : ''}. Please complete or close your existing trade before starting a new one.\n\nThis ensures better trade completion and user experience.`,
+                [
+                  { text: 'View My Trades', onPress: () => setCurrentFXScreen('user_trades') },
+                  { text: 'OK', style: 'cancel' }
+                ]
+              );
+              return;
+            } else {
+              console.log('✅ No active trades found - buyer can proceed');
+            }
+          }
+        } catch (checkError) {
+          console.warn('⚠️ Failed to check existing trades, allowing trade creation:', checkError);
+          // Don't block trade creation if we can't check - better UX
+        }
+      }
+
       if (isOfferMaker) {
         // Seller accepting the trade - create active trade and open trade room immediately
         const response = await fxService.createTrade(
@@ -188,7 +258,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
           setCurrentFXScreen('trade_room');
         } else {
           console.error('❌ Failed to accept trade:', response.error);
-          // Show error to user
+          Alert.alert('Error', response.error || 'Failed to accept trade');
         }
       } else {
         // Buyer starting the trade - create pending trade and activate trade room icon
@@ -205,54 +275,75 @@ export const FXContainer: React.FC<FXContainerProps> = ({
           setCurrentTrade(response.trade);
           // Don't navigate to trade room - trade room icon will only show when status is accepted or later
           console.log('🎯 Pending trade created - trade room will activate when seller accepts');
+          Alert.alert(
+            'Trade Request Sent',
+            'Your trade request has been sent to the merchant. You will be notified when they accept.',
+            [{ text: 'OK' }]
+          );
         } else {
           console.error('❌ Failed to create pending trade:', response.error);
-          // Show error to user
+          Alert.alert('Error', response.error || 'Failed to create trade');
         }
       }
     } catch (error) {
       console.error('❌ Exception creating trade:', error);
+      Alert.alert('Error', 'An unexpected error occurred while creating the trade');
     } finally {
       setIsLoadingGeneral(false);
     }
   };
 
   const handleUploadPaymentProof = async (file: any) => {
-    if (!currentTrade) return;
+    if (!currentTrade) return { success: false, error: 'No current trade' };
 
     try {
-      console.log('📄 Uploading payment proof...');
+      console.log('📄 Uploading payment proof to Firebase and updating backend status...');
       setIsLoadingGeneral(true);
 
+      // Use the existing upload endpoint which handles Firebase upload AND status update
       const response = await fxService.uploadPaymentProof(currentTrade.id, file);
       
-      if (response.success) {
-        console.log('✅ Payment proof uploaded successfully');
-        
-        // Refresh trade data to get the updated status from backend
-        try {
-          const updatedTradeResponse = await fxService.getTradeById(currentTrade.id);
-          if (updatedTradeResponse.success && updatedTradeResponse.trade) {
-            setCurrentTrade(updatedTradeResponse.trade);
-            console.log('🔄 Trade data refreshed after payment proof upload:', {
-              newStatus: updatedTradeResponse.trade.status,
-              tradeId: currentTrade.id,
-              hasBuyerProof: !!updatedTradeResponse.trade.buyerPaymentProof,
-              hasMerchantProof: !!updatedTradeResponse.trade.merchantPaymentProof
-            });
-          } else {
-            console.warn('⚠️ [FXContainer] Failed to refresh trade data after upload:', updatedTradeResponse.error);
-          }
-        } catch (refreshError) {
-          console.warn('⚠️ [FXContainer] Error refreshing trade data after upload:', refreshError);
-        }
-      } else {
+      if (!response.success) {
         console.error('❌ Failed to upload payment proof:', response.error);
         Alert.alert('Upload Failed', response.error || 'Failed to upload payment proof');
+        return { success: false, error: response.error };
       }
+
+      console.log('✅ Payment proof uploaded successfully:', {
+        fileUrl: response.fileUrl,
+        tradeStatus: response.tradeStatus
+      });
+      
+      // Refresh trade data to get complete updated state from backend
+      try {
+        const updatedTradeResponse = await fxService.getTradeById(currentTrade.id);
+        if (updatedTradeResponse.success && updatedTradeResponse.trade) {
+          setCurrentTrade(updatedTradeResponse.trade);
+          console.log('🔄 Trade data refreshed after payment proof upload:', {
+            newStatus: updatedTradeResponse.trade.status,
+            tradeId: currentTrade.id,
+            hasBuyerProof: !!(updatedTradeResponse.trade as any).buyerPaymentProof,
+            hasMerchantProof: !!(updatedTradeResponse.trade as any).merchantPaymentProof
+          });
+        } else {
+          console.warn('⚠️ [FXContainer] Failed to refresh trade data after upload:', updatedTradeResponse.error);
+        }
+      } catch (refreshError) {
+        console.warn('⚠️ [FXContainer] Error refreshing trade data after upload:', refreshError);
+      }
+
+      Alert.alert('Success', 'Payment proof uploaded successfully!');
+      
+      // Return the actual upload result for TradeRoom to use in chat
+      return {
+        success: true,
+        fileUrl: response.fileUrl, // This should now be the Cloudinary URL
+        tradeStatus: response.tradeStatus
+      };
     } catch (error) {
       console.error('❌ Exception uploading payment proof:', error);
       Alert.alert('Upload Error', 'An error occurred while uploading the payment proof');
+      return { success: false, error: error instanceof Error ? error.message : 'Upload failed' };
     } finally {
       setIsLoadingGeneral(false);
     }
@@ -269,7 +360,6 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       
       if (response.success) {
         console.log('✅ Payment confirmed successfully:', {
-          message: response.message,
           tradeId: currentTrade.id
         });
         
@@ -540,6 +630,10 @@ export const FXContainer: React.FC<FXContainerProps> = ({
     setCurrentFXScreen('pending_trades');
   };
 
+  const handleViewUserTrades = () => {
+    setCurrentFXScreen('user_trades');
+  };
+
   // FX Screen Navigation Logic
   const renderFXScreen = () => {
     switch (currentFXScreen) {
@@ -560,6 +654,8 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             <UserMarketplace
               onOfferSelect={handleOfferSelect}
               onBack={onBack}
+              onViewMyTrades={handleViewUserTrades}
+              userActiveTrades={userActiveTrades}
             />
           );
         }

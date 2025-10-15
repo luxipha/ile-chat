@@ -441,17 +441,19 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
         size: asset.fileSize,
       };
 
-      // Upload the image file using the FX service
-      console.log('🔧 [TradeRoom] Uploading file:', imageFile);
-      const uploadResult = await fxService.uploadPaymentProof(trade.id, imageFile);
+      // Upload image to Firebase and update trade status
+      console.log('🔧 [TradeRoom] Uploading file to Firebase and updating status:', imageFile);
+      
+      // Call the container's upload handler which handles both Firebase upload and backend status update
+      const uploadResult = await onUploadPaymentProof(imageFile);
       console.log('🔧 [TradeRoom] Upload result:', uploadResult);
       
       if (uploadResult.success && uploadResult.fileUrl) {
         const proofData = {
           transactionId: 'TXN_' + Math.random().toString(36).substring(2, 11),
           receipt: uploadResult.fileUrl,
-          amount: trade.sellAmount,
-          currency: trade.sellCurrency.code,
+          amount: isUserMerchant ? trade.buyAmount : trade.sellAmount,
+          currency: isUserMerchant ? trade.buyCurrency.code : trade.sellCurrency.code,
           method: trade.paymentMethod?.name || 'Unknown',
         };
 
@@ -505,12 +507,8 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
           // Don't fail the entire upload if chat fails
         }
 
-        try {
-          onUploadPaymentProof(proofData);
-          console.log('🔧 [TradeRoom] Successfully called onUploadPaymentProof');
-        } catch (callbackError) {
-          console.error('🔧 [TradeRoom] Error in onUploadPaymentProof callback:', callbackError);
-        }
+        // Upload was handled by FXContainer (Firebase + status update)
+        console.log('🔧 [TradeRoom] Upload handled successfully by FXContainer');
 
         // Image uploaded successfully and showing in chat
         
@@ -735,343 +733,240 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
   );
 
   const renderActionButtons = () => {
+    // Simplified two-button system as requested
+    
     if (isExpired) {
+      // Special handling for expired trades with payment proofs
+      const hasPaymentActivity = hasCurrentUserPaymentProof() || hasOtherPartyPaymentProof();
+      const paymentsUploaded = ['buyer_payment_sent', 'merchant_payment_sent', 'both_payments_sent'].includes(trade.status);
+      const isPaymentConfirmed = trade.status === 'payment_confirmed';
+      
       return (
         <View style={FXTheme.layouts.center}>
           <Typography variant="body2" color="error" style={FXTheme.text.bold}>
             Trade Expired
           </Typography>
-          <Typography variant="caption" color="textSecondary">
-            This trade has exceeded its payment deadline
+          <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.xs }}>
+            {isPaymentConfirmed 
+              ? 'One party confirmed payment but trade expired. Choose how to resolve it.'
+              : hasPaymentActivity 
+                ? 'This trade expired with payment activity. Choose how to resolve it.'
+                : 'This trade has exceeded its payment deadline'}
           </Typography>
+          
+          <View style={{ marginTop: Spacing.md, width: '100%' }}>
+            {(hasPaymentActivity && paymentsUploaded) || isPaymentConfirmed ? (
+              // If payments were uploaded or payment confirmed, show both cancel and complete options
+              <View style={FXTheme.layouts.column}>
+                <View style={FXTheme.layouts.rowGap}>
+                  <Button
+                    title="Cancel Trade"
+                    onPress={() => {
+                      Alert.alert(
+                        'Cancel Expired Trade',
+                        'This will cancel the trade due to expiration. Both parties will need to handle payments outside the platform.',
+                        [
+                          { text: 'Back', style: 'cancel' },
+                          { text: 'Cancel Trade', style: 'destructive', onPress: async () => {
+                            try {
+                              // Call backend to actually cancel the trade
+                              const response = await fxService.updateTradeStatus(trade.id, 'cancelled', {
+                                reason: 'Trade expired and manually cancelled by user',
+                                expiredCancel: true
+                              });
+                              if (response.success) {
+                                Alert.alert('Trade Cancelled', 'The expired trade has been cancelled.', [
+                                  { text: 'OK', onPress: onBack }
+                                ]);
+                              } else {
+                                Alert.alert('Error', 'Failed to cancel trade. Please try again.');
+                              }
+                            } catch (error) {
+                              Alert.alert('Error', 'Failed to cancel trade. Please try again.');
+                              console.error('Failed to cancel expired trade:', error);
+                            }
+                          }}
+                        ]
+                      );
+                    }}
+                    variant="outline"
+                    style={{ flex: 1 }}
+                  />
+                  {isUserMerchant && (
+                    <Button
+                      title="Mark Complete"
+                      onPress={() => {
+                        Alert.alert(
+                          'Mark Trade Complete',
+                          'Mark this trade as completed if both parties have successfully exchanged payments offline.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Mark Complete', onPress: () => {
+                              // Call complete trade handler
+                              onCompleteRating(5, 'Trade completed after expiration');
+                            }}
+                          ]
+                        );
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                  )}
+                </View>
+                {!isUserMerchant && (
+                  <View style={{ marginTop: Spacing.sm }}>
+                    <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center' }}>
+                      Contact the merchant to resolve payment issues
+                    </Typography>
+                  </View>
+                )}
+              </View>
+            ) : (
+              // No payment activity, just close
+              <Button
+                title="Close Trade"
+                onPress={() => {
+                  Alert.alert(
+                    'Close Expired Trade',
+                    'This trade expired without payment activity. It will be marked as cancelled.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      { text: 'Close Trade', onPress: async () => {
+                        try {
+                          // Call backend to actually cancel the trade
+                          const response = await fxService.updateTradeStatus(trade.id, 'cancelled', {
+                            reason: 'Trade expired without payment activity',
+                            expiredCancel: true
+                          });
+                          if (response.success) {
+                            onBack();
+                          } else {
+                            Alert.alert('Error', 'Failed to close trade. Please try again.');
+                          }
+                        } catch (error) {
+                          Alert.alert('Error', 'Failed to close trade. Please try again.');
+                          console.error('Failed to close expired trade:', error);
+                        }
+                      }}
+                    ]
+                  );
+                }}
+                variant="outline"
+                style={{ width: '100%' }}
+              />
+            )}
+          </View>
         </View>
       );
     }
 
-    // P2P Dual-Track System: Both parties send money to each other
-    switch (trade.status) {
-      case 'accepted':
-      case 'quote_locked':
-      case 'payment_pending':
-        // Both parties can upload payment proof simultaneously
-        return (
-          <View style={FXTheme.layouts.column}>
-            <View style={FXTheme.layouts.rowGap}>
-              <Button
-                title={isUserBuyer ? "Upload Payment Proof" : "Upload Payment Proof"}
-                onPress={handleUploadPaymentProof}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Open Dispute"
-                variant="outline"
-                onPress={() => setShowDispute(true)}
-                style={{ flex: 1 }}
-              />
-            </View>
-            {/* Show confirmation button if other party has uploaded proof */}
-            {hasOtherPartyPaymentProof() && (
-              <View style={{ marginTop: Spacing.md }}>
-                <Button
-                  title="Confirm Payment Received"
-                  onPress={handleConfirmPayment}
-                  style={{ width: '100%' }}
-                  variant="outline"
-                />
-              </View>
-            )}
-          </View>
-        );
-
-      case 'payment_sent':
-        // One party has sent payment, both can still upload proof and confirm
-        return (
-          <View style={FXTheme.layouts.column}>
-            <View style={FXTheme.layouts.rowGap}>
-              <Button
-                title="Upload Payment Proof"
-                onPress={handleUploadPaymentProof}
-                style={{ flex: 1 }}
-              />
-              <Button
-                title="Confirm Payment Received"
-                onPress={handleConfirmPayment}
-                style={{ flex: 1 }}
-              />
-            </View>
-            <View style={{ marginTop: Spacing.md }}>
-              <Button
-                title="Open Dispute"
-                variant="outline"
-                onPress={() => setShowDispute(true)}
-                style={{ width: '100%' }}
-              />
-            </View>
-          </View>
-        );
-
-      case 'buyer_payment_sent':
-        // Buyer has sent payment, merchant needs to send theirs
-        if (isUserMerchant) {
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.rowGap}>
-                <Button
-                  title="Upload Your Payment Proof"
-                  onPress={handleUploadPaymentProof}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  title="Confirm Buyer Payment Received"
-                  onPress={handleConfirmPayment}
-                  style={{ flex: 1 }}
-                />
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <Button
-                  title="Open Dispute"
-                  variant="outline"
-                  onPress={() => setShowDispute(true)}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-          );
-        } else {
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.center}>
-                <Typography variant="body2" color="primary" style={FXTheme.text.bold}>
-                  Your Payment Sent
-                </Typography>
-                <Typography variant="caption" color="textSecondary">
-                  Waiting for merchant to send their payment
-                </Typography>
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <Button
-                  title="Open Dispute"
-                  variant="outline"
-                  onPress={() => setShowDispute(true)}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-          );
-        }
-
-      case 'merchant_payment_sent':
-        // Merchant has sent payment, buyer needs to send theirs
-        if (isUserBuyer) {
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.rowGap}>
-                <Button
-                  title="Upload Your Payment Proof"
-                  onPress={handleUploadPaymentProof}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  title="Confirm Merchant Payment Received"
-                  onPress={handleConfirmPayment}
-                  style={{ flex: 1 }}
-                />
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <Button
-                  title="Open Dispute"
-                  variant="outline"
-                  onPress={() => setShowDispute(true)}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-          );
-        } else {
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.center}>
-                <Typography variant="body2" color="primary" style={FXTheme.text.bold}>
-                  Your Payment Sent
-                </Typography>
-                <Typography variant="caption" color="textSecondary">
-                  Waiting for buyer to send their payment
-                </Typography>
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <Button
-                  title="Open Dispute"
-                  variant="outline"
-                  onPress={() => setShowDispute(true)}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-          );
-        }
-
-      case 'both_payments_sent':
-        // Both parties have sent payments, both can confirm receipt
-        return (
-          <View style={FXTheme.layouts.column}>
-            <View style={FXTheme.layouts.rowGap}>
-              <Button
-                title="Confirm Payment Received"
-                onPress={handleConfirmPayment}
-                style={{ flex: 1 }}
-              />
-            </View>
-            <View style={{ marginTop: Spacing.md }}>
-              <Button
-                title="Open Dispute"
-                variant="outline"
-                onPress={() => setShowDispute(true)}
-                style={{ width: '100%' }}
-              />
-            </View>
-          </View>
-        );
-
-      case 'payment_confirmed':
-        // One party confirmed, waiting for other to confirm or trade is completed
-        const isTradeFullyCompleted = hasCurrentUserPaymentProof() && hasOtherPartyPaymentProof();
-        
-        if (isTradeFullyCompleted) {
-          // Both parties have uploaded proof and at least one confirmed
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.center}>
-                <Typography variant="body2" color="success" style={FXTheme.text.bold}>
-                  Trade Nearly Complete!
-                </Typography>
-                <Typography variant="caption" color="textSecondary">
-                  {hasCurrentUserPaymentProof() && hasOtherPartyPaymentProof() 
-                    ? 'Both payments sent. Confirm if you received payment to complete.'
-                    : 'Waiting for final confirmation from trading partner'}
-                </Typography>
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <View style={FXTheme.layouts.rowGap}>
-                  <Button
-                    title="Confirm Payment Received"
-                    onPress={handleConfirmPayment}
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    title="Open Dispute"
-                    variant="outline"
-                    onPress={() => setShowDispute(true)}
-                    style={{ flex: 1 }}
-                  />
-                </View>
-              </View>
-            </View>
-          );
-        } else {
-          // Partial confirmation, still waiting for uploads or confirmations
-          return (
-            <View style={FXTheme.layouts.column}>
-              <View style={FXTheme.layouts.center}>
-                <Typography variant="body2" color="success" style={FXTheme.text.bold}>
-                  Payment Confirmed
-                </Typography>
-                <Typography variant="caption" color="textSecondary">
-                  Waiting for trading partner to upload proof and confirm
-                </Typography>
-              </View>
-              <View style={{ marginTop: Spacing.md }}>
-                <View style={FXTheme.layouts.rowGap}>
-                  {!hasCurrentUserPaymentProof() && (
-                    <Button
-                      title="Upload Your Payment Proof"
-                      onPress={handleUploadPaymentProof}
-                      style={{ flex: 1 }}
-                    />
-                  )}
-                  <Button
-                    title="Open Dispute"
-                    variant="outline"
-                    onPress={() => setShowDispute(true)}
-                    style={{ flex: 1 }}
-                  />
-                </View>
-              </View>
-            </View>
-          );
-        }
-
-      case 'completed':
-        return (
-          <View style={FXTheme.layouts.column}>
-            <View style={FXTheme.layouts.center}>
-              <Typography variant="body2" color="success" style={FXTheme.text.bold}>
-                🎉 Trade Completed Successfully!
-              </Typography>
-              <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.xs }}>
-                Both parties have exchanged currencies and confirmed receipt
-              </Typography>
-            </View>
-            <View style={{ marginTop: Spacing.lg }}>
-              <View style={FXTheme.layouts.rowGap}>
-                <Button
-                  title="Rate Trading Partner"
-                  onPress={() => {
-                    // Show rating modal
-                    Alert.alert(
-                      'Rate Trading Partner',
-                      `How was your experience trading with ${otherParty?.name}?`,
-                      [
-                        { text: 'Skip', style: 'cancel' },
-                        { text: 'Rate Now', onPress: () => onCompleteRating(5, 'Great trade!') }
-                      ]
-                    );
-                  }}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  title="Back to Marketplace"
-                  onPress={onBack}
-                  style={{ flex: 1 }}
-                  variant="outline"
-                />
-              </View>
-            </View>
-          </View>
-        );
-
-      case 'disputed':
-        return (
+    // Handle completed and cancelled states
+    if (trade.status === 'completed') {
+      return (
+        <View style={FXTheme.layouts.column}>
           <View style={FXTheme.layouts.center}>
-            <Typography variant="body2" color="error" style={FXTheme.text.bold}>
-              Trade Disputed
-            </Typography>
-            <Typography variant="caption" color="textSecondary">
-              Waiting for platform resolution
-            </Typography>
-          </View>
-        );
-
-      case 'cancelled':
-        return (
-          <View style={FXTheme.layouts.center}>
-            <Typography variant="body2" color="error" style={FXTheme.text.bold}>
-              Trade Cancelled
+            <Typography variant="body2" color="success" style={FXTheme.text.bold}>
+              🎉 Trade Completed Successfully!
             </Typography>
             <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.xs }}>
-              {isExpired ? 'Cancelled due to expiration' : 'Trade was cancelled'}
+              Both parties have exchanged currencies and confirmed receipt
             </Typography>
           </View>
-        );
-
-      default:
-        return (
-          <View style={FXTheme.layouts.center}>
-            <Typography variant="body2" color="textSecondary">
-              Status: {trade.status}
-            </Typography>
+          <View style={{ marginTop: Spacing.lg }}>
+            <View style={FXTheme.layouts.rowGap}>
+              <Button
+                title="Rate Trading Partner"
+                onPress={() => {
+                  Alert.alert(
+                    'Rate Trading Partner',
+                    `How was your experience trading with ${otherParty?.name}?`,
+                    [
+                      { text: 'Skip', style: 'cancel' },
+                      { text: 'Rate Now', onPress: () => onCompleteRating(5, 'Great trade!') }
+                    ]
+                  );
+                }}
+                style={{ flex: 1 }}
+              />
+              <Button
+                title="Back to Marketplace"
+                onPress={onBack}
+                style={{ flex: 1 }}
+                variant="outline"
+              />
+            </View>
           </View>
-        );
+        </View>
+      );
     }
+
+    if (trade.status === 'cancelled') {
+      return (
+        <View style={FXTheme.layouts.center}>
+          <Typography variant="body2" color="error" style={FXTheme.text.bold}>
+            Trade Cancelled
+          </Typography>
+          <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.xs }}>
+            {isExpired ? 'Cancelled due to expiration' : 'Trade was cancelled'}
+          </Typography>
+          <View style={{ marginTop: Spacing.md }}>
+            <Button
+              title="Close Trade"
+              onPress={onBack}
+              variant="outline"
+              style={{ width: '100%' }}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    // SIMPLIFIED TWO-BUTTON SYSTEM FOR ACTIVE TRADES
+    // Upload button is always visible (merchants can ask buyers to re-upload)
+    // Confirm button is always active (users won't click unless they received payment)
+    
+    const confirmButtonTitle = hasOtherPartyPaymentProof() && hasCurrentUserPaymentProof() 
+      ? "Confirm Payment Received"
+      : "Confirm Payment Received";
+
+    return (
+      <View style={FXTheme.layouts.column}>
+        {/* Trade status indicator */}
+        <View style={[FXTheme.layouts.center, { marginBottom: Spacing.md }]}>
+          <Typography variant="body2" style={FXTheme.text.bold}>
+            {getStatusLabel(trade.status)}
+          </Typography>
+          <Typography variant="caption" color="textSecondary" style={{ textAlign: 'center' }}>
+            {getStatusDescription(trade.status)}
+          </Typography>
+        </View>
+
+        {/* Main action buttons */}
+        <View style={FXTheme.layouts.rowGap}>
+          <Button
+            title="Upload Payment Proof"
+            onPress={handleUploadPaymentProof}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title={confirmButtonTitle}
+            onPress={handleConfirmPayment}
+            style={{ flex: 1 }}
+            variant="outline"
+          />
+        </View>
+
+        {/* Dispute button commented out as requested
+        <View style={{ marginTop: Spacing.md }}>
+          <Button
+            title="Open Dispute"
+            variant="outline"
+            onPress={() => setShowDispute(true)}
+            style={{ width: '100%' }}
+          />
+        </View>
+        */}
+      </View>
+    );
   };
 
   
@@ -1124,6 +1019,27 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
       case 'disputed': return 'Disputed';
       case 'cancelled': return 'Cancelled';
       default: return status;
+    }
+  };
+
+  const getStatusDescription = (status: string) => {
+    switch (status) {
+      case 'accepted':
+      case 'quote_locked':
+      case 'payment_pending':
+        return 'Upload payment proof and confirm when you receive payment';
+      case 'buyer_payment_sent':
+        return 'Buyer has uploaded proof. Waiting for merchant payment';
+      case 'merchant_payment_sent':
+        return 'Merchant has uploaded proof. Waiting for buyer payment';
+      case 'both_payments_sent':
+        return 'Both parties uploaded proof. Confirm payment receipt to complete';
+      case 'payment_confirmed':
+        return 'Waiting for final confirmation to complete trade';
+      case 'disputed':
+        return 'Trade is under dispute resolution';
+      default:
+        return 'Upload proof and confirm payment when received';
     }
   };
 

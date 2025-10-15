@@ -28,6 +28,7 @@ interface UserMarketplaceProps {
   onBack?: () => void;
   onTradeRoomNavigate?: (offerId: string) => void;
   userActiveTrades?: FXTrade[];
+  onViewMyTrades?: () => void;
 }
 
 // Enhanced filter interface for users
@@ -90,6 +91,7 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   onBack,
   onTradeRoomNavigate,
   userActiveTrades = [],
+  onViewMyTrades,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -252,10 +254,15 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   }, [offers, searchQuery]);
 
   const getActiveTradeForOffer = (offerId: string): FXTrade | undefined => {
-    return userActiveTrades.find(trade => 
-      trade.offerId === offerId && 
-      ['accepted', 'payment_pending', 'payment_sent', 'payment_confirmed'].includes(trade.status)
-    );
+    return userActiveTrades.find(trade => {
+      const matchesOffer = trade.offerId === offerId;
+      const isActiveStatus = ['accepted', 'payment_pending', 'payment_sent', 'payment_confirmed'].includes(trade.status);
+      
+      // Double-check that trade is not expired (safety check)
+      const isExpired = trade.timeWindows?.paymentDeadline && new Date() > new Date(trade.timeWindows.paymentDeadline);
+      
+      return matchesOffer && isActiveStatus && !isExpired;
+    });
   };
 
   const renderTrustBadge = (badge: string | null | undefined) => {
@@ -494,6 +501,23 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
             Find the best exchange rates
           </Typography>
         </View>
+
+        {/* My Trades Button */}
+        {onViewMyTrades && (
+          <TouchableOpacity 
+            style={styles.myTradesButton}
+            onPress={onViewMyTrades}
+          >
+            <MaterialIcons name="history" size={24} color={Colors.gray700} />
+            {userActiveTrades.length > 0 && (
+              <View style={styles.counterBadge}>
+                <Typography variant="caption" style={styles.counterText}>
+                  {userActiveTrades.length > 99 ? '99+' : userActiveTrades.length}
+                </Typography>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Search */}
@@ -572,3 +596,32 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  myTradesButton: {
+    position: 'relative',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  counterText: {
+    color: Colors.white,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
+  },
+});
