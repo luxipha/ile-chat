@@ -529,20 +529,36 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       let transactionResult;
       let currency = 'USDC';
       
-      // Get recipient's Aptos address
-      const recipientAddress = selectedUser.aptosAddress || selectedUser.id;
+      // Get recipient address based on wallet type
+      let recipientAddress;
       
-      if (!recipientAddress || recipientAddress === 'placeholder_address') {
-        throw new Error('Recipient Aptos address not available. Please ensure the recipient has a wallet.');
+      if (walletId === 'usdc_base') {
+        // For Base transfers, use Base address
+        recipientAddress = selectedUser.baseAddress || selectedUser.aptosAddress || selectedUser.id;
+        if (!recipientAddress || recipientAddress === 'placeholder_address') {
+          throw new Error('Recipient Base address not available. Please ensure the recipient has a Base wallet.');
+        }
+      } else {
+        // For Aptos transfers, use Aptos address
+        recipientAddress = selectedUser.aptosAddress || selectedUser.id;
+        if (!recipientAddress || recipientAddress === 'placeholder_address') {
+          throw new Error('Recipient Aptos address not available. Please ensure the recipient has a wallet.');
+        }
       }
 
       // Execute transaction directly with crypto amounts
       if (walletId === 'usdc_aptos' || walletId === 'usdc_') {
         transactionResult = await aptosService.sendUSDC(recipientAddress, cryptoAmount);
-        currency = 'USDC';
+        currency = 'USDC (Aptos)';
       } else if (walletId === 'apt_native') {
         transactionResult = await aptosService.sendAPT(recipientAddress, cryptoAmount);
         currency = 'APT';
+      } else if (walletId === 'usdc_base') {
+        // Add Base USDC transfer support
+        // Note: This requires implementing baseService.sendUSDC method
+        throw new Error('Base USDC transfers not yet implemented. baseService.sendUSDC method needed.');
+        // transactionResult = await baseService.sendUSDC(recipientAddress, cryptoAmount);
+        // currency = 'USDC (Base)';
       } else {
         throw new Error('Unsupported wallet type');
       }

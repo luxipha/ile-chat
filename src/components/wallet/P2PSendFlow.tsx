@@ -87,20 +87,20 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
         }
       }
 
-      // Fetch Base balances
+      // Fetch Base balances using the corrected Service method
       try {
-        const baseWalletResult = await baseService.getWallet();
-        if (baseWalletResult.success && baseWalletResult.address) {
-          const baseBalanceResult = await baseService.getBalance(baseWalletResult.address);
-          if (baseBalanceResult.success) {
-            console.log('💰 Real Base wallet balances:', baseBalanceResult);
-            setBaseBalances({
-              ETH: baseBalanceResult.ethBalance || '0',
-              ETH_FORMATTED: baseBalanceResult.ethBalanceFormatted || '0.000000 ETH',
-              USDC: baseBalanceResult.usdcBalance || '0',
-              USDC_FORMATTED: baseBalanceResult.usdcBalanceFormatted || '0.000000 USDC'
-            });
-          }
+        const baseBalanceResult = await Service.getCurrentUserBaseBalance();
+        if (baseBalanceResult.success) {
+          console.log('💰 Real Base wallet balances:', baseBalanceResult);
+          setBaseBalances({
+            ETH: baseBalanceResult.balance || '0.000000 ETH',
+            ETH_FORMATTED: baseBalanceResult.balance || '0.000000 ETH',
+            USDC: baseBalanceResult.usdcBalance || '0',
+            USDC_FORMATTED: `${baseBalanceResult.usdcBalance || '0'} USDC`
+          });
+        } else {
+          console.warn('⚠️ Base balance fetch failed:', baseBalanceResult.error);
+          setBaseBalances({});
         }
       } catch (baseError) {
         console.warn('⚠️ Failed to fetch Base balances:', baseError);
@@ -124,11 +124,15 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
     const aptBalance = parseFloat(aptRaw) / 100_000_000;
     const usdcBalance = parseFloat(usdcRaw);
     
-    // Base token balances (already in ETH format)
+    // Base token balances 
     const baseEthRaw = baseBalances['ETH'] || '0';
     const baseUsdcRaw = baseBalances['USDC'] || '0';
-    const baseEthBalance = parseFloat(baseEthRaw) / 1e18; // Convert from wei to ETH
-    const baseUsdcBalance = parseFloat(baseUsdcRaw) / 1e6; // Convert from USDC smallest unit
+    
+    // Parse ETH balance (remove ' ETH' suffix if present and convert from wei if needed)
+    const baseEthBalance = baseEthRaw.includes('ETH') ? parseFloat(baseEthRaw.replace(' ETH', '')) : parseFloat(baseEthRaw) / 1e18;
+    
+    // Parse USDC balance (Service already returns in decimal format, no conversion needed)
+    const baseUsdcBalance = parseFloat(baseUsdcRaw);
     
     console.log('💰 Token balances:', { 
       aptRaw, usdcRaw, aptBalance, usdcBalance,

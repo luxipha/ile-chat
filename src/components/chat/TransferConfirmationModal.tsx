@@ -14,6 +14,7 @@ import { Card } from '../ui/Card';
 import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 import aptosService from '../../services/aptosService';
+import Service from '../../services/Service';
 import { useBalance } from '../../hooks/useBalance';
 
 interface ChatUserProfile {
@@ -54,11 +55,12 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
   const [showWalletPicker, setShowWalletPicker] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [aptosBalances, setAptosBalances] = useState<Record<string, string>>({});
+  const [baseBalances, setBaseBalances] = useState<{usdcBalance?: string, balance?: string}>({});
 
   // Use real wallet balances
   const { balances: Balances, isLoading: Loading } = useBalance();
 
-  // Fetch Aptos balances
+  // Fetch Aptos and Base balances
   useEffect(() => {
     const fetchAptosBalances = async () => {
       try {
@@ -75,8 +77,24 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
       }
     };
 
+    const fetchBaseBalances = async () => {
+      try {
+        const baseBalanceResult = await Service.getCurrentUserBaseBalance();
+        if (baseBalanceResult.success) {
+          console.log('🔵 Base balances for transfer:', baseBalanceResult);
+          setBaseBalances({
+            usdcBalance: baseBalanceResult.usdcBalance || '0',
+            balance: baseBalanceResult.balance || '0.000000 ETH'
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch Base balances:', error);
+      }
+    };
+
     if (visible) {
       fetchAptosBalances();
+      fetchBaseBalances();
     }
   }, [visible]);
 
@@ -98,15 +116,15 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
       icon: 'currency-bitcoin',
       type: 'crypto',
     },
-    // Include  USDC if available
-    ...(Balances?.usdc ? [{
-      id: 'usdc_',
-      name: 'USDC ()',
-      balance: parseFloat(Balances.usdc.amount || '0'),
+    // Include Base USDC
+    {
+      id: 'usdc_base',
+      name: 'USDC (Base)',
+      balance: parseFloat(baseBalances.usdcBalance || '0'),
       currency: 'USDC',
       icon: 'account-balance-wallet',
       type: 'crypto' as const,
-    }] : []),
+    },
   ];
 
   useEffect(() => {

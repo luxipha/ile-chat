@@ -398,24 +398,7 @@ function App() {
     }
   }, [activeTab, isAuthenticated, isCheckingAuth]);
 
-  // DEBUGGING: Track navigation visibility conditions
-  useEffect(() => {
-    if (isAuthenticated && !isCheckingAuth) {
-      const isVisible = !selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main';
-      console.log('🔧 Navigation visibility conditions changed:', {
-        isVisible,
-        selectedChat: !!selectedChat,
-        currentMeScreen,
-        showContactProfile,
-        selectedLoan: !!selectedLoan,
-        currentWalletScreen,
-        currentContactScreen,
-        activeTab,
-        isAuthenticated,
-        isCheckingAuth
-      });
-    }
-  }, [selectedChat, currentMeScreen, showContactProfile, selectedLoan, currentWalletScreen, currentContactScreen, activeTab, isAuthenticated, isCheckingAuth]);
+  // Navigation visibility conditions tracking removed to reduce frequent logging
 
   // Moments interaction handlers
   const handleLike = async (momentId: string) => {
@@ -595,117 +578,7 @@ function App() {
     }
   };
 
-  // Fetch wallet balance from both Aptos and EVM ()
-  const fetchWalletBalance = async (forceCheck = false) => {
-    // Skip if no wallets at all
-    if (!forceCheck && !hasAptosWallet && !hasWallet) {
-      console.log('⚠️ fetchWalletBalance skipped - no wallets detected:', { forceCheck, hasAptosWallet, hasWallet });
-      return;
-    }
-    
-    setIsLoadingWallet(true);
-    try {
-      console.log('🔄 Fetching wallet balances from Aptos + EVM...');
-      
-      // Create promises for parallel execution
-      const balanceFetches: Promise<{type: 'aptos' | 'evm', balances: any}>[] = [];
-      
-      // 1. Add Aptos balance fetch promise
-      console.log('🔍 Checking Aptos wallet for balance fetch:', { hasAptosWallet });
-      if (hasAptosWallet) {
-        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
-          if (aptosWallet.success && aptosWallet.address) {
-            console.log('🟣 Fetching Aptos USDC balance for address:', aptosWallet.address);
-            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
-            return { type: 'aptos' as const, balances: aptosBalances };
-          }
-          return { type: 'aptos' as const, balances: { success: false, error: 'No Aptos wallet' } };
-        });
-        balanceFetches.push(aptosPromise);
-      }
-      
-      // 2.  balance fetch removed - focusing on Aptos only
-      
-      // 3. Execute all promises in parallel and wait for completion
-      if (balanceFetches.length === 0) {
-        console.log('⚠️ No balance fetches to execute');
-        setWalletBalance({});
-        setTotalPortfolioValue(0);
-        return;
-      }
-      
-      console.log(`⏳ Waiting for ${balanceFetches.length} balance fetches to complete...`);
-      const results = await Promise.allSettled(balanceFetches);
-      
-      // 4. Process all results atomically
-      const flattenedBalances: { [key: string]: number } = {};
-      let totalUSDCValue = 0;
-      
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          const { type, balances } = result.value;
-          
-          if (type === 'aptos' && balances.success && balances.balances) {
-            console.log('✅ Processing Aptos balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]: [string, unknown]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Only include USDC from Aptos in portfolio calculation
-              if ((token as string).includes('USDC') || (token as string).toUpperCase() === 'USDC') {
-                flattenedBalances['USDC (Aptos)'] = balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
-              }
-              
-              // Also include APT for display but not in USDC total
-              if ((token as string).includes('APT') || (token as string).toUpperCase() === 'APT') {
-                flattenedBalances['APT (Aptos)'] = balanceNum;
-                console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
-              }
-            });
-          }
-          
-          if (type === 'evm' && balances.success && balances.balances) {
-            console.log('✅ Processing EVM balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Handle USDC from testnets or 
-              if ((token as string).includes('USDC')) {
-                const chainName = (token as string).includes('Ethereum') ? 'Ethereum Sepolia' : 
-                                 (token as string).includes('Polygon') ? 'Polygon Amoy' : 
-                                 (token as string).toUpperCase() === 'USDC' ? 'EVM' : token;
-                flattenedBalances[`USDC (${chainName})`] = balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from ${chainName}: ${balanceNum}`);
-              }
-              
-              // Handle native tokens (only if non-zero)
-              if ((token === 'ETH' || token === 'MATIC' || token === 'SOL') && balanceNum > 0) {
-                flattenedBalances[`${token} (${token === 'ETH' ? 'Ethereum' : token === 'MATIC' ? 'Polygon' : 'Solana'})`] = balanceNum;
-                console.log(`🔷 Added ${token} from EVM: ${balanceNum} (display only)`);
-              }
-            });
-          }
-        } else {
-          console.error(`❌ Balance fetch ${index} failed:`, result.reason);
-        }
-      });
-      
-      // 5. Update UI atomically with all balances at once
-      console.log('📊 Final combined balances:', flattenedBalances);
-      console.log('📈 Total USDC portfolio value:', totalUSDCValue);
-      
-      // Single atomic update to prevent UI flickering
-      setWalletBalance(flattenedBalances);
-      setTotalPortfolioValue(totalUSDCValue);
-    } catch (error: any) {
-      console.error('❌ Failed to get wallet balances:', error);
-      setWalletError(error.message || 'Failed to load wallet balances');
-    } finally {
-      setIsLoadingWallet(false);
-    }
-  };
+  // REMOVED: fetchWalletBalance function - replaced by WalletBalanceManager
 
   // Handle signup button press in preview mode
   const handleSignupPress = () => {
@@ -741,109 +614,7 @@ function App() {
     setShowLoginModal(true);
   };
 
-  // Fetch wallet balance using provided wallet states (bypasses async React state issues)
-  const fetchWalletBalanceWithStates = async (evmConnected: any, aptosConnected: boolean) => {
-    setIsLoadingWallet(true);
-    try {
-      console.log('🔄 Fetching wallet balances with direct states:', { evmConnected, aptosConnected });
-      
-      // Create promises for parallel execution
-      const balanceFetches: Promise<{type: 'aptos' | 'evm', balances: any}>[] = [];
-      
-      // 1. Add Aptos balance fetch promise
-      if (aptosConnected) {
-        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
-          if (aptosWallet.success && aptosWallet.address) {
-            console.log('🟣 Fetching Aptos USDC balance for address:', aptosWallet.address);
-            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
-            return { type: 'aptos' as const, balances: aptosBalances };
-          }
-          return { type: 'aptos' as const, balances: { success: false, error: 'No Aptos wallet' } };
-        });
-        balanceFetches.push(aptosPromise);
-      }
-      
-      // 2.  balance fetch removed - focusing on Aptos only
-      
-      // 3. Execute all promises in parallel and wait for completion
-      if (balanceFetches.length === 0) {
-        console.log('⚠️ No balance fetches to execute');
-        setWalletBalance({});
-        setTotalPortfolioValue(0);
-        return;
-      }
-      
-      console.log(`⏳ Waiting for ${balanceFetches.length} balance fetches to complete...`);
-      const results = await Promise.allSettled(balanceFetches);
-      
-      // 4. Process all results atomically
-      const flattenedBalances: { [key: string]: number } = {};
-      let totalUSDCValue = 0;
-      
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          const { type, balances } = result.value;
-          
-          if (type === 'aptos' && balances.success && balances.balances) {
-            console.log('✅ Processing Aptos balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Only include USDC from Aptos in portfolio calculation
-              if ((token as string).includes('USDC') || (token as string).toUpperCase() === 'USDC') {
-                flattenedBalances['USDC (Aptos)'] = balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
-              }
-              
-              // Also include APT for display but not in USDC total
-              if ((token as string).includes('APT') || (token as string).toUpperCase() === 'APT') {
-                flattenedBalances['APT (Aptos)'] = balanceNum;
-                console.log(`🟣 Added APT from Aptos: ${balanceNum} (display only)`);
-              }
-            });
-          }
-          
-          if (type === 'evm' && balances.success && balances.balances) {
-            console.log('✅ Processing EVM balances:', balances.balances);
-            Object.entries(balances.balances).forEach(([token, balance]: [string, unknown]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Handle USDC from testnets or 
-              if (token.includes('USDC')) {
-                const chainName = token.includes('Ethereum') ? 'Ethereum Sepolia' : 
-                                token.includes('Polygon') ? 'Polygon Amoy' : 
-                                 token.toUpperCase() === 'USDC' ? 'EVM' : token;
-                flattenedBalances[`USDC (${chainName})`] = balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from ${chainName}: ${balanceNum}`);
-              }
-              
-              // Handle native tokens (only if non-zero)
-              if ((token === 'ETH' || token === 'MATIC' || token === 'SOL') && balanceNum > 0) {
-                flattenedBalances[`${token} (${token === 'ETH' ? 'Ethereum' : token === 'MATIC' ? 'Polygon' : 'Solana'})`] = balanceNum;
-                console.log(`🔷 Added ${token} from EVM: ${balanceNum} (display only)`);
-              }
-            });
-          }
-        } else {
-          console.error(`❌ Balance fetch failed:`, result.reason);
-        }
-      });
-      
-      console.log('💎 Final aggregated balances:', flattenedBalances);
-      console.log('💰 Total USDC value:', totalUSDCValue);
-      
-      // Update state atomically
-      setWalletBalance(flattenedBalances);
-      setTotalPortfolioValue(totalUSDCValue);
-    } catch (error: any) {
-      console.error('❌ Failed to get wallet balances with states:', error);
-      setWalletError(error.message || 'Failed to load wallet balances');
-    } finally {
-      setIsLoadingWallet(false);
-    }
-  };
+  // fetchWalletBalanceWithStates function removed - replaced by WalletBalanceManager
 
   // Handle balance updates from WalletBalanceManager
   const handleBalanceUpdate = (balanceData: CombinedBalanceData) => {
@@ -3144,25 +2915,7 @@ function App() {
         <MainNavigation
           activeTab={activeTab}
           onTabSwitch={handleTabSwitch}
-          isVisible={(() => {
-            const isVisible = !selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main';
-            
-            // DEBUGGING: Log visibility conditions after login
-            if (isAuthenticated && !isCheckingAuth) {
-              console.log('🔧 MainNavigation visibility check:', {
-                isVisible,
-                selectedChat: !!selectedChat,
-                currentMeScreen,
-                showContactProfile,
-                selectedLoan: !!selectedLoan,
-                currentWalletScreen,
-                currentContactScreen,
-                activeTab
-              });
-            }
-            
-            return isVisible;
-          })()}
+          isVisible={!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main'}
         />
 
         <StatusBar style="auto" />
