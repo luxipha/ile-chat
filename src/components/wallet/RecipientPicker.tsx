@@ -1,19 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
-  TouchableOpacity,
-  StyleSheet,
+  Text,
   TextInput,
-  ScrollView,
+  TouchableOpacity,
+  FlatList,
+  Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
-import { Typography } from '../ui/Typography';
-import { Card } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Avatar } from '../ui/Avatar';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { QRScannerModal } from '../scanner/QRScannerModal';
+import { friendService, Friend } from '../../services/friendService';
 
 interface Contact {
   id: string;
@@ -21,10 +20,13 @@ interface Contact {
   avatar?: string;
   address?: string;
   isRecent?: boolean;
+  userId?: string;
+  username?: string;
+  trustBadge?: boolean;
 }
 
 interface RecipientPickerProps {
-  onSelectRecipient: (recipient: Contact) => void;
+  onSelectRecipient: (recipient: { id: string; name: string; address?: string }) => void;
   onBack: () => void;
 }
 
@@ -36,390 +38,390 @@ export const RecipientPicker: React.FC<RecipientPickerProps> = ({
   const [activeTab, setActiveTab] = useState<'contacts' | 'qr' | 'address'>('contacts');
   const [address, setAddress] = useState('');
   const [showQRScanner, setShowQRScanner] = useState(false);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>('');
 
-  const handleQRCodeScanned = (data: string) => {
-    console.log('QR Code scanned:', data);
-    
-    // Parse different QR code types
-    if (data.startsWith('wallet:')) {
-      const address = data.replace('wallet:', '');
-      onSelectRecipient({ id: Date.now().toString(), name: 'Scanned Wallet', address });
-    } else if (data.startsWith('payment:')) {
-      // Parse payment QR codes like payment:amount=100&currency=USD&to=address
-      const params = new URLSearchParams(data.replace('payment:', ''));
-      const address = params.get('to');
-      const name = params.get('name') || 'Payment Request';
-      if (address) {
-        onSelectRecipient({ id: Date.now().toString(), name, address });
+  // Load contacts when component mounts
+  useEffect(() => {
+    loadContacts();
+  }, []);
+
+  const loadContacts = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      // Get friends from the app's friends API
+      const friendsResponse = await friendService.getFriends();
+      
+      if (!friendsResponse.success) {
+        throw new Error('Failed to load friends list');
       }
-    } else if (data.startsWith('contact:')) {
-      // Parse contact QR codes
-      const params = new URLSearchParams(data.replace('contact:', ''));
-      const name = params.get('name') || 'Scanned Contact';
-      const email = params.get('email');
-      const address = params.get('address');
-      onSelectRecipient({ id: Date.now().toString(), name, address: address || email });
-    } else {
-      // Treat as wallet address
-      onSelectRecipient({ id: Date.now().toString(), name: 'Scanned Address', address: data });
+      
+      // Convert friends to our Contact interface
+      const friendContacts: Contact[] = friendsResponse.friends.map((friend: Friend) => ({
+        id: friend.id,
+        name: friend.name,
+        avatar: undefined, // Friends service doesn't include avatar yet
+        address: friend.id, // Using friend ID as address for now
+        isRecent: false,
+        userId: friend.id,
+        username: friend.email, // Using email as username for display
+        trustBadge: true, // All friends are trusted
+      }));
+
+      setContacts(friendContacts);
+      console.log(`✅ Loaded ${friendContacts.length} friends from app`);
+    } catch (error: any) {
+      console.error('Failed to load friends:', error);
+      setError('Failed to load friends. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const mockContacts: Contact[] = [
-    {
-      id: '1',
-      name: 'Sarah Anderson',
-      avatar: 'https://randomuser.me/api/portraits/women/1.jpg',
-      address: '0x1234...5678',
-      isRecent: true,
-    },
-    {
-      id: '2',
-      name: 'Michael Roberts',
-      avatar: 'https://randomuser.me/api/portraits/men/2.jpg',
-      address: '0x2345...6789',
-      isRecent: true,
-    },
-    {
-      id: '3',
-      name: 'Emma Thompson',
-      avatar: 'https://randomuser.me/api/portraits/women/2.jpg',
-      address: '0x3456...7890',
-    },
-    {
-      id: '4',
-      name: 'David Chen',
-      avatar: 'https://randomuser.me/api/portraits/men/3.jpg',
-      address: '0x4567...8901',
-    },
-  ];
+  const searchContacts = async (query: string) => {
+    if (!query.trim()) {
+      await loadContacts();
+      return;
+    }
 
-  const filteredContacts = mockContacts.filter(contact =>
-    contact.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const recentContacts = filteredContacts.filter(contact => contact.isRecent);
-  const allContacts = filteredContacts.filter(contact => !contact.isRecent);
-
-  const renderContact = (contact: Contact) => (
-    <TouchableOpacity
-      key={contact.id}
-      style={styles.contactItem}
-      onPress={() => onSelectRecipient(contact)}
-    >
-      <Avatar
-        name={contact.name}
-        imageUrl={contact.avatar}
-        size="medium"
+    setLoading(true);
+    try {
+      const searchResults = await friendService.searchUsers(query);
+      if (searchResults.success) {
+        const searchedContacts: Contact[] = searchResults.users.map((user: any) => ({
+          id: user.id,
+          name: user.name || user.username,
+          avatar: user.avatar,
+          address: user.id,
+          isRecent: false,
+          userId: user.id,
+          username: user.username,
+          trustBadge: false, // Search results are not necessarily friends
+        }));
         
-      />
-      <View style={styles.contactInfo}>
-        <Typography variant="h6">{contact.name}</Typography>
-        <Typography variant="body2" color="textSecondary">
-          {contact.address}
-        </Typography>
-      </View>
-      <MaterialIcons name="chevron-right" size={20} color={Colors.gray400} />
-    </TouchableOpacity>
+        setContacts(searchedContacts);
+      } else {
+        setError('Search failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+      setError('Search failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (searchQuery) {
+        searchContacts(searchQuery);
+      } else {
+        loadContacts();
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleQRCodeScanned = (data: string) => {
+    setShowQRScanner(false);
+    
+    try {
+      // Try to parse as JSON first (for QR codes with structured data)
+      const parsed = JSON.parse(data);
+      if (parsed.address) {
+        onSelectRecipient({ id: parsed.address, name: parsed.name || 'Unknown User', address: parsed.address });
+      } else {
+        onSelectRecipient({ id: data, name: 'Unknown User', address: data });
+      }
+    } catch {
+      // If not JSON, treat as plain address
+      onSelectRecipient({ id: data, name: 'Unknown User', address: data });
+    }
+  };
+
+  const handleAddressSubmit = () => {
+    if (!address.trim()) {
+      Alert.alert('Error', 'Please enter a valid address');
+      return;
+    }
+    onSelectRecipient({ id: address.trim(), name: 'Manual Entry', address: address.trim() });
+  };
+
+  const filteredContacts = contacts.filter(contact =>
+    contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (contact.username && contact.username.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const renderContactsTab = () => (
-    <ScrollView style={styles.tabContent}>
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <MaterialIcons name="search" size={20} color={Colors.gray500} />
-        <TextInput
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search contacts..."
-          placeholderTextColor={Colors.gray500}
-        />
-      </View>
+    <View style={{ flex: 1, padding: Spacing.md }}>
+      <TextInput
+        style={{
+          backgroundColor: Colors.gray100,
+          padding: Spacing.md,
+          borderRadius: BorderRadius.md,
+          marginBottom: Spacing.md,
+        }}
+        placeholder="Search contacts..."
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+      />
+      
+      {error && (
+          <View style={{ 
+            backgroundColor: Colors.gray50, 
+            padding: Spacing.md, 
+            borderRadius: BorderRadius.md, 
+            marginBottom: Spacing.md,
+            flexDirection: 'row',
+            alignItems: 'center'
+          }}>
+            <Ionicons name="warning" size={20} color={Colors.error} style={{ marginRight: Spacing.sm }} />
+            <Text style={{ color: Colors.error, flex: 1 }}>{error}</Text>
+            <TouchableOpacity 
+              onPress={loadContacts}
+              style={{ 
+                backgroundColor: Colors.error, 
+                paddingHorizontal: Spacing.sm, 
+                paddingVertical: Spacing.xs,
+                borderRadius: BorderRadius.sm 
+              }}
+            >
+              <Text style={{ color: 'white', fontSize: 12 }}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      {/* Recent */}
-      {recentContacts.length > 0 && (
-        <View style={styles.section}>
-          <Typography variant="h6" style={styles.sectionTitle}>Recent</Typography>
-          {recentContacts.map(renderContact)}
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={{ marginTop: Spacing.md, color: Colors.gray600 }}>
+            Loading friends...
+          </Text>
         </View>
-      )}
-
-      {/* All Contacts */}
-      {allContacts.length > 0 && (
-        <View style={styles.section}>
-          <Typography variant="h6" style={styles.sectionTitle}>All Contacts</Typography>
-          {allContacts.map(renderContact)}
-        </View>
-      )}
-    </ScrollView>
-  );
-
-  const renderQRTab = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.qrContainer}>
-        <MaterialIcons name="qr-code-scanner" size={80} color={Colors.gray400} />
-        <Typography variant="h5" style={styles.qrTitle}>Scan QR Code</Typography>
-        <Typography variant="body1" color="textSecondary" style={styles.qrDescription}>
-          Point your camera at a QR code to add recipient
-        </Typography>
-        <Button
-          title="Open Camera"
-          icon="camera-alt"
-          onPress={() => setShowQRScanner(true)}
-          style={styles.qrButton}
+      ) : (
+        <FlatList
+          data={filteredContacts}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: Spacing.md,
+                borderBottomWidth: 1,
+                borderBottomColor: Colors.gray200,
+              }}
+              onPress={() => onSelectRecipient({ 
+                 id: item.id,
+                 name: item.name,
+                 address: item.address || item.userId || ''
+               })}
+            >
+              <Image
+                source={{ uri: item.avatar || 'https://via.placeholder.com/40' }}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  marginRight: Spacing.md,
+                }}
+              />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ fontWeight: '600', fontSize: 16 }}>
+                    {item.name}
+                  </Text>
+                  {item.trustBadge && (
+                    <Ionicons 
+                      name="checkmark-circle" 
+                      size={16} 
+                      color={Colors.success} 
+                      style={{ marginLeft: Spacing.xs }} 
+                    />
+                  )}
+                </View>
+                {item.username && (
+                  <Text style={{ color: Colors.gray600, fontSize: 14 }}>
+                    @{item.username}
+                  </Text>
+                )}
+                {item.isRecent && (
+                  <Text style={{ color: Colors.primary, fontSize: 12 }}>
+                    Recent
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={() => (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 50 }}>
+                <Ionicons name="people-outline" size={48} color={Colors.gray400} />
+                <Text style={{ color: Colors.gray600, marginTop: Spacing.md, textAlign: 'center' }}>
+                  {searchQuery 
+                    ? 'No users found matching your search' 
+                    : 'No friends found'
+                  }
+                </Text>
+                {!searchQuery && (
+                  <Text style={{ color: Colors.gray500, marginTop: Spacing.sm, textAlign: 'center' }}>
+                    Add friends to send money to them!
+                  </Text>
+                )}
+              </View>
+          )}
         />
-      </View>
+      )}
     </View>
   );
 
-  const renderAddressTab = () => {
-    const handleAddAddress = () => {
-      if (!address.trim()) {
-        Alert.alert('Error', 'Please enter a wallet address');
-        return;
-      }
-      
-      const newContact: Contact = {
-        id: Date.now().toString(),
-        name: `Address ${address.slice(0, 6)}...${address.slice(-4)}`,
-        address: address.trim(),
-      };
-      
-      onSelectRecipient(newContact);
-    };
+  const renderQRTab = () => (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.lg }}>
+      <Ionicons name="qr-code-outline" size={80} color={Colors.gray400} />
+      <Text style={{ fontSize: 18, fontWeight: '600', marginTop: Spacing.lg, marginBottom: Spacing.md }}>
+        Scan QR Code
+      </Text>
+      <Text style={{ 
+        textAlign: 'center', 
+        color: Colors.gray600, 
+        marginBottom: Spacing.xl,
+        paddingHorizontal: Spacing.xl 
+      }}>
+        Scan a QR code to quickly add a recipient's wallet address
+      </Text>
+      <TouchableOpacity
+        style={{
+          backgroundColor: Colors.primary,
+          paddingHorizontal: Spacing.xl,
+          paddingVertical: Spacing.md,
+          borderRadius: BorderRadius.md,
+          minWidth: 200,
+          alignItems: 'center',
+        }}
+        onPress={() => setShowQRScanner(true)}
+      >
+        <Text style={{ color: 'white', fontWeight: '600' }}>Open Scanner</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
-    return (
-      <View style={styles.tabContent}>
-        <View style={styles.addressContainer}>
-          <Typography variant="h6" style={styles.addressTitle}>
-            Enter Wallet Address
-          </Typography>
-          <TextInput
-            style={styles.addressInput}
-            value={address}
-            onChangeText={setAddress}
-            placeholder="0x... Aptos address"
-            placeholderTextColor={Colors.gray500}
-            multiline
-          />
-          <Button
-            title="Add Recipient"
-            onPress={handleAddAddress}
-            style={styles.addressButton}
-          />
-        </View>
-      </View>
-    );
-  };
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'contacts': return renderContactsTab();
-      case 'qr': return renderQRTab();
-      case 'address': return renderAddressTab();
-      default: return renderContactsTab();
-    }
-  };
+  const renderAddressTab = () => (
+    <View style={{ padding: Spacing.lg }}>
+      <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: Spacing.lg }}>
+        Enter Wallet Address
+      </Text>
+      <TextInput
+        style={{
+          borderWidth: 1,
+          borderColor: Colors.gray300,
+          borderRadius: BorderRadius.md,
+          padding: Spacing.lg,
+          fontSize: 16,
+          marginBottom: Spacing.xl,
+          minHeight: 80,
+          textAlignVertical: 'top',
+        }}
+        placeholder="Enter wallet address (0x...)"
+        value={address}
+        onChangeText={setAddress}
+        multiline
+      />
+      <TouchableOpacity
+        style={{
+          backgroundColor: address.trim() ? Colors.primary : Colors.gray300,
+          paddingVertical: Spacing.md,
+          borderRadius: BorderRadius.md,
+          alignItems: 'center',
+        }}
+        disabled={!address.trim()}
+        onPress={handleAddressSubmit}
+      >
+        <Text style={{ 
+          color: address.trim() ? 'white' : Colors.gray500, 
+          fontWeight: '600' 
+        }}>
+          Add Recipient
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray200,
+      }}>
+        <TouchableOpacity onPress={onBack} style={{ padding: Spacing.xs }}>
+          <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
-        <Typography variant="h3">Select Recipient</Typography>
-        <View style={styles.headerSpacer} />
+        <Text style={{ fontSize: 18, fontWeight: '600' }}>Select Recipient</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'contacts' && styles.activeTab]}
-          onPress={() => setActiveTab('contacts')}
-        >
-          <MaterialIcons 
-            name="contacts" 
-            size={20} 
-            color={activeTab === 'contacts' ? Colors.primary : Colors.gray500} 
-          />
-          <Typography 
-            variant="body2" 
-            color={activeTab === 'contacts' ? 'primary' : 'textSecondary'}
-            style={styles.tabText}
+      {/* Tab Bar */}
+      <View style={{
+        flexDirection: 'row',
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray200,
+      }}>
+        {(['contacts', 'qr', 'address'] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: Spacing.md,
+              borderBottomWidth: activeTab === tab ? 2 : 0,
+              borderBottomColor: Colors.primary,
+            }}
+            onPress={() => setActiveTab(tab)}
           >
-            Contacts
-          </Typography>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'qr' && styles.activeTab]}
-          onPress={() => setActiveTab('qr')}
-        >
-          <MaterialIcons 
-            name="qr-code" 
-            size={20} 
-            color={activeTab === 'qr' ? Colors.primary : Colors.gray500} 
-          />
-          <Typography 
-            variant="body2" 
-            color={activeTab === 'qr' ? 'primary' : 'textSecondary'}
-            style={styles.tabText}
-          >
-            QR Code
-          </Typography>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'address' && styles.activeTab]}
-          onPress={() => setActiveTab('address')}
-        >
-          <MaterialIcons 
-            name="alternate-email" 
-            size={20} 
-            color={activeTab === 'address' ? Colors.primary : Colors.gray500} 
-          />
-          <Typography 
-            variant="body2" 
-            color={activeTab === 'address' ? 'primary' : 'textSecondary'}
-            style={styles.tabText}
-          >
-            Address
-          </Typography>
-        </TouchableOpacity>
+            <Ionicons
+              name={
+                tab === 'contacts' ? 'people' :
+                tab === 'qr' ? 'qr-code' : 'create'
+              }
+              size={16}
+              color={activeTab === tab ? Colors.primary : Colors.gray500}
+              style={{ marginRight: Spacing.xs }}
+            />
+            <Text style={{
+              fontSize: 12,
+              color: activeTab === tab ? Colors.primary : Colors.gray500,
+              textTransform: 'capitalize',
+            }}>
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Tab Content */}
-      {renderTabContent()}
-      
+      <View style={{ flex: 1 }}>
+        {activeTab === 'contacts' && renderContactsTab()}
+        {activeTab === 'qr' && renderQRTab()}
+        {activeTab === 'address' && renderAddressTab()}
+      </View>
+
       {/* QR Scanner Modal */}
       <QRScannerModal
         isVisible={showQRScanner}
         onClose={() => setShowQRScanner(false)}
         onQRCodeScanned={handleQRCodeScanned}
-        title="Scan Recipient"
-        description="Scan a QR code to add recipient"
       />
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
-  },
-  backButton: {
-    padding: Spacing.xs,
-  },
-  headerSpacer: {
-    width: 24,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.md,
-    gap: Spacing.xs,
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: Colors.primary,
-  },
-  tabText: {
-    fontSize: 12,
-  },
-  tabContent: {
-    flex: 1,
-    padding: Spacing.lg,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: Spacing.md,
-    fontSize: 16,
-    color: Colors.textPrimary,
-  },
-  section: {
-    marginBottom: Spacing.xl,
-  },
-  sectionTitle: {
-    marginBottom: Spacing.md,
-    fontWeight: '600',
-  },
-  contactItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-  contactInfo: {
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
-  qrContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing['4xl'],
-  },
-  qrTitle: {
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.md,
-    fontWeight: '600',
-  },
-  qrDescription: {
-    textAlign: 'center',
-    marginBottom: Spacing.xl,
-    paddingHorizontal: Spacing.xl,
-  },
-  qrButton: {
-    minWidth: 200,
-  },
-  addressContainer: {
-    paddingVertical: Spacing.xl,
-  },
-  addressTitle: {
-    marginBottom: Spacing.lg,
-    fontWeight: '600',
-  },
-  addressInput: {
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
-    fontSize: 16,
-    color: Colors.textPrimary,
-    marginBottom: Spacing.xl,
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  addressButton: {
-    width: '100%',
-  },
-});

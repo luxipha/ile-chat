@@ -48,6 +48,7 @@ import { QRScannerModal } from './src/components/scanner/QRScannerModal';
 import { AddContactScreen } from './src/components/contacts/AddContactScreen';
 import { FriendRequestsScreen } from './src/components/friends/FriendRequestsScreen';
 import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
+import { MainNavigation, TabName } from './src/components/ui/MainNavigation';
 import { LoadingOverlay } from './src/components/ui/LoadingOverlay';
 import { SkeletonContactItem, SkeletonCard } from './src/components/ui/SkeletonLoader';
 import Toast from 'react-native-toast-message';
@@ -77,7 +78,6 @@ import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupC
 
 import { FXOffer, FXTrade } from './src/types/fx';
 
-type TabName = 'chat' | 'contact' | 'wallet' | 'moments' | 'me';
 type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'blockedUsers' | 'sendFeedback' | 'about' | 'qrCode';
 type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings';
 type FXScreen = 'marketplace' | 'offer_detail' | 'trade_room';
@@ -144,7 +144,13 @@ function App() {
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentMeScreen, setCurrentMeScreen] = useState<MeScreen>('main');
-  const [currentWalletScreen, setCurrentWalletScreen] = useState<WalletScreen>('main');
+  const [currentWalletScreen, setCurrentWalletScreenInternal] = useState<WalletScreen>('main');
+  
+  // DEBUGGING: Wrapper to log all currentWalletScreen changes
+  const setCurrentWalletScreen = (screen: WalletScreen) => {
+    console.log('🔧 setCurrentWalletScreen called:', { from: currentWalletScreen, to: screen });
+    setCurrentWalletScreenInternal(screen);
+  };
   const [showContactProfile, setShowContactProfile] = useState(false);
   const [selectedContact, setSelectedContact] = useState<{
     name: string; 
@@ -390,6 +396,25 @@ function App() {
       setMomentsError('Authentication required to view moments');
     }
   }, [activeTab, isAuthenticated, isCheckingAuth]);
+
+  // DEBUGGING: Track navigation visibility conditions
+  useEffect(() => {
+    if (isAuthenticated && !isCheckingAuth) {
+      const isVisible = !selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main';
+      console.log('🔧 Navigation visibility conditions changed:', {
+        isVisible,
+        selectedChat: !!selectedChat,
+        currentMeScreen,
+        showContactProfile,
+        selectedLoan: !!selectedLoan,
+        currentWalletScreen,
+        currentContactScreen,
+        activeTab,
+        isAuthenticated,
+        isCheckingAuth
+      });
+    }
+  }, [selectedChat, currentMeScreen, showContactProfile, selectedLoan, currentWalletScreen, currentContactScreen, activeTab, isAuthenticated, isCheckingAuth]);
 
   // Moments interaction handlers
   const handleLike = async (momentId: string) => {
@@ -699,26 +724,13 @@ function App() {
 
     const normalizedEmail = email.trim().toLowerCase();
     setLoginInitialEmail(normalizedEmail);
-    setGeneralLoadingMessage('Sending verification code...');
-    setIsLoadingGeneral(true);
-
-    try {
-      const result = await emailAuthService.sendVerificationCode(normalizedEmail);
-
-      if (result.success) {
-        setLoginInitialStep('verification');
-      } else {
-        Alert.alert('Verification Failed', result.error || 'We could not send a verification code. Please try again.');
-        setLoginInitialStep('email');
-      }
-    } catch (error) {
-      console.error('Onboarding verification error:', error);
-      Alert.alert('Network Error', 'We could not reach the server. Please try again.');
-      setLoginInitialStep('email');
-    } finally {
-      setIsLoadingGeneral(false);
-      setShowLoginModal(true);
-    }
+    
+    // Show login modal immediately for better UX
+    setLoginInitialStep('verification');
+    setShowLoginModal(true);
+    
+    // Note: The LoginScreen will handle sending the verification code
+    // This prevents users from waiting in limbo while SMTP processes
   };
 
   const handleOnboardingLogin = () => {
@@ -969,6 +981,10 @@ function App() {
             name: sessionResult.user?.name || '',
             email: sessionResult.user?.email || '',
           }));
+          
+          // DEBUGGING: Ensure wallet screen is set to main after auth restore
+          console.log('🔧 checkAuthStatus: Setting currentWalletScreen to main');
+          setCurrentWalletScreen('main');
         }
       }
     } catch (error) {
@@ -981,6 +997,7 @@ function App() {
   const handleLoginSuccess = (userData: User) => {
     setCurrentUser(userData);
     setIsAuthenticated(true);
+    setIsCheckingAuth(false); // Ensure loading state is cleared after login
     
     // Get and store the auth token for marketplace integration
     const token = authService.getToken();
@@ -997,6 +1014,10 @@ function App() {
       name: userData.name || '',
       email: userData.email || '',
     }));
+    
+    // DEBUGGING: Ensure wallet screen is set to main after login
+    console.log('🔧 handleLoginSuccess: Setting currentWalletScreen to main');
+    setCurrentWalletScreen('main');
     
     console.log('User logged in:', userData);
   };
@@ -1341,12 +1362,17 @@ function App() {
   const handleTabSwitch = (tab: TabName) => {
     if (tab === activeTab) return;
     
+    console.log('🔧 handleTabSwitch:', { from: activeTab, to: tab });
+    
     setActiveTab(tab);
     clearErrors(); // Clear previous errors
     
     // Reset sub-screen states when switching tabs
     if (tab !== 'me') setCurrentMeScreen('main');
-    if (tab !== 'wallet') setCurrentWalletScreen('main');
+    if (tab !== 'wallet') {
+      console.log('🔧 Setting currentWalletScreen to main because switching away from wallet');
+      setCurrentWalletScreen('main');
+    }
     if (tab !== 'contact') setCurrentContactScreen('main');
     
     // Load friend requests when switching to contact tab
@@ -1564,6 +1590,7 @@ function App() {
                 <TouchableOpacity 
                   style={styles.notificationButton}
                   onPress={() => {
+                    console.log('🔧 User tapped notifications button - setting currentWalletScreen to notifications');
                     setCurrentWalletScreen('notifications');
                   }}
                 >
@@ -2796,7 +2823,7 @@ function App() {
               name={currentUser?.name || 'User'}
               role="Investor"
               region="Lagos, Nigeria"
-              joinDate="March 2024"
+              createdAt={currentUser?.createdAt}
               bricksCount={currentUser?.bricks || 0}
               trustBadge="verified"
               trustLevel={4}
@@ -2850,7 +2877,7 @@ function App() {
               </TouchableOpacity>
 
               {/* Debug Panel - Only show in development */}
-              {__DEV__ && (
+              {/* {__DEV__ && (
                 <TouchableOpacity onPress={() => setShowDebugPanel(true)}>
                   <View style={[styles.menuItem, styles.menuItemSpacing]}>
                     <MaterialIcons name="bug-report" size={24} color={Colors.warning} />
@@ -2861,7 +2888,7 @@ function App() {
                     <MaterialIcons name="chevron-right" size={24} color={Colors.gray400} style={{ marginLeft: Spacing.sm }} />
                   </View>
                 </TouchableOpacity>
-              )}
+              )} */}
             </View>
           </ScrollView>
         );
@@ -3133,6 +3160,7 @@ function App() {
                 }}
                 onLoginSuccess={handleLoginSuccess}
                 initialEmail={loginInitialEmail}
+                initialStep={loginInitialStep}
               />
             </SafeAreaView>
           </SafeAreaProvider>
@@ -3155,81 +3183,30 @@ function App() {
           {/* Content */}
           {renderContent()}
 
-        {/* Tab Bar - Hide when in chat room or on sub-screens */}
-        {!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main' && (
-          <View style={styles.tabBar}>
-          <TouchableOpacity 
-            style={styles.tabItem}
-            onPress={() => handleTabSwitch('chat')}
-          >
-            <MaterialIcons 
-              name="chat" 
-              size={24} 
-              color={activeTab === 'chat' ? Colors.primary : Colors.gray600} 
-            />
-            <Typography variant="caption" color={activeTab === 'chat' ? 'primary' : 'textSecondary'}>
-              Chat
-            </Typography>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.tabItem}
-            onPress={() => handleTabSwitch('contact')}
-          >
-            <MaterialIcons 
-              name="contacts" 
-              size={24} 
-              color={activeTab === 'contact' ? Colors.primary : Colors.gray600} 
-            />
-            <Typography variant="caption" color={activeTab === 'contact' ? 'primary' : 'textSecondary'}>
-              Contact
-            </Typography>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.tabItem}
-            onPress={() => handleTabSwitch('wallet')}
-          >
-            <MaterialIcons 
-              name="account-balance-wallet" 
-              size={24} 
-              color={activeTab === 'wallet' ? Colors.primary : Colors.gray600} 
-            />
-            <Typography variant="caption" color={activeTab === 'wallet' ? 'primary' : 'textSecondary'}>
-              Wallet
-            </Typography>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.tabItem}
-            onPress={() => handleTabSwitch('moments')}
-          >
-            <MaterialIcons 
-              name="photo-library" 
-              size={24} 
-              color={activeTab === 'moments' ? Colors.primary : Colors.gray600} 
-            />
-            <Typography variant="caption" color={activeTab === 'moments' ? 'primary' : 'textSecondary'}>
-              Moments
-            </Typography>
-          </TouchableOpacity>
-
-
-          <TouchableOpacity 
-            style={styles.tabItem}
-            onPress={() => handleTabSwitch('me')}
-          >
-            <MaterialIcons 
-              name="person" 
-              size={24} 
-              color={activeTab === 'me' ? Colors.primary : Colors.gray600} 
-            />
-            <Typography variant="caption" color={activeTab === 'me' ? 'primary' : 'textSecondary'}>
-              Me
-            </Typography>
-          </TouchableOpacity>
-          </View>
-        )}
+        {/* Main Navigation */}
+        <MainNavigation
+          activeTab={activeTab}
+          onTabSwitch={handleTabSwitch}
+          isVisible={(() => {
+            const isVisible = !selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main';
+            
+            // DEBUGGING: Log visibility conditions after login
+            if (isAuthenticated && !isCheckingAuth) {
+              console.log('🔧 MainNavigation visibility check:', {
+                isVisible,
+                selectedChat: !!selectedChat,
+                currentMeScreen,
+                showContactProfile,
+                selectedLoan: !!selectedLoan,
+                currentWalletScreen,
+                currentContactScreen,
+                activeTab
+              });
+            }
+            
+            return isVisible;
+          })()}
+        />
 
         <StatusBar style="auto" />
 

@@ -1042,7 +1042,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               }
             } catch (error) {
               console.error('Failed to get recipient profile:', error);
-              Alert.alert('Error', 'Network error. Please try again.');
+              // Keep console logging for debugging, but remove user-facing alert
             }
           }}
           onSendImage={async (imageUri) => {

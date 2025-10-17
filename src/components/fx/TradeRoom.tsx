@@ -1145,12 +1145,12 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
       return (
         <View style={[FXTheme.layouts.column, isOwnMessage ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
           {/* Show the actual image */}
-          {message.paymentProof.receipt && (
+          {message.paymentProof?.receipt && (
             <TouchableOpacity onPress={() => {
-              setViewingImage(message.paymentProof.receipt!);
+              setViewingImage(message.paymentProof?.receipt!);
             }}>
               <Image 
-                source={{ uri: message.paymentProof.receipt }} 
+                source={{ uri: message.paymentProof?.receipt }} 
                 style={{
                   width: 200,
                   height: 150,
@@ -1170,10 +1170,10 @@ export const TradeRoom: React.FC<TradeRoomProps> = ({
             maxWidth: 200,
           }}>
             <Typography variant="caption" style={{ fontSize: 10 }}>
-              💰 {message.paymentProof.currency} {message.paymentProof.amount?.toLocaleString()}
+              💰 {message.paymentProof?.currency} {message.paymentProof?.amount?.toLocaleString()}
             </Typography>
             <Typography variant="caption" style={{ fontSize: 10, color: Colors.gray600 }}>
-              {message.paymentProof.method} • {message.paymentProof.transactionId}
+              {message.paymentProof?.method} • {message.paymentProof?.transactionId}
             </Typography>
           </View>
           

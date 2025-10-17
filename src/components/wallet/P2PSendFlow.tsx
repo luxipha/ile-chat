@@ -16,6 +16,7 @@ import { Colors, Spacing, BorderRadius } from '../../theme';
 import { RecipientPicker } from './RecipientPicker';
 import Service from '../../services/Service';
 import aptosService from '../../services/aptosService';
+import baseService from '../../services/baseService';
 
 interface Contact {
   id: string;
@@ -31,6 +32,7 @@ interface Token {
   balance: number;
   icon: string;
   type: 'crypto' | 'property';
+  network?: 'aptos' | 'base' | 'ethereum';
 }
 
 
@@ -64,16 +66,18 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
   const [isLoadingBalances, setIsLoadingBalances] = useState(false);
   const [realBalances, setRealBalances] = useState<{[key: string]: string}>({});
   const [aptBalance, setAptBalance] = useState<number>(0);
+  const [baseBalances, setBaseBalances] = useState<{[key: string]: string}>({});
 
   // Fetch real wallet balances when component mounts or when stepping to amount
   const fetchWalletBalances = async () => {
     setIsLoadingBalances(true);
     try {
+      // Fetch Aptos balances
       const walletResult = await aptosService.getWallet();
       if (walletResult.success && walletResult.address) {
         const balancesResult = await aptosService.getAllBalances(walletResult.address);
         if (balancesResult.success && balancesResult.balances) {
-          console.log('💰 Real wallet balances:', balancesResult.balances);
+          console.log('💰 Real Aptos wallet balances:', balancesResult.balances);
           setRealBalances(balancesResult.balances);
           
           // Also fetch APT balance for gas fee checking
@@ -81,6 +85,27 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
           const aptBalance = parseFloat(aptRaw) / 100_000_000;
           setAptBalance(aptBalance);
         }
+      }
+
+      // Fetch Base balances
+      try {
+        const baseWalletResult = await baseService.getWallet();
+        if (baseWalletResult.success && baseWalletResult.address) {
+          const baseBalanceResult = await baseService.getBalance(baseWalletResult.address);
+          if (baseBalanceResult.success) {
+            console.log('💰 Real Base wallet balances:', baseBalanceResult);
+            setBaseBalances({
+              ETH: baseBalanceResult.ethBalance || '0',
+              ETH_FORMATTED: baseBalanceResult.ethBalanceFormatted || '0.000000 ETH',
+              USDC: baseBalanceResult.usdcBalance || '0',
+              USDC_FORMATTED: baseBalanceResult.usdcBalanceFormatted || '0.000000 USDC'
+            });
+          }
+        }
+      } catch (baseError) {
+        console.warn('⚠️ Failed to fetch Base balances:', baseError);
+        // Set empty Base balances if error
+        setBaseBalances({});
       }
     } catch (error) {
       console.error('❌ Failed to fetch wallet balances:', error);
@@ -91,6 +116,7 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
 
   // Generate tokens list with real balances
   const getTokensWithRealBalances = (): Token[] => {
+    // Aptos token balances
     const aptRaw = realBalances['APT'] || '0';
     const usdcRaw = realBalances['USDC'] || '0';
     
@@ -98,7 +124,16 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
     const aptBalance = parseFloat(aptRaw) / 100_000_000;
     const usdcBalance = parseFloat(usdcRaw);
     
-    console.log('💰 Token balances:', { aptRaw, usdcRaw, aptBalance, usdcBalance });
+    // Base token balances (already in ETH format)
+    const baseEthRaw = baseBalances['ETH'] || '0';
+    const baseUsdcRaw = baseBalances['USDC'] || '0';
+    const baseEthBalance = parseFloat(baseEthRaw) / 1e18; // Convert from wei to ETH
+    const baseUsdcBalance = parseFloat(baseUsdcRaw) / 1e6; // Convert from USDC smallest unit
+    
+    console.log('💰 Token balances:', { 
+      aptRaw, usdcRaw, aptBalance, usdcBalance,
+      baseEthRaw, baseUsdcRaw, baseEthBalance, baseUsdcBalance 
+    });
     
     const allTokens = [
       {
@@ -108,14 +143,34 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
         balance: aptBalance,
         icon: 'currency-bitcoin',
         type: 'crypto',
+        network: 'aptos'
       },
       {
         id: '2',
         symbol: 'USDC',
-        name: 'USD Coin',
+        name: 'USD Coin (Aptos)',
         balance: usdcBalance,
         icon: 'attach-money',
         type: 'crypto',
+        network: 'aptos'
+      },
+      {
+        id: '3',
+        symbol: 'ETH',
+        name: 'Ethereum (Base)',
+        balance: baseEthBalance,
+        icon: 'currency-eth',
+        type: 'crypto',
+        network: 'base'
+      },
+      {
+        id: '4',
+        symbol: 'USDC',
+        name: 'USD Coin (Base)',
+        balance: baseUsdcBalance,
+        icon: 'attach-money',
+        type: 'crypto',
+        network: 'base'
       },
     ];
     
@@ -193,21 +248,29 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
     try {
       let result;
       
-      // Send using Aptos blockchain
-      if (selectedToken.symbol === 'APT') {
-        // Send APT (native Aptos token)
-        if (!selectedRecipient.address) {
-          throw new Error('Recipient address is required for Aptos transactions');
+      if (!selectedRecipient.address) {
+        throw new Error('Recipient address is required for transactions');
+      }
+      
+      // Send using appropriate blockchain based on token network
+      if (selectedToken.network === 'aptos') {
+        if (selectedToken.symbol === 'APT') {
+          result = await aptosService.sendAPT(selectedRecipient.address, parseFloat(amount));
+        } else if (selectedToken.symbol === 'USDC') {
+          result = await aptosService.sendUSDC(selectedRecipient.address, parseFloat(amount));
+        } else {
+          throw new Error(`Unsupported Aptos token: ${selectedToken.symbol}`);
         }
-        result = await aptosService.sendAPT(selectedRecipient.address, parseFloat(amount));
-      } else if (selectedToken.symbol === 'USDC') {
-        // Send USDC (Fungible Asset)
-        if (!selectedRecipient.address) {
-          throw new Error('Recipient address is required for Aptos transactions');
+      } else if (selectedToken.network === 'base') {
+        if (selectedToken.symbol === 'ETH') {
+          result = await baseService.sendETH(selectedRecipient.address, parseFloat(amount));
+        } else if (selectedToken.symbol === 'USDC') {
+          result = await baseService.sendUSDC(selectedRecipient.address, parseFloat(amount));
+        } else {
+          throw new Error(`Unsupported Base token: ${selectedToken.symbol}`);
         }
-        result = await aptosService.sendUSDC(selectedRecipient.address, parseFloat(amount));
       } else {
-        throw new Error(`Unsupported token: ${selectedToken.symbol}`);
+        throw new Error(`Unsupported network: ${selectedToken.network}`);
       }
 
       if (result.success) {

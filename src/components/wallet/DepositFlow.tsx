@@ -16,6 +16,7 @@ import { Colors, Spacing, BorderRadius } from '../../theme';
 import QRCode from 'react-native-qrcode-svg';
 import Service from '../../services/Service';
 import aptosService from '../../services/aptosService';
+import baseService from '../../services/baseService';
 
 interface DepositFlowProps {
   visible: boolean;
@@ -23,7 +24,7 @@ interface DepositFlowProps {
 }
 
 type DepositStep = 'method' | 'network' | 'address';
-type CryptoNetwork = 'USDC_ETHEREUM' | 'USDC_APTOS';
+type CryptoNetwork = 'USDC_ETHEREUM' | 'USDC_APTOS' | 'BASE_NETWORK';
 
 const USDC_NETWORKS = [
   { 
@@ -34,6 +35,15 @@ const USDC_NETWORKS = [
     chain: 'aptos-testnet',
     description: 'USDC on Aptos testnet',
     type: 'aptos' as const
+  },
+  { 
+    id: 'BASE_NETWORK' as CryptoNetwork,
+    name: 'Base Sepolia', 
+    token: 'ETH/USDC',
+    icon: 'account-balance-wallet',
+    chain: 'base-sepolia',
+    description: 'ETH and USDC on Base network (L2)',
+    type: 'base' as const
   },
   { 
     id: 'USDC_ETHEREUM' as CryptoNetwork,
@@ -200,13 +210,111 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
               throw new Error('No Aptos wallet found. Please create a wallet first.');
             }
           }
+        } else if (networkData.type === 'base') {
+          // Check if Base wallet exists in backend database
+          console.log('🔵 Checking Base wallet for chain:', networkData.chain);
+          console.log('🔵 Looking for wallet type: base');
+          let backendWallet;
+          try {
+            console.log('🔵 Calling Service.getBaseWallet...');
+            backendWallet = await Service.getBaseWallet();
+            console.log('🔵 Backend Base wallet response:', {
+              success: backendWallet?.success,
+              hasWallet: !!backendWallet?.wallet,
+              walletAddress: backendWallet?.wallet?.address,
+              error: backendWallet?.error
+            });
+          } catch (error) {
+            console.log('⚠️ Error checking Base backend wallet:', error);
+            backendWallet = { success: false };
+          }
+          
+          if (backendWallet && backendWallet.success && backendWallet.wallet) {
+            // Base wallet exists in database, use it
+            console.log('✅ Using existing Base wallet from database:', backendWallet.wallet.address);
+            setWalletAddresses(prev => ({
+              ...prev,
+              [networkData.chain]: backendWallet.wallet.address
+            }));
+          } else {
+            // Check AsyncStorage as fallback
+            console.log('🔵 Database failed, checking AsyncStorage for Base wallet...');
+            try {
+              const localWalletData = await AsyncStorage.getItem('base_wallet');
+              if (localWalletData) {
+                try {
+                  const parsedWallet = JSON.parse(localWalletData);
+                  console.log('🔍 Parsed Base wallet data:', parsedWallet);
+                  
+                  if (parsedWallet && parsedWallet.address && typeof parsedWallet.address === 'string' && parsedWallet.address.length > 0) {
+                    console.log('✅ Found valid Base wallet in AsyncStorage:', parsedWallet.address);
+                    setWalletAddresses(prev => ({
+                      ...prev,
+                      [networkData.chain]: parsedWallet.address
+                    }));
+                  } else {
+                    console.log('❌ Invalid wallet data structure:', parsedWallet);
+                    console.log('🧹 Clearing corrupted wallet data...');
+                    await AsyncStorage.removeItem('base_wallet');
+                    throw new Error('Invalid wallet data in AsyncStorage - cleared corrupted data');
+                  }
+                } catch (parseError) {
+                  console.log('❌ JSON parse error for Base wallet data:', parseError);
+                  console.log('🧹 Clearing corrupted wallet data...');
+                  await AsyncStorage.removeItem('base_wallet');
+                  throw new Error('Corrupted wallet data in AsyncStorage - cleared corrupted data');
+                }
+              } else {
+                // No wallet found anywhere - create a new one
+                console.log('🆕 No Base wallet found, creating new wallet...');
+                const walletResult = await baseService.generateWallet();
+                
+                if (walletResult.success && walletResult.address) {
+                  console.log('✅ Created new Base wallet:', walletResult.address);
+                  setWalletAddresses(prev => ({
+                    ...prev,
+                    [networkData.chain]: walletResult.address!
+                  }));
+                  
+                  // Show success message
+                  Alert.alert(
+                    '🎉 Base Wallet Created!',
+                    `Your Base wallet has been created on ${networkData.name}.\n\nAddress: ${walletResult.address.slice(0, 12)}...${walletResult.address.slice(-12)}\n\nYou can get testnet ETH from the Base faucet.`,
+                    [{ text: 'Continue', style: 'default' }]
+                  );
+                } else {
+                  throw new Error(walletResult.error || 'Failed to create Base wallet');
+                }
+              }
+            } catch (storageError) {
+              console.error('❌ Base wallet fallback failed:', storageError);
+              throw new Error('No Base wallet found. Please create a wallet first.');
+            }
+          }
         }
       } catch (error: any) {
         console.error('❌ Failed to load wallet address:', error);
-        Alert.alert(
-          'Wallet Not Found', 
-          `No ${networkData.name} wallet found. Please create a wallet first from the main screen.`
-        );
+        
+        // Check if it's an authentication error
+        const errorMessage = error?.message || '';
+        if (errorMessage.includes('Authentication') || errorMessage.includes('log in')) {
+          Alert.alert(
+            '🔐 Login Required', 
+            `Please log in to your account first to create a ${networkData.name} wallet.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Go to Login', style: 'default', onPress: () => {
+                // Close the deposit flow and let user navigate to login
+                handleClose();
+              }}
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Wallet Error', 
+            errorMessage.includes('No') ? errorMessage : `Failed to load ${networkData.name} wallet. ${errorMessage}`
+          );
+        }
       } finally {
         setIsLoadingAddress(false);
       }
@@ -361,17 +469,18 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                 Network: {selectedNetworkData.name}
               </Typography>
               <Typography variant="caption" style={styles.networkBadgeText}>
-                Wallet: {selectedNetworkData.type === 'aptos' ? 'Aptos' : ''}
+                Wallet: {selectedNetworkData.type === 'aptos' ? 'Aptos' : selectedNetworkData.type === 'base' ? 'Base' : 'EVM'}
               </Typography>
             </View>
             
             <View style={styles.warningContainer}>
               <MaterialIcons name="warning" size={20} color={Colors.warning} />
               <Typography variant="caption" color="warning" style={styles.warningText}>
-                Only send USDC on {selectedNetworkData.name} to this address. 
-                {selectedNetworkData.type === 'aptos' 
-                  ? ' This is an Aptos testnet address.' 
-                  : ' This is a -managed address for EVM testnets.'
+                {selectedNetworkData.type === 'base' 
+                  ? `Only send ETH or USDC on ${selectedNetworkData.name} to this address. This is a Base testnet address.`
+                  : selectedNetworkData.type === 'aptos'
+                    ? `Only send USDC on ${selectedNetworkData.name} to this address. This is an Aptos testnet address.`
+                    : `Only send USDC on ${selectedNetworkData.name} to this address. This is a managed address for EVM testnets.`
                 } Sending other tokens or using wrong network may result in permanent loss.
               </Typography>
             </View>
@@ -391,7 +500,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
     switch (currentStep) {
       case 'method': return 'Deposit';
       case 'network': return 'Select Network';
-      case 'address': return `Deposit USDC`;
+      case 'address': return selectedNetworkData?.type === 'base' ? 'Deposit Crypto' : 'Deposit USDC';
       default: return 'Deposit';
     }
   };

@@ -107,18 +107,14 @@ export const ErrorHandler: React.FC<ErrorHandlerProps> = ({
     if (onContactSupport) {
       onContactSupport();
     } else {
-      // Default contact support action
-      Alert.alert(
-        'Contact Support',
-        `Error: ${error.message}\nCode: ${error.code || 'N/A'}\nTime: ${error.timestamp.toLocaleString()}\n\nPlease contact support with this information.`,
-        [
-          { text: 'Copy Error Info', onPress: () => {
-            // In a real app, this would copy to clipboard
-            console.log('Error info copied to clipboard');
-          }},
-          { text: 'Close', style: 'cancel' }
-        ]
-      );
+      // Log error info instead of showing alert
+      console.log('Error info for support:', {
+        error: error.message,
+        code: error.code || 'N/A',
+        time: error.timestamp.toLocaleString(),
+        type: error.type
+      });
+      // Keep console logging for debugging, but remove user-facing alert
     }
     onClose();
   };

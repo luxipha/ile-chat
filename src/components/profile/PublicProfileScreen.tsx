@@ -77,7 +77,7 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
     name: userName,
     role: 'Property Investor',
     region: 'Lagos, Nigeria',
-    joinDate: 'March 2024',
+    joinDate: 'Recently', // Fallback for when no actual date is available
     bricksCount: 2450,
     profilePicture: userAvatar,
     trustBadge: 'verified',

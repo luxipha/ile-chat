@@ -41,7 +41,7 @@ const normalizeAptos = (addr: string) =>
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Aptos Indexer GraphQL endpoint for TESTNET
-const APTOS_TESTNET_GRAPHQL = "https://api.testnet.aptoslabs.com/v1/graphql";
+const APTOS_TESTNET_GRAPHQL = "https://indexer-testnet.staging.gcp.aptosdev.com/v1/graphql";
 
 // -----------------------------
 // Service
@@ -98,7 +98,11 @@ class AptosService {
         const Service = await import('../services/Service');
         const backendWallet = await Service.default.getWalletFromBackend('aptos-testnet', 'aptos');
         
-        if (backendWallet && backendWallet.success && backendWallet.wallet) {
+        console.log('🔍 [DEBUG] Backend wallet response:', JSON.stringify(backendWallet, null, 2));
+        console.log('🔍 [DEBUG] Wallet object:', backendWallet?.wallet);
+        console.log('🔍 [DEBUG] Wallet address:', backendWallet?.wallet?.address);
+        
+        if (backendWallet && backendWallet.success && backendWallet.wallet && backendWallet.wallet.address) {
           console.log('✅ Aptos wallet retrieved from database');
           
           // Update AsyncStorage to match database
@@ -112,6 +116,11 @@ class AptosService {
             address: backendWallet.wallet.address, 
             privateKey: backendWallet.wallet.privateKey 
           };
+        } else if (backendWallet && backendWallet.success && backendWallet.wallet && !backendWallet.wallet.address) {
+          console.log('⚠️ Database wallet exists but address is missing/corrupted - will regenerate');
+          // Clear corrupted AsyncStorage data
+          await AsyncStorage.removeItem("aptosWalletAddress");
+          await AsyncStorage.removeItem("aptosWalletPrivateKey");
         }
       } catch (dbError) {
         console.log('ℹ️ Database check failed, falling back to AsyncStorage:', dbError);
@@ -134,9 +143,12 @@ class AptosService {
         const Service = await import('../services/Service');
         const backendWallet = await Service.default.getWalletFromBackend('aptos-testnet', 'aptos');
         
-        if (backendWallet && backendWallet.success && backendWallet.wallet) {
-          console.log('✅ Database has Aptos wallet');
+        if (backendWallet && backendWallet.success && backendWallet.wallet && backendWallet.wallet.address) {
+          console.log('✅ Database has valid Aptos wallet');
           return true;
+        } else if (backendWallet && backendWallet.success && backendWallet.wallet && !backendWallet.wallet.address) {
+          console.log('⚠️ Database has corrupted wallet (no address) - treating as no wallet');
+          return false;
         }
       } catch (dbError) {
         console.log('ℹ️ Database check failed, checking AsyncStorage:', dbError);
@@ -209,14 +221,14 @@ class AptosService {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query: `query($addr:String!){
-              current_fungible_asset_balances(where:{owner_address:{_eq:$addr}}){
+            query: `query GetAccountCoinsData($address: String) {
+              current_fungible_asset_balances(where:{owner_address:{_eq:$address}}){
                 amount
                 asset_type
                 metadata{ symbol name decimals }
               }
             }`,
-            variables: { addr: acct },
+            variables: { address: acct },
           }),
         });
         

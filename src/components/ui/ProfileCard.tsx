@@ -16,7 +16,8 @@ interface ProfileCardProps {
   name?: string; // If provided, overrides the name from profile
   role: string;
   region: string;
-  joinDate: string;
+  joinDate?: string; // Made optional to handle cases where date is not available
+  createdAt?: string; // Alternative field for user creation date
   bricksCount: number;
   profilePicture?: string; // DEPRECATED: Use UserAvatar instead
   trustBadge?: 'verified' | 'premium' | 'agent' | null;
@@ -30,12 +31,30 @@ interface ProfileCardProps {
   style?: ViewStyle;
 }
 
+// Helper function to format date for display
+const formatJoinDate = (dateString?: string): string => {
+  if (!dateString) return 'Recently';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Recently';
+    
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long' 
+    });
+  } catch (error) {
+    return 'Recently';
+  }
+};
+
 export const ProfileCard: React.FC<ProfileCardProps> = ({
   userId,
   name,
   role,
   region,
   joinDate,
+  createdAt,
   bricksCount,
   profilePicture, // DEPRECATED
   trustBadge,
@@ -48,6 +67,9 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
   onQRPress,
   style,
 }) => {
+  // Use createdAt if joinDate is not provided
+  const displayDate = joinDate || createdAt;
+  const formattedJoinDate = formatJoinDate(displayDate);
   const getTrustBadgeIcon = (badge: string | null) => {
     switch (badge) {
       case 'verified': return 'verified';
@@ -137,7 +159,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             <View style={styles.statItem}>
               <MaterialIcons name="schedule" size={16} color={Colors.gray400} />
               <Typography variant="body2" color="textSecondary" style={styles.statText}>
-                Joined {joinDate}
+                Joined {formattedJoinDate}
               </Typography>
             </View>
           </View>

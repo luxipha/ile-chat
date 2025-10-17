@@ -244,19 +244,19 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({
               'language',
               'Website',
               'Visit our official website',
-              'https://ilepay.com'
+              'https://www.ile.africa'
             )}
             {renderLinkItem(
               'policy',
               'Privacy Policy',
               'Read our privacy policy',
-              'https://ilepay.com/privacy'
+              'https://ile.africa/privacy'
             )}
             {renderLinkItem(
               'gavel',
               'Terms of Service',
               'View terms and conditions',
-              'https://ilepay.com/terms'
+              'https://ile.africa/terms'
             )}
             {renderLinkItem(
               'help',
@@ -283,7 +283,7 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({
             <View style={styles.socialButtons}>
               <TouchableOpacity 
                 style={styles.socialButton}
-                onPress={() => handleOpenLink('https://twitter.com/ilepay')}
+                onPress={() => handleOpenLink('https://x.com/IlePlatform')}
               >
                 <MaterialIcons name="alternate-email" size={24} color={Colors.primary} />
                 <Typography variant="body2" style={styles.socialText}>Twitter</Typography>
@@ -291,7 +291,7 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({
               
               <TouchableOpacity 
                 style={styles.socialButton}
-                onPress={() => handleOpenLink('https://linkedin.com/company/ilepay')}
+                onPress={() => handleOpenLink('https://www.linkedin.com/company/ileplatform')}
               >
                 <MaterialIcons name="work" size={24} color={Colors.primary} />
                 <Typography variant="body2" style={styles.socialText}>LinkedIn</Typography>
@@ -299,10 +299,10 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({
               
               <TouchableOpacity 
                 style={styles.socialButton}
-                onPress={() => handleOpenLink('https://instagram.com/ilepay')}
+                onPress={() => handleOpenLink('https://t.me/ileplatformchat')}
               >
-                <MaterialIcons name="photo-camera" size={24} color={Colors.primary} />
-                <Typography variant="body2" style={styles.socialText}>Instagram</Typography>
+                <MaterialIcons name="chat" size={24} color={Colors.primary} />
+                <Typography variant="body2" style={styles.socialText}>Telegram</Typography>
               </TouchableOpacity>
             </View>
           </Card>
@@ -311,7 +311,7 @@ export const AboutScreen: React.FC<AboutScreenProps> = ({
         {/* Legal */}
         <View style={styles.legalSection}>
           <Typography variant="caption" color="textSecondary" style={styles.legalText}>
-            © 2024 ilePay Technologies. All rights reserved.
+            © 2025 Ilé. All rights reserved.
           </Typography>
           <Typography variant="caption" color="textSecondary" style={styles.legalText}>
             Made with ❤️ in Nigeria

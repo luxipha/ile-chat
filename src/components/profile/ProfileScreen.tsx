@@ -33,7 +33,7 @@ interface UserProfile {
   name: string;
   email?: string;
   phone?: string;
-  gender?: 'Male' | 'Female' | 'Other';
+  gender?: string; // Accept any string to handle both frontend and backend formats
   dateOfBirth?: string;
   region?: string;
   address?: string;
@@ -74,31 +74,57 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     try {
       const currentUser = await authService.getCachedUser();
       if (currentUser) {
-        const profileResult = await profileService.getUserProfile(currentUser.id, forceRefresh);
-        if (profileResult.success && profileResult.profile) {
-          console.log('🔄 Profile loaded from service:', profileResult.profile);
-          console.log('🖼️ Avatar from profile service:', profileResult.profile.avatar);
+        // Hybrid loading: Try comprehensive auth profile first, then fallback to chat profile
+        console.log('🔄 Loading profile with hybrid approach...');
+        
+        // First, try to get the comprehensive profile from auth system
+        const authProfileResult = await profileService.getProfile(forceRefresh);
+        
+        if (authProfileResult.success && authProfileResult.profile) {
+          console.log('✅ Loaded comprehensive profile from auth system:', authProfileResult.profile);
           setUserProfile({
             id: currentUser.id,
-            name: profileResult.profile.name || currentUser.name || '',
-            email: currentUser.email, // Use email from Firebase auth
-            phone: undefined, // Phone not available in ChatUserProfile
-            gender: undefined, // Gender not available in ChatUserProfile
-            dateOfBirth: undefined, // Date of birth not available in ChatUserProfile
-            region: undefined, // Region not available in ChatUserProfile
-            address: undefined, // Address not available in ChatUserProfile
-            bio: undefined, // Bio not available in ChatUserProfile
-            avatar: profileResult.profile.avatar,
-            bricks: 0,
+            name: authProfileResult.profile.name || currentUser.name || '',
+            email: authProfileResult.profile.email || currentUser.email,
+            phone: authProfileResult.profile.phone,
+            gender: authProfileResult.profile.gender,
+            dateOfBirth: authProfileResult.profile.dateOfBirth,
+            region: authProfileResult.profile.region,
+            address: authProfileResult.profile.address,
+            bio: authProfileResult.profile.bio,
+            avatar: authProfileResult.profile.avatar,
+            bricks: authProfileResult.profile.bricks || 0,
           });
         } else {
-          // Fallback to basic user data
-          setUserProfile({
-            id: currentUser.id,
-            name: currentUser.name || '',
-            email: currentUser.email, // Use email from Firebase auth
-            bricks: 0,
-          });
+          // Fallback to chat profile system for backward compatibility
+          console.log('⚠️ Auth profile not available, falling back to chat profile system');
+          const chatProfileResult = await profileService.getUserProfile(currentUser.id, forceRefresh);
+          
+          if (chatProfileResult.success && chatProfileResult.profile) {
+            console.log('🔄 Loaded limited profile from chat system:', chatProfileResult.profile);
+            setUserProfile({
+              id: currentUser.id,
+              name: chatProfileResult.profile.name || currentUser.name || '',
+              email: currentUser.email, // Use email from Firebase auth
+              phone: undefined, // Phone not available in ChatUserProfile
+              gender: undefined, // Gender not available in ChatUserProfile
+              dateOfBirth: undefined, // Date of birth not available in ChatUserProfile
+              region: undefined, // Region not available in ChatUserProfile
+              address: undefined, // Address not available in ChatUserProfile
+              bio: undefined, // Bio not available in ChatUserProfile
+              avatar: chatProfileResult.profile.avatar,
+              bricks: 0,
+            });
+          } else {
+            // Final fallback to basic user data
+            console.log('⚠️ Both profile systems failed, using basic user data');
+            setUserProfile({
+              id: currentUser.id,
+              name: currentUser.name || '',
+              email: currentUser.email,
+              bricks: 0,
+            });
+          }
         }
       }
     } catch (error) {
@@ -220,12 +246,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         }
       }
 
+      // Convert gender values to lowercase for backend compatibility
+      if (updateField === 'gender' && valueToSave) {
+        valueToSave = valueToSave.toLowerCase();
+      }
+
       // Update profile via service
       const updateData = { [updateField]: valueToSave };
       const result = await profileService.updateProfile(updateData);
       
       if (result.success) {
-        // Update local state
+        // Update local state with the saved value
         setUserProfile(prev => prev ? { ...prev, [updateField]: valueToSave } : null);
         handleCloseModal();
         Alert.alert('Success', `${editField} updated successfully`);
@@ -504,14 +535,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       console.log('✅ Profile picture uploaded successfully:', imageUrl);
 
       console.log('🔄 Updating user profile with new image URL:', imageUrl);
-      // Update user profile with new avatar using the correct API endpoint
+      // Update user profile with new avatar using the unified auth profile system
       if (!userProfile?.id) {
         throw new Error('User profile ID not found');
       }
-      const updateResult = await profileService.updateUserProfile(userProfile.id, { avatar: imageUrl });
+      
+      // Use the comprehensive auth profile system for avatar updates
+      const updateResult = await profileService.updateProfile({ avatar: imageUrl });
       
       if (updateResult.success && updateResult.profile) {
-        console.log('✅ User profile updated successfully');
+        console.log('✅ User profile updated successfully via auth system');
         // Update local state
         setUserProfile(prev => prev ? { ...prev, avatar: imageUrl } : null);
         
@@ -530,10 +563,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       
       if (error instanceof Error && error.name === 'AbortError') {
         console.log('⏰ Request was aborted due to timeout');
-        Alert.alert('Timeout', 'Upload timed out. Please check your connection and try again.');
+        // Keep console logging for debugging, but remove user-facing alert
       } else {
         console.log('❌ General upload error');
-        Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+        // Keep console logging for debugging, but remove user-facing alert
       }
     }
   };
@@ -557,6 +590,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
+  const formatGenderForDisplay = (gender?: string): string => {
+    if (!gender) return '';
+    // Convert backend lowercase values to display format
+    switch (gender.toLowerCase()) {
+      case 'male': return 'Male';
+      case 'female': return 'Female';
+      case 'other': return 'Other';
+      case 'prefer-not-to-say': return 'Prefer not to say';
+      default: return gender;
+    }
+  };
+
   const getFieldValue = (field: string): string => {
     if (!userProfile) return '';
     
@@ -564,7 +609,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       case 'Name': return userProfile.name;
       case 'Email': return userProfile.email || '';
       case 'Phone Number': return userProfile.phone || '';
-      case 'Gender': return userProfile.gender || '';
+      case 'Gender': return formatGenderForDisplay(userProfile.gender);
       case 'Date of Birth': return userProfile.dateOfBirth || '';
       case 'Region': return userProfile.region || '';
       case 'Address': return userProfile.address || '';

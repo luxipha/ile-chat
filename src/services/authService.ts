@@ -52,6 +52,12 @@ export interface User {
   _id?: string; // Adding _id for backward compatibility
   name: string;
   email: string;
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'prefer-not-to-say';
+  dateOfBirth?: string;
+  region?: string;
+  address?: string;
+  bio?: string;
   balance: number;
   bricks: number;
   referralCode: string;
@@ -62,6 +68,7 @@ export interface User {
   role?: 'user' | 'merchant' | 'admin';
   trustScore?: number; // Added trustScore property
   merchantProfile?: MerchantProfile;
+  createdAt?: string; // User registration/creation date
 }
 
 export interface AuthResponse {
@@ -201,21 +208,15 @@ class AuthService {
 
   async getSession(): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      console.log('🔄 Getting session...');
-      
       if (!this.token) {
-        console.log('🔍 No token in memory, checking AsyncStorage...');
         this.token = await AsyncStorage.getItem('authToken');
       }
 
       if (!this.token) {
-        console.log('❌ No authentication token found');
         return { success: false, error: 'No authentication token' };
       }
 
-      console.log('🔑 Using token for session:', `${this.token.substring(0, 20)}...`);
       const url = `${API_BASE_URL}/auth/v2/session`;
-      console.log('🌐 Making session request to:', url);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -373,23 +374,16 @@ class AuthService {
 
   async logout(): Promise<void> {
     try {
-      console.log('🚪 Logout initiated...');
-      console.log('🔑 Current token before logout:', this.token ? `${this.token.substring(0, 20)}...` : 'null');
-      
       this.token = null;
-      console.log('🗑️ Clearing AsyncStorage items: authToken, userData');
       
       await AsyncStorage.multiRemove(['authToken', 'userData']);
       
       // Clear Firebase authentication data
       try {
         await firebaseAuthService.clearFirebaseAuth();
-        console.log('🔥 Firebase authentication cleared');
       } catch (error) {
         console.warn('⚠️ Error clearing Firebase auth:', error);
       }
-      
-      console.log('✅ Logout completed successfully');
       
       // Verify items were removed
       const tokenCheck = await AsyncStorage.getItem('authToken');
@@ -410,17 +404,11 @@ class AuthService {
 
   async isAuthenticated(): Promise<boolean> {
     try {
-      console.log('🔐 Checking authentication status...');
-      console.log('🔑 Current token in memory:', this.token ? `${this.token.substring(0, 20)}...` : 'null');
-      
       if (!this.token) {
-        console.log('🔍 No token in memory, checking AsyncStorage...');
         this.token = await AsyncStorage.getItem('authToken');
-        console.log('🔑 Token from AsyncStorage:', this.token ? `${this.token.substring(0, 20)}...` : 'null');
       }
       
       const isAuth = !!this.token;
-      console.log('✅ Authentication check result:', isAuth);
       return isAuth;
     } catch (error) {
       console.error('❌ Authentication check error:', error);
@@ -439,11 +427,6 @@ class AuthService {
 
 
   getToken(): string | null {
-    console.log('🔍 authService.getToken() called', {
-      hasTokenInMemory: !!this.token,
-      tokenLength: this.token?.length,
-      tokenPrefix: this.token?.substring(0, 30) + '...'
-    });
     return this.token;
   }
 }

@@ -7,7 +7,12 @@ import { API_BASE_URL } from '../config/apiConfig';
 export interface ProfileUpdateData {
   name?: string;
   avatar?: string;
-  // Add other profile fields as needed
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'prefer-not-to-say';
+  dateOfBirth?: string;
+  region?: string;
+  address?: string;
+  bio?: string;
 }
 
 export interface UserProfileData extends User {
@@ -101,7 +106,7 @@ class ProfileService {
     }
   }
 
-  async updateUserProfile(firebaseUid: string, updates: { avatar?: string; name?: string }): Promise<{ success: boolean; profile?: ChatUserProfile; error?: string }> {
+  async updateUserProfile(firebaseUid: string, updates: ProfileUpdateData): Promise<{ success: boolean; profile?: ChatUserProfile; error?: string }> {
     try {
       console.log('🔄 Updating user profile via API for UID:', firebaseUid, 'Updates:', updates);
       

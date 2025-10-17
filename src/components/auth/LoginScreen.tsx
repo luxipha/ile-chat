@@ -27,6 +27,7 @@ interface LoginScreenProps {
   onClose?: () => void;
   visible?: boolean;
   initialEmail?: string;
+  initialStep?: LoginStep;
 }
 
 type LoginStep = 'email' | 'verification' | 'complete';
@@ -36,8 +37,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onClose,
   visible = true,
   initialEmail,
+  initialStep = 'email',
 }) => {
-  const [step, setStep] = useState<LoginStep>('verification');
+  const [step, setStep] = useState<LoginStep>(initialStep);
   const [email, setEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState(['', '', '', '', '', '']);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -84,17 +86,48 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       const normalized = initialEmail.trim().toLowerCase();
       setEmail(normalized);
       setEmailError(null);
+      
+      // If we start at verification step with an email, send verification code
+      if (initialStep === 'verification') {
+        sendVerificationCodeInBackground(normalized);
+      }
     }
 
-    if (step !== 'verification') {
-      animateStepTransition();
-      setStep('verification');
+    // Set the initial step properly
+    if (step !== initialStep) {
+      if (initialStep === 'verification') {
+        animateStepTransition();
+      }
+      setStep(initialStep);
     }
-    setCountdown(60);
-    setTimeout(() => {
-      codeInputRefs.current[0]?.focus();
-    }, 300);
-  }, [visible, initialEmail]);
+    
+    // Only start countdown and focus for verification step
+    if (initialStep === 'verification') {
+      setCountdown(60);
+      setTimeout(() => {
+        codeInputRefs.current[0]?.focus();
+      }, 300);
+    }
+  }, [visible, initialEmail, initialStep]);
+
+  // Send verification code in background without blocking UI
+  const sendVerificationCodeInBackground = async (email: string) => {
+    try {
+      console.log('📧 Sending verification code in background for:', email);
+      const result = await emailAuthService.sendVerificationCode(email);
+      
+      if (!result.success) {
+        console.warn('⚠️ Background verification code failed:', result.error);
+        // Optionally show a subtle notification, but don't block the UI
+        setEmailError(result.error || 'Failed to send verification code');
+      } else {
+        console.log('✅ Verification code sent successfully in background');
+      }
+    } catch (error) {
+      console.error('❌ Background verification code error:', error);
+      setEmailError('Network error. Please try again.');
+    }
+  };
 
 
   const animateStepTransition = () => {
@@ -198,10 +231,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       }
     } catch (error) {
       console.error('Verification error:', error);
-      Alert.alert(
-        'Connection Error', 
-        'We couldn\'t connect to our servers. Please check your internet connection and try again.'
-      );
+      // Keep console logging for debugging, but remove user-facing alert
       // Don't clear the code on network errors so user can retry
     } finally {
       setIsLoading(false);
@@ -246,13 +276,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       const result = await emailAuthService.resendVerificationCode();
       if (result.success) {
         setCountdown(60);
-        Alert.alert('Code Sent', result.message || 'A new verification code has been sent to your email.');
+        // Keep success flow without alert - code will be sent silently
       } else {
-        Alert.alert('Error', result.error || 'Failed to resend code. Please try again.');
+        console.error('Failed to resend code:', result.error);
+        // Keep error logging for debugging, but remove user-facing alert
       }
     } catch (error) {
       console.error('Resend error:', error);
-      Alert.alert('Error', 'Failed to resend code. Please try again.');
+      // Keep console logging for debugging, but remove user-facing alert
     }
   };
 
@@ -329,12 +360,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         </Typography>
       </View>
 
-      <Card style={[styles.inputCard, emailError && styles.inputCardError]}>
+      <Card style={[styles.inputCard, emailError ? styles.inputCardError : undefined]}>
         <View style={styles.inputSection}>
           <MaterialIcons name="email" size={20} color={emailError ? Colors.error : Colors.primary} />
           <TextInput
             ref={emailInputRef}
-            style={[styles.input, emailError && styles.inputError]}
+            style={[styles.input, emailError ? styles.inputError : undefined]}
             placeholder="Enter your email address"
             value={email}
             onChangeText={handleEmailChange}
@@ -348,7 +379,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       </Card>
       
       {emailError && (
-        <ValidationError message={emailError} style={styles.validationError} />
+        <ValidationError message={emailError} />
       )}
 
       <Button
@@ -584,12 +615,6 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xl,
   },
   content: {
     flex: 1,

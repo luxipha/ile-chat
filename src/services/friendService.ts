@@ -96,7 +96,6 @@ class FriendService {
       const result = await this.makeRequest('/api/friends/requests/pending');
       return result;
     } catch (error) {
-      console.error('Error fetching friend requests:', error);
       return {
         success: false,
         requests: []
@@ -116,7 +115,6 @@ class FriendService {
 
       return result;
     } catch (error) {
-      console.error('Error responding to friend request:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to respond to request'
@@ -132,7 +130,6 @@ class FriendService {
       const result = await this.makeRequest('/api/friends/list');
       return result;
     } catch (error) {
-      console.error('Error fetching friends:', error);
       return {
         success: false,
         friends: []
@@ -148,7 +145,6 @@ class FriendService {
       const result = await this.makeRequest('/api/friends/requests/sent');
       return result;
     } catch (error) {
-      console.error('Error fetching sent requests:', error);
       return {
         success: false,
         requests: []

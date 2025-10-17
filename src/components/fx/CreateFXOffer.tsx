@@ -437,7 +437,7 @@ export const CreateFXOffer: React.FC<CreateFXOfferProps> = ({
       }
     } catch (error) {
       console.error('❌ Error creating FX offer:', error);
-      Alert.alert('Error', 'Failed to create offer. Please check your connection and try again.');
+      // Keep console logging for debugging, but remove user-facing alert
     } finally {
       setIsCreating(false);
     }
