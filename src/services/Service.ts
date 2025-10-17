@@ -328,16 +328,26 @@ class ServiceClass {
       const response = await apiService.get<any>('/api/base/wallet', token);
       
       if (response.success && response.data) {
-        const balanceData = response.data.balance;
+        // Handle nested data structure - the actual data is in response.data.data
+        const actualData = response.data.data || response.data;
+        const balanceData = actualData.balance;
         
         // Extract USDC balance if available
         let usdcBalance = '0.00';
         let totalUSD = '0.00';
         
+        console.log('🔍 [Service] Checking for USDC in:', {
+          hasUsdc: !!actualData.usdc,
+          usdcData: actualData.usdc
+        });
+        
         // Check if the response includes USDC data
-        if (response.data.usdc) {
-          usdcBalance = response.data.usdc.balanceUSD || '0.00';
+        if (actualData.usdc) {
+          usdcBalance = actualData.usdc.balanceUSD || actualData.usdc.balanceFormatted || '0.00';
           totalUSD = usdcBalance; // USDC is pegged to USD
+          console.log('✅ [Service] Extracted USDC balance:', usdcBalance);
+        } else {
+          console.log('❌ [Service] No USDC data found in response');
         }
         
         return {
@@ -345,7 +355,7 @@ class ServiceClass {
           balance: balanceData?.balanceFormatted || '0.000000 ETH',
           balanceUSD: totalUSD,
           usdcBalance: usdcBalance,
-          address: response.data.address
+          address: actualData.address
         };
       }
       

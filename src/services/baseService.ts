@@ -26,6 +26,16 @@ const BASE_NETWORKS = {
   }
 };
 
+export interface BaseWalletData {
+  address: string;
+  network: string;
+  chainId: number;
+  balance?: string;
+  balanceFormatted?: string;
+  privateKey?: string;
+  mnemonic?: string;
+}
+
 export interface BaseWalletResponse {
   success: boolean;
   address?: string;
@@ -37,6 +47,13 @@ export interface BaseWalletResponse {
   balanceFormatted?: string;
   error?: string;
   message?: string;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  status?: number;
 }
 
 export interface BaseBalanceResponse {
@@ -84,7 +101,7 @@ class BaseService {
       }
 
       // Call backend to generate wallet (using authenticated client)
-      const response = await apiClient.post('/api/base/create-wallet', {});
+      const response = await apiClient.post('/api/base/create-wallet', {}) as ApiResponse<BaseWalletData>;
 
       if (response.success && response.data) {
         const walletData = response.data;
@@ -146,7 +163,7 @@ class BaseService {
     try {
       console.log('🔵 [BaseService] Getting Base wallet from backend...');
 
-      const response = await apiClient.get('/api/base/wallet');
+      const response = await apiClient.get('/api/base/wallet') as ApiResponse<BaseWalletData & { balance?: { balance: string; balanceFormatted: string } }>;
 
       if (response.success && response.data) {
         const walletData = response.data;
@@ -221,7 +238,7 @@ class BaseService {
       console.log('🔵 [BaseService] Getting balance for:', walletAddress);
 
       // Get ETH balance from backend
-      const response = await apiClient.get(`/api/base/balance/${walletAddress}`);
+      const response = await apiClient.get(`/api/base/balance/${walletAddress}`) as ApiResponse<{ balance: string; balanceFormatted: string }>;
 
       if (response.success && response.data) {
         const balanceData = response.data;
@@ -337,7 +354,7 @@ class BaseService {
       name: networkConfig.name,
       rpcUrl: networkConfig.rpcUrl,
       explorerUrl: networkConfig.explorerUrl,
-      faucetUrl: networkConfig.faucetUrl,
+      faucetUrl: 'faucetUrl' in networkConfig ? networkConfig.faucetUrl : undefined,
       usdcAddress: networkConfig.usdcAddress
     };
   }
@@ -350,7 +367,7 @@ class BaseService {
       console.log('🔵 [BaseService] Disconnecting Base wallet...');
 
       // Remove from backend
-      const response = await apiClient.delete('/api/base/disconnect-wallet');
+      const response = await apiClient.delete('/api/base/disconnect-wallet') as ApiResponse<any>;
 
       // Remove from local storage
       await AsyncStorage.removeItem('base_wallet');

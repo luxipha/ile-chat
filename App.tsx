@@ -57,6 +57,7 @@ import { ErrorMessage, NetworkError, ValidationError, PaymentError } from './src
 import { ErrorScreen, NoInternetScreen, ServerErrorScreen } from './src/components/ui/ErrorScreen';
 import { EmptyState, EmptyContacts, EmptyMoments, EmptyChat, EmptyWallet, EmptyProperties, EmptyTransactions, EmptySearch } from './src/components/ui/EmptyState';
 import { ProfileEditScreen } from './src/components/profile/ProfileEditScreen';
+import WalletBalanceManager, { CombinedBalanceData } from './src/components/WalletBalanceManager';
 import { NotificationScreen } from './src/components/notifications/NotificationScreen';
 import { NotificationSettingsScreen } from './src/components/notifications/NotificationSettingsScreen';
 import { InAppNotification } from './src/components/notifications/InAppNotification';
@@ -578,13 +579,13 @@ function App() {
       if (aptosConnected) {
         console.log('✅ Triggering balance fetch...');
         // Pass the detected states directly to avoid async state issues
-        await fetchCombinedBalances();
+        fetchCombinedBalances();
       } else {
         console.log('⚠️ No wallets detected, skipping balance fetch');
         // Still try to fetch if we have persistent state
         if (hasWallet || hasAptosWallet) {
           console.log('🔄 Found wallet state, force fetching anyway...');
-          await fetchCombinedBalances();
+          fetchCombinedBalances();
         }
       }
     } catch (error) {
@@ -844,95 +845,51 @@ function App() {
     }
   };
 
-  // Combined balance fetching using  + Aptos in parallel
-  const fetchCombinedBalances = async () => {
-    if (isLoadingWallet) {
-      console.log('⚠️ Balance fetch already in progress, skipping...');
-      return;
-    }
+  // Handle balance updates from WalletBalanceManager
+  const handleBalanceUpdate = (balanceData: CombinedBalanceData) => {
+    console.log('💎 Received combined balance update:', balanceData);
     
-    setIsLoadingWallet(true);
-    try {
-      console.log('🔄 Fetching combined  + Aptos balances in parallel...');
-      
-      // Create promises for parallel execution
-      const balancePromises: Promise<{type: string, data: any}>[] = [];
-      
-      // 1.  removed - focus on Aptos only
-      // balancePromises.push(Promise);
-      
-      // 2. Add Aptos promise if wallet exists
-      if (hasAptosWallet) {
-        const aptosPromise = aptosService.getWallet().then(async (aptosWallet) => {
-          if (aptosWallet.success && aptosWallet.address) {
-            const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
-            return { type: 'aptos', data: aptosBalances };
-          }
-          return { type: 'aptos', data: { success: false, error: 'No Aptos wallet' } };
-        });
-        balancePromises.push(aptosPromise);
-      }
-      
-      // 3. Wait for all promises to complete
-      console.log(`⏳ Waiting for ${balancePromises.length} balance fetches to complete...`);
-      const results = await Promise.allSettled(balancePromises);
-      
-      // 4. Process all results atomically
-      const combinedBalances: { [key: string]: number } = {};
-      let totalUSDCValue = 0;
-      
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          const { type, data } = result.value;
-          
-          //  balance processing removed
-          
-          if (type === 'aptos' && data.success && data.balances) {
-            console.log('✅ Processing Aptos balances:', data.balances);
-            
-            Object.entries(data.balances).forEach(([token, balance]) => {
-              const balanceNum = parseFloat(balance as string) || 0;
-              
-              // Add USDC from Aptos
-              if (token.includes('USDC') || token.toUpperCase() === 'USDC') {
-                combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + balanceNum;
-                totalUSDCValue += balanceNum;
-                console.log(`💰 Added USDC from Aptos: ${balanceNum}`);
-              }
-              
-              // Add APT for display
-              if (token.includes('APT') || token.toUpperCase() === 'APT') {
-                combinedBalances['APT'] = balanceNum;
-                console.log(`🔷 Added APT: ${balanceNum}`);
-              }
-            });
-          }
-        } else {
-          console.error(`❌ Balance fetch ${index} failed:`, result.reason);
+    // Update wallet balance state for UI display
+    const combinedBalances: { [key: string]: number } = {};
+    let totalUSDCValue = parseFloat(balanceData.totalUSD) || 0;
+    
+    // Process wallet data to extract token balances
+    balanceData.wallets.forEach(wallet => {
+      if (wallet.chain === 'aptos') {
+        if (wallet.usdcBalance) {
+          combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + parseFloat(wallet.usdcBalance);
         }
-      });
-      
-      // 5. Single atomic update to UI
-      console.log('💎 Final combined balances:', combinedBalances);
-      console.log('💰 Total USDC portfolio value:', totalUSDCValue);
-      
-      setWalletBalance(combinedBalances);
-      setTotalPortfolioValue(totalUSDCValue);
-      
-    } catch (error: any) {
-      console.error('❌ Failed to fetch combined balances:', error);
-      setWalletError(error.message || 'Failed to load wallet balances');
-    } finally {
-      setIsLoadingWallet(false);
+        if (wallet.aptBalance) {
+          combinedBalances['APT'] = parseFloat(wallet.aptBalance);
+        }
+      } else if (wallet.chain === 'base') {
+        if (wallet.usdcBalance) {
+          combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + parseFloat(wallet.usdcBalance);
+        }
+        if (wallet.ethBalance) {
+          combinedBalances['ETH'] = parseFloat(wallet.ethBalance.replace(' ETH', ''));
+        }
+      }
+    });
+    
+    setWalletBalance(combinedBalances);
+    setTotalPortfolioValue(totalUSDCValue);
+    setIsLoadingWallet(balanceData.isLoading);
+    
+    if (balanceData.error) {
+      setWalletError(balanceData.error);
+    } else {
+      setWalletError(null);
     }
   };
 
-  // Auto-refresh combined balances when Aptos wallet changes
-  useEffect(() => {
-    if (isAuthenticated && hasAptosWallet) {
-      fetchCombinedBalances();
-    }
-  }, [hasAptosWallet, isAuthenticated]);
+  // Ref to trigger balance refresh
+  const walletBalanceManagerRef = React.useRef<{ refreshBalance: () => void } | null>(null);
+  
+  // Function to trigger balance refresh (replaces fetchCombinedBalances)
+  const fetchCombinedBalances = () => {
+    walletBalanceManagerRef.current?.refreshBalance();
+  };
 
   // REMOVED: handleCreateWallet function - wallet creation now happens at chain level during deposit
   // This prevents creating multiple wallets and ensures consistency with database wallets
@@ -3209,6 +3166,22 @@ function App() {
         />
 
         <StatusBar style="auto" />
+
+        {/* Background Balance Manager */}
+        <WalletBalanceManager
+          onBalanceUpdate={handleBalanceUpdate}
+          autoRefresh={isAuthenticated}
+          refreshInterval={60000}
+        >
+          {(balanceData, refreshBalance) => {
+            // Expose refresh function via ref
+            React.useImperativeHandle(walletBalanceManagerRef, () => ({
+              refreshBalance
+            }), [refreshBalance]);
+            
+            return null; // This component runs in background
+          }}
+        </WalletBalanceManager>
 
         {/* P2P Send Flow Modal */}
         <P2PSendFlow

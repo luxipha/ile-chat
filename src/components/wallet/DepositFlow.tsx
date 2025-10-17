@@ -125,7 +125,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             console.log('✅ Using existing Aptos wallet from database:', backendWallet.wallet.address);
             setWalletAddresses(prev => ({
               ...prev,
-              [networkData.chain]: backendWallet.wallet.address
+              [networkData.chain]: backendWallet.wallet!.address
             }));
             
             // Also update AsyncStorage to match database
@@ -234,7 +234,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             console.log('✅ Using existing Base wallet from database:', backendWallet.wallet.address);
             setWalletAddresses(prev => ({
               ...prev,
-              [networkData.chain]: backendWallet.wallet.address
+              [networkData.chain]: backendWallet.wallet!.address
             }));
           } else {
             // Check AsyncStorage as fallback
