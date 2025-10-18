@@ -125,8 +125,12 @@ class AuthService {
       // Authenticate with Firebase after successful login
       try {
         console.log('🔥 Initiating Firebase authentication...');
+        console.log('🔍 User data before Firebase auth:', { id: authData.user.id, email: authData.user.email });
         const firebaseResult = await firebaseAuthService.authenticateWithFirebase();
-        if (!firebaseResult.success) {
+        console.log('🔍 Firebase auth result:', firebaseResult);
+        if (firebaseResult.success) {
+          console.log('✅ Firebase authentication successful!');
+        } else {
           console.warn('⚠️ Firebase authentication failed:', firebaseResult.error);
           // Continue with login success even if Firebase fails - Firebase is for chat only
         }

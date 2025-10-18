@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService, { User } from './authService';
 import { apiClient } from './api';
-
+import { ApiResponse } from '../types';
 import { API_BASE_URL } from '../config/apiConfig';
 
 export interface ProfileUpdateData {
@@ -57,7 +57,7 @@ class ProfileService {
     console.log('🗑️ Cleared user profile cache for:', firebaseUid);
   }
 
-  async getUserProfile(firebaseUid: string, forceRefresh = false): Promise<{ success: boolean; profile?: ChatUserProfile & { aptosAddress?: string }; error?: string }> {
+  async getUserProfile(firebaseUid: string, forceRefresh = false): Promise<{ success: boolean; profile?: ChatUserProfile & { aptosAddress?: string; baseAddress?: string }; error?: string }> {
     try {
       // Check cache first (unless forcing refresh)
       if (!forceRefresh) {
@@ -72,16 +72,26 @@ class ProfileService {
       // Fetch from backend API
       const response = await apiClient.get(`/api/user/profile/${firebaseUid}`);
       
-      if (response.success && response.data) {
-        const profileData = response.data as { success: boolean; profile: ChatUserProfile & { aptosAddress?: string } };
-        if (profileData.success && profileData.profile) {
+      console.log('🔍 DEBUG: Full API response:', JSON.stringify(response, null, 2));
+      
+      // The API response structure is directly: { success: boolean, profile: {...} }
+      // Cast the response to include the profile property
+      const profileResponse = response as ApiResponse<unknown> & { profile?: ChatUserProfile & { aptosAddress?: string; baseAddress?: string } };
+      
+      if (profileResponse.success && profileResponse.profile) {
+        console.log('🔍 DEBUG: Response.profile:', JSON.stringify(profileResponse.profile, null, 2));
+        
+        const profile = profileResponse.profile;
+        
+        if (profile && profile.name) {
           // Cache the profile
-          this.userProfileCache.set(firebaseUid, profileData.profile);
-          console.log('✅ User profile resolved:', profileData.profile);
-          return { success: true, profile: profileData.profile };
+          this.userProfileCache.set(firebaseUid, profile);
+          console.log('✅ User profile resolved:', profile);
+          return { success: true, profile: profile };
         }
       }
       
+      console.log('❌ Profile lookup failed - response structure issue');
       return { success: false, error: response.error || 'User not found' };
     } catch (error) {
       console.error('Get user profile error:', error);

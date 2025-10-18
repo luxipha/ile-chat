@@ -16,9 +16,11 @@ class FirebaseAuthService {
    */
   async getCustomFirebaseToken(): Promise<FirebaseAuthResponse> {
     try {
+      console.log('🔍 Getting auth token from AsyncStorage...');
       const authToken = await AsyncStorage.getItem('authToken');
       
       if (!authToken) {
+        console.error('❌ No auth token found in AsyncStorage');
         return {
           success: false,
           message: 'No authentication token found. Please log in first.',
@@ -26,6 +28,7 @@ class FirebaseAuthService {
         };
       }
 
+      console.log('🔍 Auth token found, requesting custom Firebase token from backend...');
       const response = await fetch(`${API_BASE_URL}/api/firebase-auth/custom-token`, {
         method: 'POST',
         headers: {
@@ -35,8 +38,16 @@ class FirebaseAuthService {
       });
 
       const result = await response.json();
+      console.log('🔍 Backend response for custom token:', { 
+        ok: response.ok, 
+        status: response.status, 
+        hasCustomToken: !!result.customToken,
+        success: result.success,
+        error: result.error 
+      });
 
       if (!response.ok) {
+        console.error('❌ Backend rejected custom token request:', result);
         return {
           success: false,
           message: result.message || 'Failed to get custom Firebase token',
@@ -44,9 +55,10 @@ class FirebaseAuthService {
         };
       }
 
+      console.log('✅ Custom Firebase token received from backend');
       return result;
     } catch (error) {
-      console.error('Error getting custom Firebase token:', error);
+      console.error('❌ Error getting custom Firebase token:', error);
       return {
         success: false,
         message: 'Network error. Please check your connection.',
@@ -74,13 +86,21 @@ class FirebaseAuthService {
       }
 
       // Step 2: Sign into Firebase with the custom token
+      console.log('🔍 Attempting to sign into Firebase with custom token...');
       const userCredential = await signInWithCustomFirebaseToken(tokenResponse.customToken);
+      
+      console.log('🔍 Firebase sign-in result:', { 
+        hasCredential: !!userCredential, 
+        hasUser: !!userCredential?.user,
+        uid: userCredential?.user?.uid 
+      });
       
       if (userCredential && userCredential.user) {
         // Store Firebase UID for future reference
         await AsyncStorage.setItem('firebaseUid', userCredential.user.uid);
         
         console.log('✅ Firebase authentication successful:', userCredential.user.uid);
+        console.log('🔍 Firebase user stored in AsyncStorage');
         return { success: true };
       }
 

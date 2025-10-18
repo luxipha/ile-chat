@@ -52,6 +52,7 @@ export interface BaseWalletResponse {
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
+  hash?: string; // Transaction hash returned at root level
   error?: string;
   status?: number;
 }
@@ -68,6 +69,7 @@ export interface BaseBalanceResponse {
 
 export interface BaseTransactionResponse {
   success: boolean;
+  hash?: string; // For consistency with aptosService
   transactionHash?: string;
   gasUsed?: string;
   gasPrice?: string;
@@ -297,20 +299,74 @@ class BaseService {
     try {
       console.log('🔵 [BaseService] Sending USDC:', { toAddress, amount });
 
-      // Note: For now, this is a placeholder
-      // In production, you'd implement the actual USDC transfer
+      // Check if user is authenticated
+      const isAuth = await authService.isAuthenticated();
+      if (!isAuth) {
+        return {
+          success: false,
+          error: 'Authentication required',
+          message: 'Please log in to send USDC'
+        };
+      }
+
+      // Call backend to send USDC
+      const response = await apiClient.post('/api/base/send-usdc', {
+        toAddress,
+        amount
+      }) as ApiResponse<{
+        transactionHash: string;
+        blockNumber: number;
+        gasUsed: string;
+        gasPrice?: string;
+        from: string;
+        to: string;
+        amount: number;
+        amountFormatted: string;
+        contractAddress: string;
+        network: string;
+        chainId: number;
+        explorerUrl: string;
+      }>;
+
+      if (response.success && response.data) {
+        const txData = response.data;
+        // Now that apiClient preserves all fields, hash should be available at response.hash
+        const transactionHash = response.hash || txData.transactionHash;
+        
+        console.log('✅ [BaseService] USDC sent successfully:', {
+          hash: transactionHash,
+          amount: txData.amountFormatted,
+          from: txData.from,
+          to: txData.to,
+          responseHasHash: !!response.hash,
+          dataHasHash: !!txData.transactionHash,
+          rawResponseHash: response.hash,
+          rawDataHash: txData.transactionHash,
+          responseKeys: Object.keys(response),
+          dataKeys: txData ? Object.keys(txData) : 'null'
+        });
+
+        return {
+          success: true,
+          hash: transactionHash, // Use 'hash' for consistency with aptosService
+          transactionHash: transactionHash,
+          gasUsed: txData.gasUsed,
+          gasPrice: txData.gasPrice,
+          message: response.message || `Successfully sent ${txData.amountFormatted} to ${toAddress}`
+        };
+      } else {
+        throw new Error(response.error || 'Failed to send USDC');
+      }
+    } catch (error) {
+      console.error('❌ [BaseService] Error sending USDC:', error);
+      
+      // Extract meaningful error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
       return {
         success: false,
-        error: 'Transaction sending not implemented',
-        message: 'USDC sending functionality coming soon'
-      };
-    } catch (error) {
-      console.error('❌ [BaseService] Error sending USDC:', error);
-      return {
-        success: false,
         error: 'Failed to send USDC',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: errorMessage
       };
     }
   }

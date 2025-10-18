@@ -27,6 +27,7 @@ import { StickerData } from '../types/sticker';
 const conversationsCollection = collection(db, 'conversations');
 const messagesCollection = (conversationId: string) => collection(db, `conversations/${conversationId}/messages`);
 
+
 // Helper function to create consistent conversation IDs
 const createConversationId = (userId1: string, userId2: string): string => {
   // Sort user IDs to ensure consistent conversation ID regardless of order
@@ -186,7 +187,20 @@ const chatService = {
             if (isValidUserId) {
               try {
                 const profileResult = await profileService.getUserProfile(otherParticipantId);
-                displayName = profileResult.success && profileResult.profile ? profileResult.profile.name : `User ${otherParticipantId.slice(-6)}`;
+                console.log('🔍 Profile lookup result for conversation:', {
+                  otherParticipantId,
+                  success: profileResult.success,
+                  hasProfile: !!profileResult.profile,
+                  profileName: profileResult.profile?.name,
+                  conversationId: doc.id
+                });
+                
+                if (profileResult.success && profileResult.profile && profileResult.profile.name) {
+                  displayName = profileResult.profile.name;
+                } else {
+                  // Enhanced fallback logic
+                  displayName = `User ${otherParticipantId.slice(-6)}`;
+                }
               } catch (error) {
                 console.error('Failed to get user profile for chat:', {
                   error,

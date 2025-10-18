@@ -82,7 +82,7 @@ class ApiService {
       console.log('✅ Request successful');
       return {
         success: true,
-        data,
+        ...data, // Spread all response fields including hash, message, etc.
       };
     } catch (error) {
       console.error('❌ Network error in request:', error);

@@ -1,8 +1,26 @@
 export interface User {
   id: string;
+  _id?: string; // Adding _id for backward compatibility
+  name: string;
   email: string;
-  walletAddress?: string;
-  createdAt: string;
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'prefer-not-to-say';
+  dateOfBirth?: string;
+  region?: string;
+  address?: string;
+  bio?: string;
+  balance?: number;
+  bricks?: number;
+  referralCode?: string;
+  loginStreak?: number;
+  onboardingCompleted?: boolean;
+  authMethod?: 'email' | 'google' | 'telegram';
+  avatar?: string;
+  role?: 'user' | 'merchant' | 'admin';
+  trustScore?: number;
+  merchantProfile?: any; // Will be properly typed if needed
+  createdAt?: string;
+  walletAddress?: string; // Keep for backward compatibility
 }
 
 export interface Token {

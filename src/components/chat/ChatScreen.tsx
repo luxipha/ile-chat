@@ -28,6 +28,7 @@ import { Typography } from '../ui/Typography';
 import chatService, { ChatMessage } from '../../services/chatService';
 import authService from '../../services/authService';
 import aptosService from '../../services/aptosService';
+import baseService from '../../services/baseService';
 import profileService from '../../services/profileService';
 import { StickerData } from '../../types/sticker';
 
@@ -69,7 +70,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNote, setTransferNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string } | null>(null);
+  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string; baseAddress?: string } | null>(null);
   const [showChatActions, setShowChatActions] = useState(false);
   const [showComposerActions, setShowComposerActions] = useState(false);
   const [actionPanelMode, setActionPanelMode] = useState<'actions' | 'stickers'>('actions');
@@ -86,7 +87,59 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   // Convert Firebase ChatMessage to local Message format
-  const convertToLocalMessage = (chatMessage: ChatMessage, currentUserId: string): Message => {
+  const convertToLocalMessage = async (chatMessage: ChatMessage, currentUserId: string): Promise<Message> => {
+    // Extract display name from the message
+    let displayName = chatMessage.user.name || '';
+    
+    console.log('🔍 convertToLocalMessage called:', {
+      messageId: chatMessage._id,
+      userId: chatMessage.user._id,
+      originalName: chatMessage.user.name,
+      displayName: displayName,
+      nameLength: displayName.length,
+      nameStartsWithUser: displayName.startsWith('User '),
+      shouldLookupProfile: !displayName || displayName.trim() === '' || displayName.startsWith('User ') || displayName.length < 2
+    });
+    
+    // Only do profile lookup if name is completely missing or is a generic "User" name
+    if (!displayName || displayName.trim() === '' || displayName.startsWith('User ') || displayName.length < 2) {
+      try {
+        console.log('🔍 Looking up user profile for:', chatMessage.user._id);
+        const profileResult = await profileService.getUserProfile(chatMessage.user._id);
+        console.log('📋 Profile lookup result:', {
+          success: profileResult.success,
+          hasProfile: !!profileResult.profile,
+          profileName: profileResult.profile?.name,
+          error: profileResult.error
+        });
+        
+        if (profileResult.success && profileResult.profile?.name && profileResult.profile.name.trim() !== '') {
+          displayName = profileResult.profile.name;
+          console.log('✅ Resolved display name:', displayName);
+        } else {
+          // Better fallback: try to extract email username or use "Anonymous User"
+          const userId = chatMessage.user._id;
+          if (userId.includes('@')) {
+            // If it's an email, use the part before @
+            displayName = userId.split('@')[0];
+          } else {
+            // Use "Anonymous User" instead of cryptic user ID
+            displayName = 'Anonymous User';
+          }
+          console.log('⚠️ Using improved fallback display name:', displayName);
+        }
+      } catch (error) {
+        console.warn('Failed to lookup user profile:', error);
+        // Better fallback for errors too
+        const userId = chatMessage.user._id;
+        if (userId.includes('@')) {
+          displayName = userId.split('@')[0];
+        } else {
+          displayName = 'Anonymous User';
+        }
+      }
+    }
+
     return {
       id: chatMessage._id,
       text: chatMessage.text,
@@ -94,7 +147,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       isOwn: chatMessage.user._id === currentUserId,
       status: 'read', // Default status
       senderName: chatMessage.user._id, // Use Firebase UID for API calls
-      senderDisplayName: chatMessage.user.name, // Display name for UI
+      senderDisplayName: displayName, // Resolved display name for UI
       senderAvatar: chatMessage.user.avatar,
       type: (chatMessage.type || 'text') as 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image',
       imageUrl: chatMessage.imageUrl, // Add imageUrl for image messages
@@ -126,9 +179,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         setCurrentUser(user);
 
         // Subscribe to real-time messages
-        const unsubscribe = chatService.getMessages(chatId, (chatMessages: ChatMessage[]) => {
-          const convertedMessages = chatMessages.map(msg => 
-            convertToLocalMessage(msg, user.id)
+        const unsubscribe = chatService.getMessages(chatId, async (chatMessages: ChatMessage[]) => {
+          const convertedMessages = await Promise.all(
+            chatMessages.map(msg => convertToLocalMessage(msg, user.id))
           );
           
           setMessages(convertedMessages);
@@ -490,11 +543,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         const profileResult = await profileService.getUserProfile(userFirebaseId);
         
         if (profileResult.success && profileResult.profile) {
+          console.log('👤 Profile data received:', {
+            id: userFirebaseId,
+            name: profileResult.profile.name,
+            aptosAddress: profileResult.profile.aptosAddress,
+            baseAddress: profileResult.profile.baseAddress,
+            allKeys: Object.keys(profileResult.profile)
+          });
+          
           setSelectedUser({
             name: profileResult.profile.name,
             avatar: profileResult.profile.avatar || message.senderAvatar,
             id: userFirebaseId,
             aptosAddress: profileResult.profile.aptosAddress,
+            baseAddress: profileResult.profile.baseAddress,
           });
           setShowPublicProfile(true);
         } else {
@@ -533,10 +595,41 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       let recipientAddress;
       
       if (walletId === 'usdc_base') {
-        // For Base transfers, use Base address
-        recipientAddress = selectedUser.baseAddress || selectedUser.aptosAddress || selectedUser.id;
+        // For Base transfers, use Base address only
+        recipientAddress = selectedUser.baseAddress;
+        
+        console.log('🔍 Base transfer attempt:', {
+          selectedUserId: selectedUser.id,
+          selectedUserName: selectedUser.name,
+          baseAddress: selectedUser.baseAddress,
+          aptosAddress: selectedUser.aptosAddress,
+          walletId: walletId
+        });
+        
+        // If baseAddress is not available, try to fetch fresh profile data
         if (!recipientAddress || recipientAddress === 'placeholder_address') {
-          throw new Error('Recipient Base address not available. Please ensure the recipient has a Base wallet.');
+          console.log('🔄 Base address not available, fetching fresh profile data...');
+          
+          try {
+            const freshProfile = await profileService.getUserProfile(selectedUser.id, true); // Force refresh
+            if (freshProfile.success && freshProfile.profile?.baseAddress) {
+              recipientAddress = freshProfile.profile.baseAddress;
+              console.log('✅ Found Base address in fresh profile:', recipientAddress);
+              
+              // Update selectedUser with fresh data
+              setSelectedUser(prev => prev ? {
+                ...prev,
+                baseAddress: freshProfile.profile?.baseAddress,
+                aptosAddress: freshProfile.profile?.aptosAddress || prev.aptosAddress
+              } : null);
+            }
+          } catch (profileError) {
+            console.error('❌ Failed to fetch fresh profile:', profileError);
+          }
+        }
+        
+        if (!recipientAddress || recipientAddress === 'placeholder_address') {
+          throw new Error('Recipient Base address not available. Please ensure the recipient has a Base wallet set up.');
         }
       } else {
         // For Aptos transfers, use Aptos address
@@ -554,11 +647,16 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         transactionResult = await aptosService.sendAPT(recipientAddress, cryptoAmount);
         currency = 'APT';
       } else if (walletId === 'usdc_base') {
-        // Add Base USDC transfer support
-        // Note: This requires implementing baseService.sendUSDC method
-        throw new Error('Base USDC transfers not yet implemented. baseService.sendUSDC method needed.');
-        // transactionResult = await baseService.sendUSDC(recipientAddress, cryptoAmount);
-        // currency = 'USDC (Base)';
+        // Base USDC transfer support
+        transactionResult = await baseService.sendUSDC(recipientAddress, cryptoAmount);
+        currency = 'USDC (Base)';
+        
+        console.log('🔍 Base transaction result:', {
+          success: transactionResult.success,
+          hash: transactionResult.hash,
+          transactionHash: transactionResult.transactionHash,
+          allKeys: Object.keys(transactionResult)
+        });
       } else {
         throw new Error('Unsupported wallet type');
       }

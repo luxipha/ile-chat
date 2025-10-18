@@ -76,6 +76,7 @@ import { signInWithCustomToken } from 'firebase/auth'; // Import from Firebase S
 import { auth as firebaseAuth } from './src/services/firebaseConfig'; // Assuming you have a firebaseConfig.ts
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
+import { useMainNavVisibility } from './src/hooks/useMainNavVisibility';
 
 import { FXOffer, FXTrade } from './src/types/fx';
 
@@ -197,6 +198,16 @@ function App() {
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isLoadingMoments, setIsLoadingMoments] = useState(false);
   const [refreshingMoments, setRefreshingMoments] = useState(false);
+  
+  // Use the custom hook for MainNavigation visibility
+  const isMainNavVisible = useMainNavVisibility({
+    selectedChat,
+    currentMeScreen,
+    showContactProfile,
+    selectedLoan,
+    currentWalletScreen,
+    currentContactScreen
+  });
   const [isLoadingWallet, setIsLoadingWallet] = useState(false);
   const [isLoadingGeneral, setIsLoadingGeneral] = useState(false);
   const [generalLoadingMessage, setGeneralLoadingMessage] = useState('Loading...');
@@ -743,9 +754,15 @@ function App() {
       email: userData.email || '',
     }));
     
-    // DEBUGGING: Ensure wallet screen is set to main after login
-    console.log('🔧 handleLoginSuccess: Setting currentWalletScreen to main');
+    // Reset all navigation state variables to default values
+    console.log('🔧 handleLoginSuccess: Resetting all navigation state to defaults');
+    setCurrentMeScreen('main');
     setCurrentWalletScreen('main');
+    setCurrentContactScreen('main');
+    setSelectedChat(null);
+    setShowContactProfile(false);
+    setSelectedLoan(null);
+    setActiveTab('wallet');
     
     console.log('User logged in:', userData);
   };
@@ -785,8 +802,14 @@ function App() {
       setMoments([]);
       setMomentsError(null);
       
-      console.log('🔄 Resetting to default tab...');
-      // Reset to default tab
+      // Reset all navigation state variables to default values
+      console.log('🔧 handleLogout: Resetting all navigation state to defaults');
+      setCurrentMeScreen('main');
+      setCurrentWalletScreen('main');
+      setCurrentContactScreen('main');
+      setSelectedChat(null);
+      setShowContactProfile(false);
+      setSelectedLoan(null);
       setActiveTab('wallet');
       
       console.log('✅ Logout completed successfully');
@@ -2915,7 +2938,7 @@ function App() {
         <MainNavigation
           activeTab={activeTab}
           onTabSwitch={handleTabSwitch}
-          isVisible={!selectedChat && currentMeScreen === 'main' && !showContactProfile && !selectedLoan && currentWalletScreen === 'main' && currentContactScreen === 'main'}
+          isVisible={isMainNavVisible}
         />
 
         <StatusBar style="auto" />
