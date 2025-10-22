@@ -30,6 +30,9 @@ import authService from '../../services/authService';
 import aptosService from '../../services/aptosService';
 import baseService from '../../services/baseService';
 import profileService from '../../services/profileService';
+import { audioService } from '../../services/audioService';
+import { locationService, LocationData } from '../../services/locationService';
+import { LocationShareModal } from './LocationShareModal';
 import { StickerData } from '../../types/sticker';
 
 interface ChatScreenProps {
@@ -77,6 +80,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
   const [isUserBlocked, setIsUserBlocked] = useState(false);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [showLocationShare, setShowLocationShare] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const messageComposerRef = useRef<MessageComposerRef>(null);
 
@@ -149,8 +154,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       senderName: chatMessage.user._id, // Use Firebase UID for API calls
       senderDisplayName: displayName, // Resolved display name for UI
       senderAvatar: chatMessage.user.avatar,
-      type: (chatMessage.type || 'text') as 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image',
+      type: (chatMessage.type || 'text') as 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location',
       imageUrl: chatMessage.imageUrl, // Add imageUrl for image messages
+      audioUrl: chatMessage.audioUrl, // Add audioUrl for audio messages
+      audioDuration: chatMessage.audioDuration, // Add audioDuration for audio messages
+      locationData: chatMessage.locationData, // Add locationData for location messages
       paymentData: chatMessage.paymentData ? {
         amount: chatMessage.paymentData.amount,
         currency: chatMessage.paymentData.currency,
@@ -530,6 +538,106 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     } catch (error) {
       console.error('Failed to get user profile:', error);
       Alert.alert('Error', 'Unable to get user information');
+    }
+  };
+
+  const handleStartVoiceRecording = async () => {
+    try {
+      console.log('🎤 Starting voice recording from composer');
+      await audioService.startRecording();
+      setIsVoiceRecording(true);
+    } catch (error) {
+      console.error('Error starting voice recording:', error);
+      Alert.alert('Error', 'Failed to start voice recording. Please check microphone permissions.');
+    }
+  };
+
+  const handleStopVoiceRecording = async () => {
+    try {
+      console.log('🛑 Stopping voice recording from composer');
+      const audioUri = await audioService.stopRecording();
+      setIsVoiceRecording(false);
+
+      if (audioUri) {
+        const duration = await audioService.getAudioDuration(audioUri);
+        console.log('🎵 Audio recorded from composer:', audioUri, 'Duration:', duration);
+        
+        // Send the audio message immediately
+        const currentUser = await authService.getSession();
+        if (!currentUser.success || !currentUser.user) {
+          Alert.alert('Error', 'Please log in to send voice messages.');
+          return;
+        }
+
+        const user = currentUser.user;
+        const sender = {
+          _id: user.id,
+          name: user.name,
+          // Only include avatar if it exists, otherwise omit the field entirely
+          ...(user.avatar && { avatar: user.avatar }),
+        };
+
+        // Extract recipient ID from chatId if possible
+        const recipientId = chatId.includes('_') 
+          ? chatId.split('_').find(id => id !== user.id)
+          : undefined;
+
+        console.log('📤 Sending audio message from composer...', { chatId, audioUri, duration, sender, recipientId });
+        
+        // Send the audio message
+        const result = await chatService.sendAudioMessage(chatId, audioUri, duration, sender, recipientId);
+        
+        if (result.success) {
+          console.log('✅ Audio message sent successfully from composer:', result.messageId);
+        } else {
+          console.error('❌ Failed to send audio message from composer:', result.error);
+          Alert.alert('Error', result.error || 'Failed to send voice message. Please try again.');
+        }
+      } else {
+        Alert.alert('Recording Error', 'No audio was recorded or recording was too short.');
+      }
+    } catch (error) {
+      console.error('Error stopping voice recording:', error);
+      setIsVoiceRecording(false);
+      Alert.alert('Error', 'Failed to stop voice recording');
+    }
+  };
+
+  const handleLocationShare = async (location: LocationData) => {
+    try {
+      console.log('📍 Sharing location:', location);
+      
+      // Get current user for sender info
+      const currentUser = await authService.getSession();
+      if (!currentUser.success || !currentUser.user) {
+        Alert.alert('Error', 'Please log in to share location.');
+        return;
+      }
+
+      const user = currentUser.user;
+      const sender = {
+        _id: user.id,
+        name: user.name,
+        // Only include avatar if it exists, otherwise omit the field entirely
+        ...(user.avatar && { avatar: user.avatar }),
+      };
+
+      // Extract recipient ID from chatId if possible
+      const recipientId = chatId.includes('_') 
+        ? chatId.split('_').find(id => id !== user.id)
+        : undefined;
+
+      console.log('📤 Sending location message...', { chatId, location, sender, recipientId });
+      
+      // Send the location message
+      await chatService.sendLocationMessage(chatId, location, sender, recipientId);
+      
+      console.log('✅ Location message sent successfully');
+      setShowLocationShare(false);
+      
+    } catch (error) {
+      console.error('❌ Error sending location message:', error);
+      Alert.alert('Error', 'Failed to share location. Please try again.');
     }
   };
 
@@ -1090,6 +1198,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           onSendMessage={handleSendMessage}
           onSendPayment={handleSendPayment}
           onSendAttachment={handleSendAttachment}
+          onStartVoiceRecording={handleStartVoiceRecording}
+          onStopVoiceRecording={handleStopVoiceRecording}
           showActions={showComposerActions} // Pass the action panel state
           onActionsToggle={(show, mode) => {
             console.log('🎛️ Actions toggle:', { show, mode, current: { showComposerActions, actionPanelMode } });
@@ -1098,6 +1208,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           }}
           chatId={chatId}
           currentUser={currentUser}
+          isRecording={isVoiceRecording}
         />
 
         {/* Message Composer Actions - Below text input like WeChat */}
@@ -1241,6 +1352,53 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               Alert.alert('Error', 'Failed to send sticker. Please try again.');
             }
           }}
+          onSendAudio={async (audioUri, duration) => {
+            console.log('🎵 Send audio:', audioUri, 'Duration:', duration);
+            
+            try {
+              // Get current user for sender info
+              const currentUser = await authService.getSession();
+              if (!currentUser.success || !currentUser.user) {
+                Alert.alert('Error', 'Please log in to send voice messages.');
+                return;
+              }
+
+              const user = currentUser.user;
+              const sender = {
+                _id: user.id,
+                name: user.name,
+                // Only include avatar if it exists, otherwise omit the field entirely
+                ...(user.avatar && { avatar: user.avatar }),
+              };
+
+              // Extract recipient ID from chatId if possible
+              const recipientId = chatId.includes('_') 
+                ? chatId.split('_').find(id => id !== user.id)
+                : undefined;
+
+              console.log('📤 Sending audio message...', { chatId, audioUri, duration, sender, recipientId });
+              
+              // Send the audio message
+              const result = await chatService.sendAudioMessage(chatId, audioUri, duration, sender, recipientId);
+              
+              if (result.success) {
+                console.log('✅ Audio message sent successfully:', result.messageId);
+                // Close the action panel
+                setShowComposerActions(false);
+              } else {
+                console.error('❌ Failed to send audio message:', result.error);
+                Alert.alert('Error', result.error || 'Failed to send voice message. Please try again.');
+              }
+              
+            } catch (error) {
+              console.error('❌ Error sending audio message:', error);
+              Alert.alert('Error', 'Failed to send voice message. Please try again.');
+            }
+          }}
+          onSendLocation={() => {
+            console.log('📍 Location button pressed');
+            setShowLocationShare(true);
+          }}
         />
       </KeyboardAvoidingView>
 
@@ -1287,6 +1445,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           />
         </>
       )}
+
+      {/* Location Share Modal */}
+      <LocationShareModal
+        visible={showLocationShare}
+        onClose={() => setShowLocationShare(false)}
+        onShareLocation={handleLocationShare}
+      />
 
     </View>
   );

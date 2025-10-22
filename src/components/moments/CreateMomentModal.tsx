@@ -9,6 +9,7 @@ import {
   Alert,
   TextInput,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
@@ -40,7 +41,7 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
   const [isPosting, setIsPosting] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
 
-  const handleImageSelect = () => {
+  const handleImageSelect = async () => {
     if (selectedImage) {
       // Remove current image
       setSelectedImage(null);
@@ -48,7 +49,7 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
     }
 
     // For web environment, use file input
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
@@ -64,16 +65,28 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
       };
       input.click();
     } else {
-      // For mobile, would use expo-image-picker
-      // Mock for now
-      const mockImages = [
-        'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=400',
-        'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=400',
-        'https://images.unsplash.com/photo-1582407947304-fd86f028f716?w=400',
-        'https://images.unsplash.com/photo-1565402170291-8491f14678db?w=400',
-      ];
-      const randomImage = mockImages[Math.floor(Math.random() * mockImages.length)];
-      setSelectedImage(randomImage);
+      // For mobile, use expo-image-picker
+      try {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission required', 'Please grant camera roll permissions to upload photos.');
+          return;
+        }
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          setSelectedImage(result.assets[0].uri);
+        }
+      } catch (error) {
+        console.error('Error selecting image:', error);
+        Alert.alert('Error', 'Failed to select image');
+      }
     }
   };
 

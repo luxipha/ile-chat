@@ -93,6 +93,14 @@ export interface ChatMessage {
     status?: string;
     openedBy?: string;
   };
+  audioUrl?: string;
+  audioDuration?: number;
+  locationData?: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+    name?: string;
+  };
 }
 
 // Interface for group member data
@@ -539,6 +547,9 @@ const chatService = {
             status: data.disputeData.status,
             openedBy: data.disputeData.openedBy,
           } : undefined,
+          audioUrl: data.audioUrl,
+          audioDuration: data.audioDuration,
+          locationData: data.locationData,
         };
       });
       callback(messages);
@@ -577,6 +588,286 @@ const chatService = {
           expiresAt: expiryTime,
           isTradeChat,
         });
+      }
+    }
+  },
+
+  /**
+   * Sends an audio message to a conversation.
+   * @param conversationId The ID of the conversation.
+   * @param audioUri The URI of the recorded audio file.
+   * @param audioDuration The duration of the audio in milliseconds.
+   * @param sender The user object of the sender.
+   * @param recipientId Optional recipient ID for direct messages.
+   */
+  sendAudioMessage: async (
+    conversationId: string,
+    audioUri: string,
+    audioDuration: number,
+    sender: { _id: string; name: string; avatar?: string },
+    recipientId?: string
+  ): Promise<{ success: boolean; messageId?: string; audioUrl?: string; error?: string }> => {
+    try {
+      console.log('🎵 Starting audio upload and message send...', { 
+        conversationId, 
+        audioUri, 
+        audioDuration,
+        senderName: sender.name 
+      });
+
+      // Create FormData for audio upload
+      const formData = new FormData();
+      formData.append('audio', {
+        uri: audioUri,
+        type: 'audio/m4a',
+        name: `voice_message_${Date.now()}.m4a`,
+      } as any);
+
+      // Get auth token for the request
+      const getAuthToken = async (): Promise<string | undefined> => {
+        try {
+          const AsyncStorage = await import('@react-native-async-storage/async-storage');
+          const token = await AsyncStorage.default.getItem('authToken');
+          return token || undefined;
+        } catch (error) {
+          console.error('Error getting auth token:', error);
+          return undefined;
+        }
+      };
+
+      const token = await getAuthToken();
+      if (!token) {
+        console.error('❌ No auth token available for audio upload');
+        return {
+          success: false,
+          error: 'Authentication required for audio upload',
+        };
+      }
+
+      // Upload audio to backend
+      console.log('📤 Uploading audio to backend...');
+      const uploadUrl = `${API_BASE_URL}/api/firebase-auth/upload-audio`;
+      
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('❌ Audio upload failed:', {
+          status: uploadResponse.status,
+          statusText: uploadResponse.statusText,
+          error: errorText
+        });
+        return {
+          success: false,
+          error: `Failed to upload audio: ${uploadResponse.status} ${uploadResponse.statusText}`,
+        };
+      }
+
+      const uploadData = await uploadResponse.json();
+      
+      if (!uploadData.success) {
+        console.error('❌ Audio upload failed:', uploadData.error);
+        return {
+          success: false,
+          error: uploadData.error || 'Failed to upload audio',
+        };
+      }
+
+      const audioUrl = uploadData.audioUrl || uploadData.url;
+      if (!audioUrl) {
+        console.error('❌ No audio URL returned from upload');
+        return {
+          success: false,
+          error: 'No audio URL returned from upload',
+        };
+      }
+
+      console.log('✅ Audio uploaded successfully:', audioUrl);
+
+      // Send the audio message
+      const messageData = {
+        _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        text: '', // Empty text for audio messages
+        createdAt: serverTimestamp(),
+        user: sender,
+        type: 'audio',
+        audioUrl: audioUrl,
+        audioDuration: audioDuration,
+        metadata: {
+          originalUri: audioUri,
+          uploadedAt: new Date().toISOString(),
+        }
+      };
+
+      const messagesRef = messagesCollection(conversationId);
+      const docRef = await addDoc(messagesRef, messageData);
+      
+      console.log('✅ Audio message sent successfully:', docRef.id);
+
+      // Update conversation's last message
+      const conversationRef = doc(conversationsCollection, conversationId);
+      await updateDoc(conversationRef, {
+        lastMessage: {
+          text: '🎵 Voice message',
+          createdAt: serverTimestamp(),
+          senderId: sender._id,
+        },
+        updatedAt: serverTimestamp(),
+      });
+
+      // Schedule deletion of audio file from server after 30 days
+      const deleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await updateDoc(docRef, {
+        deleteAt: deleteAt,
+      });
+
+      return {
+        success: true,
+        messageId: docRef.id,
+        audioUrl: audioUrl,
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to send audio message:', error);
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send audio message',
+      };
+    }
+  },
+
+  /**
+   * Sends a location message to a conversation.
+   * @param conversationId The ID of the conversation.
+   * @param locationData The location data to send.
+   * @param sender The user object of the sender.
+   * @param recipientId Optional recipient ID for direct messages.
+   */
+  sendLocationMessage: async (
+    conversationId: string,
+    locationData: {
+      latitude: number;
+      longitude: number;
+      address?: string;
+      name?: string;
+    },
+    sender: { _id: string; name: string; avatar?: string },
+    recipientId?: string
+  ) => {
+    console.log('📍 ChatService: Sending location message...', {
+      conversationId,
+      locationData,
+      senderName: sender.name,
+    });
+
+    // Clean sender data to prevent Firebase undefined errors
+    const cleanSender = {
+      _id: sender._id,
+      name: sender.name,
+      // Only include avatar if it has a valid value
+      ...(sender.avatar ? { avatar: sender.avatar } : {})
+    };
+
+    const messageData = {
+      text: `📍 ${locationData.name || 'Shared Location'}`, // Display text for location
+      createdAt: serverTimestamp(),
+      user: cleanSender,
+      type: 'location',
+      locationData: locationData,
+    };
+
+    try {
+      // Add the message to the messages subcollection
+      const messagesRef = messagesCollection(conversationId);
+      console.log('🔥 ChatService: About to send location message:', {
+        conversationId,
+        messageData,
+        messagesRefPath: `conversations/${conversationId}/messages`
+      });
+      
+      const messageDoc = await addDoc(messagesRef, messageData);
+      
+      console.log('✅ ChatService: Location message sent successfully:', {
+        messageId: messageDoc.id,
+        conversationId,
+      });
+    } catch (addDocError) {
+      console.error('❌ ChatService: FAILED to add location message to Firestore:', {
+        error: addDocError,
+        conversationId,
+        senderId: sender._id,
+        senderName: sender.name,
+        locationData
+      });
+      throw addDocError;
+    }
+
+    // Update or create the parent conversation document with the last message
+    const conversationRef = doc(db, 'conversations', conversationId);
+    try {
+      console.log('📝 ChatService: Updating conversation document:', conversationId);
+      
+      await updateDoc(conversationRef, {
+        lastMessage: {
+          text: `📍 ${locationData.name || 'Location'}`,
+          createdAt: serverTimestamp(),
+          senderId: sender._id,
+        },
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log('✅ ChatService: Conversation updated successfully');
+    } catch (error: any) {
+      console.log('🔍 ChatService: Conversation update failed, error:', {
+        errorCode: error.code,
+        errorMessage: error.message,
+        conversationId,
+        senderId: sender._id
+      });
+      
+      // If conversation doesn't exist, create it
+      if (error.code === 'not-found') {
+        console.log('📝 ChatService: Creating new conversation document:', conversationId);
+        
+        // Extract participants from conversationId (format: userId1_userId2)
+        const participants = conversationId.includes('_') 
+          ? conversationId.split('_')
+          : [sender._id, recipientId].filter(Boolean);
+        
+        console.log('👥 ChatService: Conversation participants:', participants);
+        
+        try {
+          await setDoc(conversationRef, {
+            participants: participants,
+            type: 'direct',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastMessage: {
+              text: `📍 ${locationData.name || 'Location'}`,
+              createdAt: serverTimestamp(),
+              senderId: sender._id,
+            },
+          });
+          
+          console.log('✅ ChatService: New conversation created successfully');
+        } catch (createError) {
+          console.error('❌ ChatService: FAILED to create conversation:', {
+            error: createError,
+            conversationId,
+            participants
+          });
+          throw createError;
+        }
+      } else {
+        console.error('❌ ChatService: Unexpected conversation update error:', error);
+        throw error;
       }
     }
   },

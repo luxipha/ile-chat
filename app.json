@@ -13,14 +13,21 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ile.chat.app"
     },
     "android": {
+      "package": "com.ile.chat.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        }
+      },
+      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -30,6 +37,13 @@
       "eas": {
         "projectId": "031a8885-9919-4bef-85a2-71e1a2dfe8f2"
       }
-    }
+    },
+    "env": {
+      "EXPO_PUBLIC_API_BASE_URL": "https://api.ile.africa"
+    },
+    "plugins": [
+      "expo-video",
+      "expo-web-browser"
+    ]
   }
 }

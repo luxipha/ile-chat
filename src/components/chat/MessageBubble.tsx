@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
+import { View, Text, StyleSheet, TouchableOpacity, DimensionValue } from 'react-native';
+import { ChatTheme, ChatSpacing, ChatSizes } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from '../ui/Avatar';
 import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
 import StickerMessage from './StickerMessage';
 import { StickerData } from '../../types/sticker';
 import { ImageMessage } from './ImageMessage';
+import { AudioMessage } from './AudioMessage';
+import { LocationMessage } from './LocationMessage';
 import { getRelativeTime, formatTime, formatFullDateTime } from '../../utils/timeUtils';
+import { LocationData } from '../../services/locationService';
 
 export interface Message {
   id: string;
@@ -18,8 +21,11 @@ export interface Message {
   senderName?: string; // Firebase UID for API calls
   senderDisplayName?: string; // Display name for UI
   senderAvatar?: string;
-  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image';
+  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location'; // No change needed here, just for context
   imageUrl?: string; // For image messages
+  audioUrl?: string; // For audio messages
+  audioDuration?: number; // Audio duration in milliseconds
+  locationData?: LocationData; // For location messages
   paymentData?: {
     amount: number;
     currency: string;
@@ -124,6 +130,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <ImageMessage
             imageUrl={message.imageUrl}
             isOwn={message.isOwn}
+          />
+        );
+      
+      case 'audio':
+        if (!message.audioUrl || message.audioDuration === undefined) return null;
+        
+        return (
+          <AudioMessage
+            audioUrl={message.audioUrl}
+            audioDuration={message.audioDuration}
+            isCurrentUser={message.isOwn}
+            timestamp={message.timestamp}
+          />
+        );
+      
+      case 'location':
+        if (!message.locationData) return null;
+        
+        return (
+          <LocationMessage
+            location={message.locationData}
+            isCurrentUser={message.isOwn}
+            timestamp={message.timestamp}
           />
         );
       
@@ -344,6 +373,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     );
   }
 
+  // Audio messages are rendered as standalone components
+  if (message.type === 'audio') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
+
+  // Location messages are rendered as standalone components
+  if (message.type === 'location') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
+
   return (
     <View style={[
       styles.container,
@@ -400,7 +453,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 const styles = StyleSheet.create({
   container: {
     marginVertical: ChatSpacing.xs / 2,
-    paddingHorizontal: ChatSpacing.xs, // Reduced from md (12px) to xs (4px) for tighter spacing
+    paddingHorizontal: ChatSpacing.xs,
   },
   ownContainer: {
     alignItems: 'flex-end',
@@ -411,15 +464,15 @@ const styles = StyleSheet.create({
   messageRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    maxWidth: '100%',
+    maxWidth: '100%' as DimensionValue,
   },
   avatarContainer: {
-    marginRight: ChatSpacing.xs, // Reduced from sm (8px) to xs (4px)
-    marginBottom: ChatSpacing.xs / 2, // Reduced from xs (4px) to xs/2 (2px)
+    marginRight: ChatSpacing.xs,
+    marginBottom: ChatSpacing.xs / 2,
   },
   messageContent: {
     flex: 1,
-    maxWidth: '92%', // Increased from 88% to 92% to use more space on the right side
+    maxWidth: ChatSizes.bubble.maxWidth,
   },
   ownMessageContent: {
     alignItems: 'flex-end',
@@ -431,28 +484,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: ChatTheme.textSecondary,
     marginBottom: ChatSpacing.xs / 2,
-    marginLeft: ChatSpacing.xs, // Reduced from sm (8px) to xs (4px)
+    marginLeft: ChatSpacing.xs,
   },
   bubble: {
-    minWidth: 90,
-    maxWidth: '80%',
-    paddingHorizontal: ChatSpacing.md,
-    paddingTop: ChatSpacing.md,
-    paddingBottom: ChatSpacing.xs,
-    borderRadius: 12,
+    minWidth: ChatSizes.bubble.minWidth,
+    maxWidth: ChatSizes.bubble.maxWidth,
+    paddingHorizontal: ChatSizes.bubble.padding.horizontal,
+    paddingVertical: ChatSizes.bubble.padding.vertical,
+    borderRadius: ChatSizes.bubble.borderRadius.default,
   },
   ownBubble: {
     backgroundColor: ChatTheme.sendBubbleBackground,
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: ChatSizes.bubble.borderRadius.tail,
+    borderTopLeftRadius: ChatSizes.bubble.borderRadius.top,
+    borderTopRightRadius: ChatSizes.bubble.borderRadius.top,
+    borderBottomLeftRadius: ChatSizes.bubble.borderRadius.top,
   },
   otherBubble: {
     backgroundColor: ChatTheme.receiveBubbleBackground,
-    borderBottomLeftRadius: 4,
+    borderBottomLeftRadius: ChatSizes.bubble.borderRadius.tail,
+    borderTopLeftRadius: ChatSizes.bubble.borderRadius.top,
+    borderTopRightRadius: ChatSizes.bubble.borderRadius.top,
+    borderBottomRightRadius: ChatSizes.bubble.borderRadius.top,
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 20,
-    marginBottom: ChatSpacing.xs,
+    lineHeight: 22,
+    marginBottom: 0,
   },
   ownText: {
     color: ChatTheme.sendBubbleText,
@@ -465,6 +523,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: ChatSpacing.xs / 2,
+    marginTop: ChatSpacing.xs,
   },
   timestamp: {
     fontSize: 11,

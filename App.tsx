@@ -36,7 +36,7 @@ import { BlockedUsersScreen } from './src/components/settings/BlockedUsersScreen
 import { SendFeedbackScreen } from './src/components/settings/SendFeedbackScreen';
 import { AboutScreen } from './src/components/settings/AboutScreen';
 import { QRCodeScreen } from './src/components/profile/QRCodeScreen';
-import { DepositFlow } from './src/components/wallet/DepositFlow';
+import { QRReceiveFlow } from './src/components/wallet/QRReceiveFlow';
 import { CreateGroupModal } from './src/components/chat/CreateGroupModal';
 import { GroupChatDebugPanel } from './src/components/debug/GroupChatDebugPanel';
 import { GroupCreationErrorHandler, useGroupCreationErrorHandler } from './src/components/chat/GroupCreationErrorHandler';
@@ -62,6 +62,7 @@ import { NotificationScreen } from './src/components/notifications/NotificationS
 import { NotificationSettingsScreen } from './src/components/notifications/NotificationSettingsScreen';
 import { InAppNotification } from './src/components/notifications/InAppNotification';
 import { NotificationProvider, useNotifications } from './src/contexts/NotificationContext';
+import NewsHubScreen from './src/components/news/NewsHubScreen';
 import authService, { User } from './src/services/authService';
 import { communityService, CommunityPost } from './src/services/communityService';
 import profileService from './src/services/profileService';
@@ -81,7 +82,7 @@ import { useMainNavVisibility } from './src/hooks/useMainNavVisibility';
 import { FXOffer, FXTrade } from './src/types/fx';
 
 type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'blockedUsers' | 'sendFeedback' | 'about' | 'qrCode';
-type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings';
+type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings' | 'news';
 type FXScreen = 'marketplace' | 'offer_detail' | 'trade_room';
 
 interface UserProfile {
@@ -1182,6 +1183,13 @@ function App() {
           />
         );
       
+      case 'news':
+        return (
+          <NewsHubScreen
+            onBack={() => setCurrentWalletScreen('main')}
+          />
+        );
+      
       case 'tokens':
         return (
           <ScrollView style={styles.content}>
@@ -1249,44 +1257,31 @@ function App() {
               <View style={styles.headerSpacer} />
             </View>
             
-            <EmptyProperties
-              onBrowse={() => setCurrentWalletScreen('marketplace')}
-              onLearnMore={() => {
-                // TODO: Navigate to learning resources
-                console.log('Learn more about property investment');
-              }}
-            />
+            <View style={styles.disabledSection}>
+              <Typography variant="body1" style={styles.disabledText}>
+                Property investments feature coming soon
+              </Typography>
+            </View>
           </ScrollView>
         );
 
       case 'lending':
-        if (selectedLoan) {
-          return (
-            <LoanDetailScreen
-              loan={selectedLoan}
-              onBack={() => setSelectedLoan(null)}
-              onMakeOffer={(offer) => {
-                console.log('Made loan offer:', offer);
-              }}
-              onFundLoan={(amount) => {
-                console.log('Funded loan:', amount);
-              }}
-              onContactBorrower={() => {
-                setSelectedLoan(null);
-                setCurrentWalletScreen('main');
-                setActiveTab('chat');
-              }}
-            />
-          );
-        }
         return (
-          <LendingMarketplace
-            onLoanSelect={(loan) => {
-              setSelectedLoan(loan);
-            }}
-            onCreateRequest={() => setShowLoanRequest(true)}
-            onBack={() => setCurrentWalletScreen('main')}
-          />
+          <ScrollView style={styles.content}>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => setCurrentWalletScreen('main')} style={styles.backButton}>
+                <MaterialIcons name="arrow-back" size={24} color={Colors.gray700} />
+              </TouchableOpacity>
+              <Typography variant="h3">Lending Marketplace</Typography>
+              <View style={styles.headerSpacer} />
+            </View>
+            
+            <View style={styles.disabledSection}>
+              <Typography variant="body1" style={styles.disabledText}>
+                Lending marketplace feature coming soon
+              </Typography>
+            </View>
+          </ScrollView>
         );
 
       case 'marketplace':
@@ -1569,9 +1564,28 @@ function App() {
                   <MaterialIcons name="grain" size={24} color={Colors.gray400} />
                   <Typography variant="caption" color="textSecondary">Bricks</Typography>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.serviceItem} disabled>
-                  <MaterialIcons name="school" size={24} color={Colors.gray400} />
-                  <Typography variant="caption" color="textSecondary">Learn</Typography>
+                <TouchableOpacity
+                  style={[
+                    styles.serviceItem,
+                    previewMode && styles.disabledItem,
+                  ]}
+                  onPress={() => {
+                    if (previewMode) return;
+                    setCurrentWalletScreen('news');
+                  }}
+                  disabled={previewMode}
+                >
+                  <MaterialIcons
+                    name="article"
+                    size={24}
+                    color={previewMode ? Colors.gray400 : Colors.primary}
+                  />
+                  <Typography
+                    variant="caption"
+                    color={previewMode ? 'textSecondary' : 'primary'}
+                  >
+                    News Hub
+                  </Typography>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2995,10 +3009,12 @@ function App() {
           }}
         />
 
-        {/* Deposit Flow Modal */}
-        <DepositFlow
+        {/* QR Receive Flow Modal */}
+        <QRReceiveFlow
           visible={showDepositFlow}
           onClose={() => setShowDepositFlow(false)}
+          userHandle={currentUser?.username || ''}
+          showAdvanced={true}
         />
 
         {/* Create Group Modal */}
@@ -3224,6 +3240,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  disabledSection: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    backgroundColor: Colors.gray100,
+    borderRadius: BorderRadius.lg,
+    marginTop: Spacing.xl,
+    opacity: 0.7,
+  },
+  disabledText: {
+    color: Colors.gray700,
+    textAlign: 'center',
   },
   content: {
     flex: 1,

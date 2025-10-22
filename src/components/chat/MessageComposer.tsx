@@ -16,10 +16,13 @@ interface MessageComposerProps {
   onSendPayment?: (amount: number, currency: string) => void;
   onSendAttachment?: (type: 'camera' | 'gallery' | 'document') => void;
   onActionsToggle?: (show: boolean, mode: 'actions' | 'stickers') => void;
+  onStartVoiceRecording?: () => void;
+  onStopVoiceRecording?: () => void;
   placeholder?: string;
   showActions?: boolean; // Add prop to track parent's action panel state
   chatId?: string; // Add chatId for typing status
   currentUser?: any; // Add current user for typing status
+  isRecording?: boolean; // Add prop to track recording state
 }
 
 export interface MessageComposerRef {
@@ -31,10 +34,13 @@ export const MessageComposer = forwardRef<MessageComposerRef, MessageComposerPro
   onSendPayment,
   onSendAttachment,
   onActionsToggle,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
   placeholder = 'Type a message...',
   showActions = false, // Default to false
   chatId,
   currentUser,
+  isRecording = false,
 }, ref) => {
   const insets = useSafeAreaInsets();
   const textInputRef = useRef<TextInput>(null);
@@ -148,6 +154,14 @@ export const MessageComposer = forwardRef<MessageComposerRef, MessageComposerPro
     }
   };
 
+  const handleVoicePress = () => {
+    if (isRecording) {
+      onStopVoiceRecording?.();
+    } else {
+      onStartVoiceRecording?.();
+    }
+  };
+
 
 
   return (
@@ -155,12 +169,12 @@ export const MessageComposer = forwardRef<MessageComposerRef, MessageComposerPro
       
       <View style={[styles.container, isExpanded && styles.expandedContainer]}>
         <View style={styles.inputContainer}>
-        {/* Attachment button */}
-        <TouchableOpacity style={styles.attachButton} onPress={handleAttachmentPress}>
+        {/* Voice button - in the + position */}
+        <TouchableOpacity style={[styles.voiceButton, isRecording && styles.recordingButton]} onPress={handleVoicePress}>
           <MaterialIcons 
-            name={showActions ? "close" : "add"} 
+            name={isRecording ? "stop" : "mic"} 
             size={20} 
-            color={showActions ? ChatTheme.sendBubbleBackground : ChatTheme.textSecondary} 
+            color={isRecording ? ChatTheme.background1 : ChatTheme.textSecondary} 
           />
         </TouchableOpacity>
         
@@ -188,6 +202,15 @@ export const MessageComposer = forwardRef<MessageComposerRef, MessageComposerPro
             name="sentiment-very-satisfied" 
             size={20} 
             color={ChatTheme.textSecondary} 
+          />
+        </TouchableOpacity>
+
+        {/* Attachment button - moved beside emoji */}
+        <TouchableOpacity style={styles.attachButton} onPress={handleAttachmentPress}>
+          <MaterialIcons 
+            name={showActions ? "close" : "add"} 
+            size={20} 
+            color={showActions ? ChatTheme.sendBubbleBackground : ChatTheme.textSecondary} 
           />
         </TouchableOpacity>
         
@@ -237,9 +260,17 @@ const styles = StyleSheet.create({
     paddingVertical: ChatSpacing.sm,
     maxHeight: 120,
   },
-  attachButton: {
+  voiceButton: {
     padding: ChatSpacing.xs,
     marginRight: ChatSpacing.xs,
+  },
+  recordingButton: {
+    backgroundColor: ChatTheme.sendBubbleBackground,
+    borderRadius: 16,
+  },
+  attachButton: {
+    padding: ChatSpacing.xs,
+    marginLeft: ChatSpacing.xs,
   },
   textInput: {
     flex: 1,

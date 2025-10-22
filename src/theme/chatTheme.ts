@@ -1,4 +1,5 @@
 import { Colors } from './index';
+import { DimensionValue } from 'react-native';
 
 export const ChatTheme = {
   // Backgrounds
@@ -8,7 +9,7 @@ export const ChatTheme = {
   background4: Colors.gray200,
   
   // Message bubbles
-  sendBubbleBackground: Colors.primary, // Deep indigo
+  sendBubbleBackground: Colors.primary,
   sendBubbleText: Colors.white,
   receiveBubbleBackground: Colors.gray200,
   receiveBubbleText: Colors.gray900,
@@ -22,7 +23,7 @@ export const ChatTheme = {
   // UI elements
   border: Colors.gray200,
   borderActive: Colors.primary,
-  accent: Colors.secondary, // Gold
+  accent: Colors.secondary,
   success: Colors.success,
   warning: Colors.warning,
   error: Colors.error,
@@ -54,8 +55,16 @@ export const ChatSizes = {
     large: 24,
   },
   bubble: {
-    minWidth: 90,
-    maxWidth: '80%',
-    borderRadius: 12,
+    minWidth: 90 as DimensionValue,
+    maxWidth: '80%' as DimensionValue,
+    borderRadius: {
+      default: 24,
+      tail: 8,
+      top: 28,
+    },
+    padding: {
+      horizontal: ChatSpacing.lg,
+      vertical: ChatSpacing.md,
+    },
   },
 };

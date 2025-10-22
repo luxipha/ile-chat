@@ -81,9 +81,24 @@ export interface TopContributor {
 }
 
 class CommunityService {
+  private cacheKey = 'community_posts_cache';
+  private cacheExpiryKey = 'community_posts_cache_expiry';
+  private cacheExpiryTime = 5 * 60 * 1000; // 5 minutes
+
   async getPosts(page = 1, limit = 20, search?: string, retryCount = 0): Promise<CommunityResponse<PostsResponse>> {
     try {
       console.log(`📱 CommunityService.getPosts(page=${page}, limit=${limit}, search=${search}, retry=${retryCount})`);
+      
+      // Check cache first (only for first page without search)
+      if (page === 1 && !search) {
+        const cachedData = await this.getCachedPosts();
+        if (cachedData) {
+          console.log('📦 Using cached posts data');
+          // Still make API call in background to update cache
+          this.updateCacheInBackground(page, limit, search);
+          return cachedData;
+        }
+      }
       
       const params = new URLSearchParams({
         page: page.toString(),
@@ -93,10 +108,17 @@ class CommunityService {
       
       const response = await apiClient.get(`/api/community/posts?${params}`);
       
-      if (!response.success && response.error && typeof response.error === 'object' && response.error !== null && 'isTimeout' in response.error && (response.error as any).isTimeout && retryCount < 2) {
-        // Implement exponential backoff for retries
-        const delay = (retryCount + 1) * 1000; // 1s, then 2s
-        console.log(`⏱️ Timeout detected, retrying in ${delay}ms (attempt ${retryCount + 1}/2)...`);
+      // Improved timeout detection and retry logic
+      const isTimeoutError = (
+        (response.error && typeof response.error === 'object' && 'isTimeout' in response.error && (response.error as any).isTimeout) ||
+        (response.error && typeof response.error === 'string' && response.error.includes('timeout')) ||
+        (response.error && typeof response.error === 'string' && response.error.includes('taking too long'))
+      );
+      
+      if (!response.success && isTimeoutError && retryCount < 1) {
+        // Reduced retries to 1 and faster retry for better UX
+        const delay = 500; // Quick 500ms retry
+        console.log(`⏱️ Timeout detected, retrying in ${delay}ms (attempt ${retryCount + 1}/1)...`);
         
         return new Promise(resolve => {
           setTimeout(() => {
@@ -105,19 +127,43 @@ class CommunityService {
         });
       }
       
-      return {
+      // Backend returns: { posts: [...], pagination: { page, limit, total, pages } }
+      // Transform to expected format
+      const responseData = (response.data as any) || response;
+      const posts = responseData.posts || [];
+      const pagination = responseData.pagination || {};
+      
+      const result = {
         success: response.success,
-        data: response.data ?? { 
-          posts: [], 
-          total: 0, 
-          page: 1, 
-          pages: 0, 
-          hasNext: false 
+        data: { 
+          posts: posts,
+          total: pagination.total || 0,
+          page: pagination.page || 1,
+          pages: pagination.pages || 0,
+          hasNext: pagination.page < pagination.pages
         },
         error: response.error
       };
+
+      // Cache the result if successful and it's the first page
+      if (response.success && page === 1 && !search && posts.length > 0) {
+        await this.cachePostsData(result);
+        console.log('💾 Cached posts data successfully');
+      }
+      
+      return result;
     } catch (error: any) {
       console.error('❌ Failed to get posts:', error);
+      
+      // Try to return cached data on error (only for first page)
+      if (page === 1 && !search) {
+        const cachedData = await this.getCachedPosts();
+        if (cachedData) {
+          console.log('📦 Returning cached posts due to error');
+          return cachedData;
+        }
+      }
+      
       return {
         success: false,
         data: { 
@@ -140,39 +186,82 @@ class CommunityService {
         imageSize: data.image ? data.image.length : 0
       });
 
-      let requestData: any = data;
+      // Text-only posts will use the simple JSON approach
+      const requestData = data;
 
-      // Use FormData for ALL image uploads (both web and mobile)
-      if (data.image && data.image.startsWith('data:')) {
-        console.log('📷 Converting to FormData for better image handling...');
+      // For image uploads, use FormData and handle like chat images
+      let response;
+      if (data.image) {
+        // First upload the image, then create the post
+        console.log('📤 Uploading image first...');
         
-        const formData = new FormData();
-        formData.append('content', data.content);
+        const imageFormData = new FormData();
+        if (data.image.startsWith('data:')) {
+          const blob = this.dataURLToBlob(data.image);
+          imageFormData.append('image', blob, 'image.jpg');
+        } else {
+          imageFormData.append('image', {
+            uri: data.image,
+            type: 'image/jpeg',
+            name: `moment_${Date.now()}.jpg`,
+          } as any);
+        }
         
-        // Convert base64 to blob
-        const blob = this.dataURLToBlob(data.image);
-        formData.append('image', blob, 'image.jpg');
+        const imageUploadResponse = await apiClient.post('/api/firebase-auth/upload-image', imageFormData);
         
-        requestData = formData;
-        console.log('✅ FormData created with image blob');
-      } else if (data.image) {
-        console.log('📱 Non-base64 image, using JSON');
-        requestData = data;
+        console.log('📷 Image upload response:', {
+          success: imageUploadResponse.success,
+          data: imageUploadResponse.data,
+          error: imageUploadResponse.error
+        });
+        
+        if (!imageUploadResponse.success) {
+          console.error('❌ Image upload failed:', imageUploadResponse.error);
+          return {
+            success: false,
+            error: imageUploadResponse.error || 'Failed to upload image',
+            data: {} as any
+          };
+        }
+        
+        // Extract the image URL from the response (check multiple possible fields)
+        const responseData = (imageUploadResponse.data as any) || imageUploadResponse;
+        const imageUrl = responseData.url || responseData.imageUrl || responseData.data?.url;
+        
+        if (!imageUrl) {
+          console.error('❌ No image URL in response:', responseData);
+          return {
+            success: false,
+            error: 'Image upload succeeded but no URL returned',
+            data: {} as any
+          };
+        }
+        
+        console.log('✅ Image uploaded successfully:', imageUrl);
+        
+        // Now create the post with the uploaded image URL
+        response = await apiClient.post('/api/community/posts', {
+          content: data.content,
+          image: imageUrl
+        });
       } else {
-        console.log('📝 Text-only post, using JSON');
-        requestData = data;
+        response = await apiClient.post('/api/community/posts', requestData);
       }
-
-      const response = await apiClient.post('/api/community/posts', requestData);
       console.log('� Create post API response:', {
         success: response.success,
         error: response.error,
         hasData: !!response.data
       });
+
+      // Clear cache when new post is created successfully
+      if (response.success) {
+        await this.clearCache();
+        console.log('🗑️ Cleared posts cache after successful post creation');
+      }
       
       return {
         success: response.success,
-        data: response.data ?? {
+        data: (response.data as any) ?? {
           _id: '',
           id: '',
           author: {
@@ -239,7 +328,7 @@ class CommunityService {
       });
       return {
         success: response.success,
-        data: response.data ?? {
+        data: (response.data as any) ?? {
           isLiked: false,
           likes: 0
         },
@@ -266,7 +355,7 @@ class CommunityService {
       });
       return {
         success: response.success,
-        data: response.data ?? {
+        data: (response.data as any) ?? {
           shares: 0
         },
         error: response.error
@@ -291,7 +380,7 @@ class CommunityService {
       const response = await apiClient.get(`/api/community/posts/${postId}/comments?${params}`);
       return {
         success: response.success,
-        data: response.data ?? { comments: [], total: 0, page: 1, pages: 0 },
+        data: (response.data as any) ?? { comments: [], total: 0, page: 1, pages: 0 },
         error: response.error
       };
     } catch (error: any) {
@@ -309,7 +398,7 @@ class CommunityService {
       const response = await apiClient.post(`/api/community/posts/${postId}/comments`, { content });
       return {
         success: response.success,
-        data: response.data ?? {
+        data: (response.data as any) ?? {
           _id: '',
           author: {
             _id: '',
@@ -353,7 +442,7 @@ class CommunityService {
       const response = await apiClient.get('/api/community/topics/trending');
       return {
         success: response.success,
-        data: response.data ?? [],
+        data: (response.data as any) ?? [],
         error: response.error
       };
     } catch (error: any) {
@@ -371,7 +460,7 @@ class CommunityService {
       const response = await apiClient.get('/api/community/contributors/top');
       return {
         success: response.success,
-        data: response.data ?? [],
+        data: (response.data as any) ?? [],
         error: response.error
       };
     } catch (error: any) {
@@ -395,7 +484,7 @@ class CommunityService {
       });
       return {
         success: response.success,
-        data: response.data ?? { deleted: true },
+        data: (response.data as any) ?? { deleted: true },
         error: response.error
       };
     } catch (error: any) {
@@ -429,7 +518,7 @@ class CommunityService {
       });
       
       // Handle the nested data structure from backend
-      const responseData = response.data?.data || response.data || {};
+      const responseData = (response.data as any)?.data || (response.data as any) || {};
       
       // Transform the data to match our expected format
       const posts = (responseData.posts || []).map((post: any) => ({
@@ -524,6 +613,100 @@ class CommunityService {
       u8arr[n] = bstr.charCodeAt(n);
     }
     return new Blob([u8arr], { type: mime });
+  }
+
+  // Cache management methods
+  private async getCachedPosts(): Promise<CommunityResponse<PostsResponse> | null> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const [cachedData, cacheExpiry] = await Promise.all([
+        AsyncStorage.getItem(this.cacheKey),
+        AsyncStorage.getItem(this.cacheExpiryKey)
+      ]);
+
+      if (cachedData && cacheExpiry) {
+        const expiryTime = parseInt(cacheExpiry, 10);
+        const now = Date.now();
+        
+        if (now < expiryTime) {
+          console.log('📦 Cache is valid, returning cached posts');
+          return JSON.parse(cachedData);
+        } else {
+          console.log('📦 Cache expired, clearing cache');
+          await this.clearCache();
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Error reading cache:', error);
+      return null;
+    }
+  }
+
+  private async cachePostsData(data: CommunityResponse<PostsResponse>): Promise<void> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const expiryTime = Date.now() + this.cacheExpiryTime;
+      
+      await Promise.all([
+        AsyncStorage.setItem(this.cacheKey, JSON.stringify(data)),
+        AsyncStorage.setItem(this.cacheExpiryKey, expiryTime.toString())
+      ]);
+    } catch (error) {
+      console.error('❌ Error caching posts:', error);
+    }
+  }
+
+  private async clearCache(): Promise<void> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await Promise.all([
+        AsyncStorage.removeItem(this.cacheKey),
+        AsyncStorage.removeItem(this.cacheExpiryKey)
+      ]);
+    } catch (error) {
+      console.error('❌ Error clearing cache:', error);
+    }
+  }
+
+  private async updateCacheInBackground(page: number, limit: number, search?: string): Promise<void> {
+    try {
+      console.log('🔄 Updating cache in background...');
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString(),
+        ...(search && { search })
+      });
+      
+      const response = await apiClient.get(`/api/community/posts?${params}`);
+      
+      if (response.success) {
+        const responseData = response.data || response;
+        const posts = (responseData as any).posts || [];
+        const pagination = (responseData as any).pagination || {};
+        
+        const result = {
+          success: response.success,
+          data: { 
+            posts: posts,
+            total: pagination.total || 0,
+            page: pagination.page || 1,
+            pages: pagination.pages || 0,
+            hasNext: pagination.page < pagination.pages
+          },
+          error: response.error
+        };
+
+        if (posts.length > 0) {
+          await this.cachePostsData(result);
+          console.log('💾 Background cache update successful');
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Background cache update failed:', error);
+      // Silently fail for background updates
+    }
   }
 }
 

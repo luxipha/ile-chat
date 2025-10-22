@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Layout, Text, Button, Card, Input, Modal } from '@ui-kitten/components';
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { WalletConnect } from '../components/WalletConnect';
+import { QRReceiveFlow } from '../components/wallet/QRReceiveFlow';
 
 export const WalletScreen: React.FC = () => {
   const [showSendModal, setShowSendModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [sendAmount, setSendAmount] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [isWalletConnected, setIsWalletConnected] = useState(false);
@@ -41,7 +43,7 @@ export const WalletScreen: React.FC = () => {
             <Layout style={styles.section}>
               <Text category='h6' style={styles.sectionTitle}>Tokens</Text>
               {tokens.map((token, index) => (
-                <Card key={index} style={styles.tokenCard}>
+                <View key={index} style={[styles.tokenCard, styles.disabledCard]}>
                   <Layout style={styles.tokenHeader}>
                     <Layout style={styles.tokenInfo}>
                       <Text category='s1'>{token.symbol}</Text>
@@ -52,17 +54,34 @@ export const WalletScreen: React.FC = () => {
                       <Text category='c1' appearance='hint'>{token.value}</Text>
                     </Layout>
                   </Layout>
-                </Card>
+                </View>
               ))}
+            </Layout>
+
+            {/* Properties Section - Disabled */}
+            <Layout style={styles.section}>
+              <Text category='h6' style={styles.sectionTitle}>Properties</Text>
+              <View style={[styles.tokenCard, styles.disabledCard]}>
+                <Text style={styles.disabledText}>Properties feature coming soon</Text>
+              </View>
+            </Layout>
+
+            {/* Lending Section - Disabled */}
+            <Layout style={styles.section}>
+              <Text category='h6' style={styles.sectionTitle}>Lending</Text>
+              <View style={[styles.tokenCard, styles.disabledCard]}>
+                <Text style={styles.disabledText}>Lending feature coming soon</Text>
+              </View>
             </Layout>
 
             {/* Quick Actions */}
             <Layout style={styles.actions}>
               <Button 
                 style={styles.actionButton}
-                accessoryLeft={() => <MaterialIcons name="add" size={20} color="white" />}
+                accessoryLeft={() => <MaterialIcons name="qr-code" size={20} color="white" />}
+                onPress={() => setShowReceiveModal(true)}
               >
-                Deposit
+                Receive
               </Button>
               <Button 
                 style={styles.actionButton}
@@ -118,6 +137,14 @@ export const WalletScreen: React.FC = () => {
           </Layout>
         </Card>
       </Modal>
+
+      {/* Receive Modal */}
+      <QRReceiveFlow
+        visible={showReceiveModal}
+        onClose={() => setShowReceiveModal(false)}
+        userHandle="abisoye.ile"
+        showAdvanced={true}
+      />
     </Layout>
   );
 };
@@ -140,6 +167,16 @@ const styles = StyleSheet.create({
   tokenCard: {
     marginBottom: 8,
     borderRadius: 12,
+    padding: 16,
+  },
+  disabledCard: {
+    opacity: 0.7,
+    backgroundColor: '#F0F3F6',
+    borderColor: '#E4E9F2',
+  },
+  disabledText: {
+    textAlign: 'center',
+    color: '#8F9BB3',
   },
   tokenHeader: {
     flexDirection: 'row',

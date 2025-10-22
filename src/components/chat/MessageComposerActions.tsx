@@ -7,6 +7,8 @@ import { Typography } from '../ui/Typography';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import GiphyStickerGrid from './GiphyStickerGrid';
 import { StickerData } from '../../types/sticker';
+import { audioService } from '../../services/audioService';
+import { SimpleCameraScreen } from './SimpleCameraScreen';
 
 
 interface MessageComposerActionsProps {
@@ -17,6 +19,8 @@ interface MessageComposerActionsProps {
   onSendImage?: (imageUri: string) => void;
   onSendDocument?: (documentUri: string) => void;
   onSendSticker?: (sticker: StickerData) => void;
+  onSendAudio?: (audioUri: string, duration: number) => void;
+  onSendLocation?: () => void;
 }
 
 export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
@@ -27,9 +31,15 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   onSendImage,
   onSendDocument,
   onSendSticker,
+  onSendAudio,
+  onSendLocation,
 }) => {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [showCamera, setShowCamera] = useState(false);
+  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -66,29 +76,27 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   const handleTakePhoto = async () => {
     try {
       console.log('📷 Camera action requested');
-      
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is required to take photos.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        console.log('📸 Photo taken:', result.assets[0].uri);
-        onSendImage?.(result.assets[0].uri);
-        onClose();
-      }
+      console.log('📷 Setting showCamera to true...');
+      setShowCamera(true);
+      console.log('📷 showCamera state updated');
     } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo');
+      console.error('Error opening camera:', error);
+      Alert.alert('Error', 'Failed to open camera');
     }
+  };
+
+  const handlePhotoTaken = (uri: string) => {
+    console.log('📸 Photo taken:', uri);
+    onSendImage?.(uri);
+    setShowCamera(false);
+    onClose();
+  };
+
+  const handleVideoRecorded = (uri: string) => {
+    console.log('🎥 Video recorded:', uri);
+    onSendImage?.(uri); // For now, treat video same as image
+    setShowCamera(false);
+    onClose();
   };
 
   const handleSelectImage = async () => {
@@ -143,6 +151,86 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     onClose();
     onSendMoney();
   };
+
+  const startRecordingTimer = () => {
+    setRecordingDuration(0);
+    recordingTimer.current = setInterval(() => {
+      setRecordingDuration(prev => {
+        const newDuration = prev + 1;
+        // Auto-stop at 2 minutes (120 seconds)
+        if (newDuration >= 120) {
+          handleStopVoiceRecording();
+          return 120;
+        }
+        return newDuration;
+      });
+    }, 1000);
+  };
+
+  const stopRecordingTimer = () => {
+    if (recordingTimer.current) {
+      clearInterval(recordingTimer.current);
+      recordingTimer.current = null;
+    }
+  };
+
+  const handleStartVoiceRecording = async () => {
+    try {
+      console.log('🎤 Starting voice recording');
+      await audioService.startRecording();
+      setIsRecording(true);
+      startRecordingTimer();
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      Alert.alert('Error', 'Failed to start recording. Please check microphone permissions.');
+    }
+  };
+
+  const handleStopVoiceRecording = async () => {
+    try {
+      console.log('🛑 Stopping voice recording');
+      const audioUri = await audioService.stopRecording();
+      setIsRecording(false);
+      stopRecordingTimer();
+
+      if (audioUri && recordingDuration > 0) {
+        const duration = await audioService.getAudioDuration(audioUri);
+        console.log('🎵 Audio recorded:', audioUri, 'Duration:', duration);
+        
+        // Check if recording is at least 1 second long
+        if (recordingDuration >= 1) {
+          onSendAudio?.(audioUri, duration);
+          onClose();
+        } else {
+          Alert.alert('Recording Too Short', 'Please record for at least 1 second.');
+        }
+      } else {
+        Alert.alert('Recording Error', 'No audio was recorded or recording was too short.');
+      }
+      setRecordingDuration(0);
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+      setIsRecording(false);
+      stopRecordingTimer();
+      setRecordingDuration(0);
+      Alert.alert('Error', 'Failed to stop recording');
+    }
+  };
+
+  const handleVoicePress = () => {
+    if (isRecording) {
+      handleStopVoiceRecording();
+    } else {
+      handleStartVoiceRecording();
+    }
+  };
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      stopRecordingTimer();
+    };
+  }, []);
 
 
   // Add header with close button for sticker mode
@@ -215,16 +303,15 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity>
 
-        {/* Document Option */}
+        {/* Voice Call Option */}
         <TouchableOpacity 
-          onPress={handleSelectDocument} 
           style={styles.actionItem}
         >
           <View style={styles.actionIcon}>
-            <MaterialIcons name="attach-file" size={24} color={Colors.primary} />
+            <MaterialIcons name="call" size={24} color={Colors.primary} />
           </View>
           <Typography variant="caption" style={styles.actionText}>
-            Document
+            Voice Call
           </Typography>
         </TouchableOpacity>
 
@@ -244,7 +331,13 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
 
       {/* Second Row */}
       <View style={styles.row}>
-        <TouchableOpacity style={styles.actionItem}>
+        <TouchableOpacity 
+          onPress={() => {
+            onSendLocation?.();
+            onClose();
+          }}
+          style={styles.actionItem}
+        >
           <View style={styles.actionIcon}>
             <MaterialIcons name="location-on" size={24} color={Colors.primary} />
           </View>
@@ -255,19 +348,29 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
 
         <TouchableOpacity style={styles.actionItem}>
           <View style={styles.actionIcon}>
-            <MaterialIcons name="card-giftcard" size={24} color={Colors.primary} />
+            <MaterialIcons name="videocam" size={24} color={Colors.primary} />
           </View>
           <Typography variant="caption" style={styles.actionText}>
-            Gift
+            Video Call
           </Typography>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionItem}>
-          <View style={styles.actionIcon}>
-            <MaterialIcons name="mic" size={24} color={Colors.primary} />
+        <TouchableOpacity 
+          onPress={handleVoicePress} 
+          style={styles.actionItem}
+        >
+          <View style={[
+            styles.actionIcon, 
+            isRecording && styles.recordingIcon
+          ]}>
+            <MaterialIcons 
+              name={isRecording ? "stop" : "mic"} 
+              size={24} 
+              color={isRecording ? Colors.white : Colors.primary} 
+            />
           </View>
           <Typography variant="caption" style={styles.actionText}>
-            Voice
+            {isRecording ? `${recordingDuration}s/120s` : 'Voice Note'}
           </Typography>
         </TouchableOpacity>
 
@@ -278,19 +381,32 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   );
 
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          transform: [{ translateY }],
-          opacity: opacityAnim,
-        },
-      ]}
-    >
-      {/* Conditional rendering based on mode */}
-      {mode === 'stickers' ? renderStickerGrid() : renderActionButtons()}
-      
-    </Animated.View>
+    <>
+      <Animated.View
+        style={[
+          styles.container,
+          {
+            transform: [{ translateY }],
+            opacity: opacityAnim,
+          },
+        ]}
+      >
+        {/* Conditional rendering based on mode */}
+        {mode === 'stickers' ? renderStickerGrid() : renderActionButtons()}
+      </Animated.View>
+
+      {/* Camera Screen */}
+      {console.log('📷 MessageComposerActions render - showCamera:', showCamera)}
+      <SimpleCameraScreen
+        visible={showCamera}
+        onClose={() => {
+          console.log('📷 Camera close requested');
+          setShowCamera(false);
+        }}
+        onPhotoTaken={handlePhotoTaken}
+        onVideoRecorded={handleVideoRecorded}
+      />
+    </>
   );
 };
 
@@ -330,6 +446,9 @@ const styles = StyleSheet.create({
   },
   sendMoneyIcon: {
     backgroundColor: Colors.secondary, // Gold color for Send Money
+  },
+  recordingIcon: {
+    backgroundColor: Colors.error || '#FF4444', // Red color when recording
   },
   actionText: {
     textAlign: 'center',

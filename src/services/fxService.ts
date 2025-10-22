@@ -169,6 +169,20 @@ class FXService {
       const response = await apiClient.get(endpoint);
       
       const responseTime = Date.now() - startTime;
+      
+      // CRITICAL DEBUG: Log the exact response structure
+      console.log('🚨 FX GET_OFFERS RAW RESPONSE:', {
+        endpoint,
+        responseType: typeof response,
+        responseKeys: response ? Object.keys(response) : null,
+        success: response?.success,
+        data: response?.data,
+        dataType: typeof response?.data,
+        dataKeys: response?.data ? Object.keys(response.data) : null,
+        error: response?.error,
+        fullResponse: response
+      });
+      
       this.debugger.log('GET_OFFERS_API_RESPONSE', { 
         response, 
         responseTime,
@@ -192,7 +206,26 @@ class FXService {
       }
 
       // Transform backend response to frontend format
-      const responseData = response.data as any;
+      // The API client spreads response fields, so offers might be directly on response
+      const responseData = response.data || response;
+      
+      // Ensure we have valid offers data before transformation
+      if (!responseData || (!responseData.offers && !Array.isArray(responseData))) {
+        this.debugger.log('GET_OFFERS_INVALID_RESPONSE', {
+          responseData,
+          hasOffers: !!responseData?.offers,
+          isArray: Array.isArray(responseData),
+          responseKeys: responseData ? Object.keys(responseData) : null
+        });
+        return {
+          success: false,
+          offers: [],
+          totalCount: 0,
+          hasMore: false,
+          error: 'Invalid response format from server',
+        };
+      }
+      
       const transformedOffers = this.transformOffersFromBackend(responseData.offers || responseData);
       
       const result = {
@@ -893,11 +926,17 @@ class FXService {
       // 🚨 CRITICAL: Log raw backend response before transformation
       console.log('🚨 RAW BACKEND API RESPONSE (getUserTrades):', {
         endpoint,
+        responseType: typeof response,
+        responseKeys: response ? Object.keys(response) : null,
         responseSuccess: response.success,
         responseData: response.data,
+        dataType: typeof response.data,
+        dataKeys: response.data ? Object.keys(response.data) : null,
+        error: response?.error,
         tradesArray: Array.isArray(response.data) ? response.data : response.data?.trades,
         firstTrade: Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0],
-        firstTradeKeys: (Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) ? Object.keys(Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) : null
+        firstTradeKeys: (Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) ? Object.keys(Array.isArray(response.data) ? response.data[0] : response.data?.trades?.[0]) : null,
+        fullResponse: response
       });
       
       const responseTime = Date.now() - startTime;
@@ -921,7 +960,8 @@ class FXService {
         };
       }
 
-      const responseData = response.data as any;
+      // The API client spreads response fields, so trades might be directly on response
+      const responseData = response.data || response;
       const transformedTrades = (responseData.trades || responseData).map((trade: any) => 
         this.transformTradeFromBackend(trade)
       );
@@ -1144,16 +1184,42 @@ class FXService {
       // Backend uses 'merchant' field, but frontend expects 'maker'
       const merchantData = offer.merchant || offer.maker;
       
+      // Enhanced merchant data handling for ObjectId vs populated object
+      let merchantInfo = {
+        id: '',
+        name: 'Unknown Merchant',
+        avatar: '/api/placeholder/40/40',
+        trustScore: 85,
+        completedTrades: 0,
+        responseTime: '~5 minutes'
+      };
+      
+      if (merchantData) {
+        if (typeof merchantData === 'string') {
+          // If merchant is just an ObjectId string
+          merchantInfo.id = merchantData;
+          merchantInfo.name = 'Merchant'; // Fallback name for ObjectId-only data
+        } else if (typeof merchantData === 'object') {
+          // If merchant is a populated object
+          merchantInfo.id = merchantData._id || merchantData.id;
+          merchantInfo.name = merchantData.name || merchantData.userName || 'Merchant';
+          merchantInfo.avatar = merchantData.avatar || merchantData.profilePicture || '/api/placeholder/40/40';
+          merchantInfo.trustScore = merchantData.merchantProfile?.stats?.averageRating || merchantData.trustScore || 85;
+          merchantInfo.completedTrades = merchantData.merchantProfile?.stats?.completedTrades || merchantData.completedTrades || 0;
+          merchantInfo.responseTime = merchantData.merchantProfile?.stats?.responseTime ? `~${merchantData.merchantProfile.stats.responseTime} min` : '~5 minutes';
+        }
+      }
+      
       return {
         id: offer._id || offer.id,
         maker: {
-          id: merchantData?._id || merchantData?.id || offer.makerId,
-          name: merchantData?.name || merchantData?.userName || 'Unknown Merchant',
-          avatar: merchantData?.avatar || merchantData?.profilePicture || '/api/placeholder/40/40',
-          trustScore: merchantData?.merchantProfile?.stats?.averageRating || merchantData?.trustScore || 85,
-          trustBadge: this.getTrustBadge(merchantData?.merchantProfile?.stats?.averageRating || merchantData?.trustScore || 85),
-          completedTrades: merchantData?.merchantProfile?.stats?.completedTrades || merchantData?.completedTrades || 0,
-          responseTime: merchantData?.merchantProfile?.stats?.responseTime ? `~${merchantData.merchantProfile.stats.responseTime} min` : '~5 minutes',
+          id: merchantInfo.id,
+          name: merchantInfo.name,
+          avatar: merchantInfo.avatar,
+          trustScore: merchantInfo.trustScore,
+          trustBadge: this.getTrustBadge(merchantInfo.trustScore),
+          completedTrades: merchantInfo.completedTrades,
+          responseTime: merchantInfo.responseTime,
           onlineStatus: 'online', // For now, assume all merchants are online
         },
         sellCurrency: this.transformCurrency(offer.fromCurrency || offer.sellCurrency),

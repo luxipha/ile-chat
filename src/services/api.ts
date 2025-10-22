@@ -25,9 +25,9 @@ class ApiService {
         timestamp: new Date().toISOString()
       });
 
-      // Add a timeout to the request
+      // Add a timeout to the request - increased to 30 seconds to reduce timeout errors
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for better reliability
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout to give backend more time
       
       // Build headers carefully - don't set Content-Type for FormData
       const headers: Record<string, string> = {};
@@ -70,19 +70,20 @@ class ApiService {
       if (!response.ok) {
         console.log('❌ Request failed:', {
           status: response.status,
-          error: data.message || 'An error occurred',
+          error: data.message || data.error || 'An error occurred',
           data
         });
         return {
           success: false,
-          error: data.message || 'An error occurred',
+          error: data.message || data.error || 'An error occurred',
         };
       }
 
       console.log('✅ Request successful');
       return {
         success: true,
-        ...data, // Spread all response fields including hash, message, etc.
+        data: data, // Put response data in data field as expected by ApiResponse<T>
+        ...data, // Also spread for backward compatibility with fields like hash, message, etc.
       };
     } catch (error) {
       console.error('❌ Network error in request:', error);

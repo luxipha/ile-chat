@@ -76,3 +76,5 @@ export interface ApiResponse<T> {
   isTimeout?: boolean;
   isNetworkError?: boolean;
 }
+
+export * from './news';
