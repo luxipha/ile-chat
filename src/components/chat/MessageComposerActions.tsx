@@ -5,9 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Typography } from '../ui/Typography';
 import { Colors, Spacing, BorderRadius } from '../../theme';
-import GiphyStickerGrid from './GiphyStickerGrid';
+import { KlipyStickerGrid } from './UnifiedStickerGrid';
 import { StickerData } from '../../types/sticker';
-import { audioService } from '../../services/audioService';
 import { SimpleCameraScreen } from './SimpleCameraScreen';
 
 
@@ -15,12 +14,15 @@ interface MessageComposerActionsProps {
   visible: boolean;
   mode: 'actions' | 'stickers'; // Two modes for the panel
   onClose: () => void;
+  currentUserId?: string; // For Stipop user ID
   onSendMoney: () => void;
   onSendImage?: (imageUri: string) => void;
   onSendDocument?: (documentUri: string) => void;
   onSendSticker?: (sticker: StickerData) => void;
   onSendAudio?: (audioUri: string, duration: number) => void;
   onSendLocation?: () => void;
+  onStartVideoCall?: () => void;
+  onStartVoiceCall?: () => void;
 }
 
 export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
@@ -33,13 +35,13 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   onSendSticker,
   onSendAudio,
   onSendLocation,
+  onStartVideoCall,
+  onStartVoiceCall,
+  currentUserId = 'default-user',
 }) => {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
   const [showCamera, setShowCamera] = useState(false);
-  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -152,95 +154,7 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     onSendMoney();
   };
 
-  const startRecordingTimer = () => {
-    setRecordingDuration(0);
-    recordingTimer.current = setInterval(() => {
-      setRecordingDuration(prev => {
-        const newDuration = prev + 1;
-        // Auto-stop at 2 minutes (120 seconds)
-        if (newDuration >= 120) {
-          handleStopVoiceRecording();
-          return 120;
-        }
-        return newDuration;
-      });
-    }, 1000);
-  };
 
-  const stopRecordingTimer = () => {
-    if (recordingTimer.current) {
-      clearInterval(recordingTimer.current);
-      recordingTimer.current = null;
-    }
-  };
-
-  const handleStartVoiceRecording = async () => {
-    try {
-      console.log('🎤 Starting voice recording');
-      await audioService.startRecording();
-      setIsRecording(true);
-      startRecordingTimer();
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      Alert.alert('Error', 'Failed to start recording. Please check microphone permissions.');
-    }
-  };
-
-  const handleStopVoiceRecording = async () => {
-    try {
-      console.log('🛑 Stopping voice recording');
-      const audioUri = await audioService.stopRecording();
-      setIsRecording(false);
-      stopRecordingTimer();
-
-      if (audioUri && recordingDuration > 0) {
-        const duration = await audioService.getAudioDuration(audioUri);
-        console.log('🎵 Audio recorded:', audioUri, 'Duration:', duration);
-        
-        // Check if recording is at least 1 second long
-        if (recordingDuration >= 1) {
-          onSendAudio?.(audioUri, duration);
-          onClose();
-        } else {
-          Alert.alert('Recording Too Short', 'Please record for at least 1 second.');
-        }
-      } else {
-        Alert.alert('Recording Error', 'No audio was recorded or recording was too short.');
-      }
-      setRecordingDuration(0);
-    } catch (error) {
-      console.error('Error stopping recording:', error);
-      setIsRecording(false);
-      stopRecordingTimer();
-      setRecordingDuration(0);
-      Alert.alert('Error', 'Failed to stop recording');
-    }
-  };
-
-  const handleVoicePress = () => {
-    if (isRecording) {
-      handleStopVoiceRecording();
-    } else {
-      handleStartVoiceRecording();
-    }
-  };
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      stopRecordingTimer();
-    };
-  }, []);
-
-
-  // Add header with close button for sticker mode
-  const renderStickerHeader = () => (
-    <View style={styles.header}>
-         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-           <MaterialIcons name="close" size={24} color={Colors.gray600} />
-         </TouchableOpacity>
-       </View>
-  );
 
   if (!visible) {
     return null;
@@ -251,13 +165,14 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     outputRange: [20, 0], // Slide up from 20px below - more subtle
   });
 
-  // Render GIPHY sticker grid mode
+  // Render sticker grid mode with unified component
   const renderStickerGrid = () => (
     <View style={styles.stickerContainer}>
-      {renderStickerHeader()}
-      <GiphyStickerGrid
-        onStickerSelect={(sticker) => {
-          console.log('GIPHY sticker selected:', sticker);
+      {/* Klipy Sticker Grid */}
+      <KlipyStickerGrid
+        currentUserId={currentUserId}
+        onStickerSelect={(sticker: StickerData) => {
+          console.log('🎭 Unified sticker selected:', sticker);
           onSendSticker?.(sticker);
           onClose();
         }}
@@ -303,8 +218,12 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity>
 
-        {/* Voice Call Option */}
-        <TouchableOpacity 
+        {/* Voice Call Option - Temporarily disabled */}
+        {/* <TouchableOpacity 
+          onPress={() => {
+            onStartVoiceCall?.();
+            onClose();
+          }}
           style={styles.actionItem}
         >
           <View style={styles.actionIcon}>
@@ -313,7 +232,7 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           <Typography variant="caption" style={styles.actionText}>
             Voice Call
           </Typography>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         {/* Send Money Option */}
         <TouchableOpacity 
@@ -346,35 +265,24 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionItem}>
+        {/* Video Call Option - Temporarily disabled */}
+        {/* <TouchableOpacity 
+          onPress={() => {
+            onStartVideoCall?.();
+            onClose();
+          }}
+          style={styles.actionItem}
+        >
           <View style={styles.actionIcon}>
             <MaterialIcons name="videocam" size={24} color={Colors.primary} />
           </View>
           <Typography variant="caption" style={styles.actionText}>
             Video Call
           </Typography>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
-        <TouchableOpacity 
-          onPress={handleVoicePress} 
-          style={styles.actionItem}
-        >
-          <View style={[
-            styles.actionIcon, 
-            isRecording && styles.recordingIcon
-          ]}>
-            <MaterialIcons 
-              name={isRecording ? "stop" : "mic"} 
-              size={24} 
-              color={isRecording ? Colors.white : Colors.primary} 
-            />
-          </View>
-          <Typography variant="caption" style={styles.actionText}>
-            {isRecording ? `${recordingDuration}s/120s` : 'Voice Note'}
-          </Typography>
-        </TouchableOpacity>
-
-        {/* Empty slot for now */}
+        {/* Empty slots for future features */}
+        <View style={styles.actionItem} />
         <View style={styles.actionItem} />
       </View>
     </>
@@ -385,6 +293,7 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
       <Animated.View
         style={[
           styles.container,
+          mode === 'stickers' && styles.stickerModeContainer,
           {
             transform: [{ translateY }],
             opacity: opacityAnim,
@@ -447,9 +356,6 @@ const styles = StyleSheet.create({
   sendMoneyIcon: {
     backgroundColor: Colors.secondary, // Gold color for Send Money
   },
-  recordingIcon: {
-    backgroundColor: Colors.error || '#FF4444', // Red color when recording
-  },
   actionText: {
     textAlign: 'center',
     color: Colors.gray600,
@@ -457,8 +363,33 @@ const styles = StyleSheet.create({
   },
   // Sticker styles
   stickerContainer: {
-    height: 200, // Further reduced to better match action buttons height
+    height: 250, // Increased to accommodate tabs
     backgroundColor: Colors.surface,
+    margin: 0, // Remove all margins
+    padding: 0, // Remove all padding
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    flex: 1,
+  },
+  tab: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginRight: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.gray100,
+  },
+  activeTab: {
+    backgroundColor: Colors.primary,
+  },
+  tabText: {
+    color: Colors.gray600,
+    fontWeight: '500',
+    fontSize: 12,
+  },
+  activeTabText: {
+    color: Colors.white,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
@@ -467,5 +398,9 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: Spacing.xs,
+  },
+  stickerModeContainer: {
+    paddingTop: 0, // Remove only top padding to eliminate space above categories
+    borderTopWidth: 0, // Remove top border for stickers mode
   },
 });

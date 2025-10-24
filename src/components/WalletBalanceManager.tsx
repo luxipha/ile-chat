@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text } from 'react-native';
 import Service from '../services/Service';
-import aptosService from '../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 
 interface WalletBalance {
   chain: string;
@@ -46,7 +46,7 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
   const MINIMUM_FETCH_INTERVAL = 15000; // Minimum 15 seconds between fetches
 
-  // Combined balance fetching for Aptos + Base in parallel
+  // Combined balance fetching for Base (Aptos removed)
   const fetchCombinedBalances = useCallback(async () => {
     const now = Date.now();
     
@@ -69,27 +69,14 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
     setBalanceData(prev => ({ ...prev, isLoading: true, error: undefined }));
     
     try {
-      console.log('🔄 Fetching combined Aptos + Base balances in parallel...');
+      console.log('🔄 Fetching Base balances (Aptos support removed)...');
       
       // Create promises for parallel execution
       const balancePromises: Promise<{type: string, data: any}>[] = [];
       
-      // 1. Aptos balance - fetch wallet first, then balances with delay to prevent rate limiting
+      // Aptos service removed - skip Aptos balance fetching
       balancePromises.push(
-        aptosService.getWallet()
-          .then(async (aptosWallet: any) => {
-            if (aptosWallet.success && aptosWallet.address) {
-              // Add small delay before balance fetch to prevent rate limiting
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              const aptosBalances = await aptosService.getAllBalances(aptosWallet.address);
-              return { type: 'aptos', data: aptosBalances };
-            }
-            return { type: 'aptos', data: { success: false, error: 'No Aptos wallet' } };
-          })
-          .catch((error: any) => {
-            console.error('❌ Aptos balance fetch error:', error);
-            return { type: 'aptos', data: { error: error.message } };
-          })
+        Promise.resolve({ type: 'aptos', data: { success: false, error: 'Aptos support removed' } })
       );
       
       // 2. Base balance with delay to stagger requests

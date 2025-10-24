@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Layout, Text, Button, Card, Input, Modal } from '@ui-kitten/components';
+import { Layout, Text, Button, Card, Input, Modal } from '../components/compat/UIKittenCompat';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { WalletConnect } from '../components/WalletConnect';
-import { QRReceiveFlow } from '../components/wallet/QRReceiveFlow';
+import { DepositFlow } from '../components/wallet/DepositFlow';
 
 export const WalletScreen: React.FC = () => {
   const [showSendModal, setShowSendModal] = useState(false);
@@ -139,11 +139,9 @@ export const WalletScreen: React.FC = () => {
       </Modal>
 
       {/* Receive Modal */}
-      <QRReceiveFlow
+      <DepositFlow
         visible={showReceiveModal}
         onClose={() => setShowReceiveModal(false)}
-        userHandle="abisoye.ile"
-        showAdvanced={true}
       />
     </Layout>
   );

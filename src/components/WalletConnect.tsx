@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Text, Button, Card, Modal, Input } from '@ui-kitten/components';
+import { Layout, Text, Button, Card, Modal, Input } from './compat/UIKittenCompat';
 import { StyleSheet, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';

@@ -32,6 +32,7 @@ export interface Conversation {
   isPinned?: boolean;
   bricksCount?: number;
   trustBadge?: 'verified' | 'premium' | 'agent' | null;
+  participantIds?: string[];
 }
 
 interface ConversationListProps {

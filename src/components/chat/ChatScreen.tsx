@@ -27,7 +27,7 @@ import { ChatTheme } from '../../theme/chatTheme';
 import { Typography } from '../ui/Typography';
 import chatService, { ChatMessage } from '../../services/chatService';
 import authService from '../../services/authService';
-import aptosService from '../../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
 import profileService from '../../services/profileService';
 import { audioService } from '../../services/audioService';
@@ -44,6 +44,8 @@ interface ChatScreenProps {
   onBack: () => void;
   onInfo?: () => void;
   onNavigateToMoments?: () => void;
+  // onStartVideoCall?: () => void;
+  // onStartVoiceCall?: () => void;
 }
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({
@@ -55,6 +57,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onBack,
   onInfo,
   onNavigateToMoments,
+  // onStartVideoCall,
+  // onStartVoiceCall,
 }) => {
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = Dimensions.get('window');
@@ -748,12 +752,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       }
 
       // Execute transaction directly with crypto amounts
-      if (walletId === 'usdc_aptos' || walletId === 'usdc_') {
-        transactionResult = await aptosService.sendUSDC(recipientAddress, cryptoAmount);
-        currency = 'USDC (Aptos)';
-      } else if (walletId === 'apt_native') {
-        transactionResult = await aptosService.sendAPT(recipientAddress, cryptoAmount);
-        currency = 'APT';
+      if (walletId === 'usdc_aptos' || walletId === 'usdc_' || walletId === 'apt_native') {
+        // Aptos service removed
+        throw new Error('Aptos transfers temporarily unavailable - support removed');
       } else if (walletId === 'usdc_base') {
         // Base USDC transfer support
         transactionResult = await baseService.sendUSDC(recipientAddress, cryptoAmount);
@@ -1215,6 +1216,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         <MessageComposerActions
           visible={showComposerActions}
           mode={actionPanelMode}
+          currentUserId={currentUser?.id}
           onClose={() => {
             setShowComposerActions(false);
             // Refocus the input when action panel closes
@@ -1399,6 +1401,14 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             console.log('📍 Location button pressed');
             setShowLocationShare(true);
           }}
+          // onStartVideoCall={() => {
+          //   console.log('📹 Video call button pressed');
+          //   onStartVideoCall?.();
+          // }}
+          // onStartVoiceCall={() => {
+          //   console.log('📞 Voice call button pressed');
+          //   onStartVoiceCall?.();
+          // }}
         />
       </KeyboardAvoidingView>
 

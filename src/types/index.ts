@@ -21,6 +21,7 @@ export interface User {
   merchantProfile?: any; // Will be properly typed if needed
   createdAt?: string;
   walletAddress?: string; // Keep for backward compatibility
+  username?: string; // Add username for calls
 }
 
 export interface Token {

@@ -1,7 +1,7 @@
-import { initializeApp } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence, signInWithCustomToken } from 'firebase/auth';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeAuth, getReactNativePersistence, signInWithCustomToken, getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Firebase configuration for React Native (Android/iOS)
 // Values loaded from environment variables (.env file)
@@ -16,13 +16,30 @@ const firebaseConfig = {
   automaticDataCollectionEnabled: false,
 };
 
-// Initialize Firebase with analytics disabled
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase with analytics disabled (only if not already initialized)
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Auth with AsyncStorage persistence for React Native
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage)
-});
+// Initialize Auth with platform-specific persistence
+let auth;
+try {
+  if (Platform.OS === 'web') {
+    // Use default web auth for web platform
+    auth = getAuth(app);
+  } else {
+    // Use React Native persistence for mobile platforms
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
+  }
+} catch (error: any) {
+  // If auth is already initialized, get the existing instance
+  if (error.code === 'auth/already-initialized') {
+    auth = getAuth(app);
+  } else {
+    throw error;
+  }
+}
 
 const db = getFirestore(app);
 

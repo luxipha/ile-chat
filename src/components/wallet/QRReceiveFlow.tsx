@@ -13,7 +13,7 @@ import { Typography } from '../ui/Typography';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import QRCode from 'react-native-qrcode-svg';
 import Service from '../../services/Service';
-import aptosService from '../../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
 
 interface QRReceiveFlowProps {

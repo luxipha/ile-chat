@@ -1,6 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import aptosService from './aptosService';
-
 import { API_BASE_URL } from '../config/apiConfig';
 
 export interface ContributionGroupWallet {
@@ -191,56 +189,8 @@ class ContributionGroupService {
         result.wallet.createdAt = new Date(result.wallet.createdAt);
         result.wallet.lastActivity = new Date(result.wallet.lastActivity);
 
-        // Get real-time balance from Aptos blockchain
-        if (result.wallet.contractAddress) {
-          console.log('📊 [ContributionGroupService] Fetching real Aptos balance for:', result.wallet.contractAddress);
-          
-          try {
-            const aptosBalances = await aptosService.getAllBalances(result.wallet.contractAddress);
-            
-            if (aptosBalances.success && aptosBalances.balances) {
-              // Update wallet balance with real blockchain data
-              const updatedBalance: { [token: string]: number } = {};
-              let totalValue = 0;
-
-              // Process APT balance
-              if (aptosBalances.balances.APT) {
-                const aptAmount = parseFloat(aptosBalances.balances.APT) / 100_000_000; // Convert from octas
-                updatedBalance.APT = aptAmount;
-                totalValue += aptAmount * 10; // Rough APT price estimate for demo
-              }
-
-              // Process USDC balance
-              if (aptosBalances.balances.USDC) {
-                const usdcAmount = parseFloat(aptosBalances.balances.USDC);
-                updatedBalance.USDC = usdcAmount;
-                totalValue += usdcAmount; // USDC is ~$1
-              }
-
-              // Process other tokens
-              Object.keys(aptosBalances.balances).forEach(symbol => {
-                if (symbol !== 'APT' && symbol !== 'USDC') {
-                  const amount = parseFloat(aptosBalances.balances![symbol]);
-                  updatedBalance[symbol] = amount;
-                  // Add estimated value for other tokens
-                  totalValue += amount * 0.5; // Conservative estimate
-                }
-              });
-
-              result.wallet.balance = updatedBalance;
-              result.wallet.totalValue = totalValue;
-              result.wallet.lastActivity = new Date(); // Update last activity
-
-              console.log('✅ [ContributionGroupService] Updated wallet with real Aptos balances:', {
-                balance: updatedBalance,
-                totalValue,
-              });
-            }
-          } catch (balanceError) {
-            console.warn('⚠️ [ContributionGroupService] Failed to fetch real balance, using cached:', balanceError);
-            // Continue with cached balance from database
-          }
-        }
+        // Aptos service removed - using Circle/Hedera instead
+        console.log('📊 [ContributionGroupService] Using cached balance (Aptos support removed)');
       }
 
       console.log('✅ [ContributionGroupService] Group wallet retrieved:', result);
@@ -283,23 +233,8 @@ class ContributionGroupService {
       const groupWalletAddress = walletResponse.wallet.contractAddress;
       console.log('📍 [ContributionGroupService] Group wallet address:', groupWalletAddress);
 
-      // Step 2: Send tokens using Aptos service
-      let txResult;
-      if (token === 'USDC') {
-        console.log('💵 Sending USDC via Aptos...');
-        txResult = await aptosService.sendUSDC(groupWalletAddress, amount);
-      } else if (token === 'APT') {
-        console.log('🟡 Sending APT via Aptos...');
-        txResult = await aptosService.sendAPT(groupWalletAddress, amount);
-      } else {
-        throw new Error(`Unsupported token: ${token}`);
-      }
-
-      if (!txResult.success) {
-        throw new Error(txResult.error || 'Blockchain transaction failed');
-      }
-
-      console.log('✅ [ContributionGroupService] Aptos transaction successful:', txResult.hash);
+      // Aptos service removed - using Circle/Hedera instead
+      throw new Error('Contribution service temporarily unavailable - Aptos support removed');
 
       // Step 3: Record contribution in backend database
       const recordResult = await this.makeRequest('/api/contribution-groups/contribute', {

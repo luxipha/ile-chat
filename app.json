@@ -10,11 +10,14 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#170F34"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ile.chat.app"
+      "bundleIdentifier": "com.ile.chat.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.ile.chat.app",

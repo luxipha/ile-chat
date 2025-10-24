@@ -13,7 +13,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Avatar } from '../ui/Avatar';
 import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
-import aptosService from '../../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import Service from '../../services/Service';
 import { useBalance } from '../../hooks/useBalance';
 
@@ -60,23 +60,8 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
   // Use real wallet balances
   const { balances: Balances, isLoading: Loading } = useBalance();
 
-  // Fetch Aptos and Base balances
+  // Fetch Base balances (Aptos support removed)
   useEffect(() => {
-    const fetchAptosBalances = async () => {
-      try {
-        // Get wallet first
-        const walletResult = await aptosService.getWallet();
-        if (walletResult.success && walletResult.address) {
-          const balanceResult = await aptosService.getAllBalances(walletResult.address);
-          if (balanceResult.success && balanceResult.balances) {
-            setAptosBalances(balanceResult.balances);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch Aptos balances:', error);
-      }
-    };
-
     const fetchBaseBalances = async () => {
       try {
         const baseBalanceResult = await Service.getCurrentUserBaseBalance();
@@ -93,8 +78,9 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
     };
 
     if (visible) {
-      fetchAptosBalances();
       fetchBaseBalances();
+      // Aptos balance fetching removed
+      setAptosBalances({}); // Set empty balances
     }
   }, [visible]);
 

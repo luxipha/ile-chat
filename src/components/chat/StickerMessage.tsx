@@ -62,13 +62,23 @@ export const StickerMessage: React.FC<StickerMessageProps> = React.memo(({
         activeOpacity={0.8}
       >
         {sticker.url ? (
-          // GIPHY animated sticker
+          // GIPHY or Stipop image sticker
           <Image
             source={{ uri: sticker.url }}
             style={styles.stickerImage}
             resizeMode="contain"
             onError={(error) => {
-              console.log('🎭 Error loading sticker:', sticker.id);
+              console.log('🎭 Error loading sticker:', sticker.id, 'from', sticker.source);
+            }}
+          />
+        ) : sticker.preview_gif ? (
+          // Fallback to preview GIF for GIPHY stickers
+          <Image
+            source={{ uri: sticker.preview_gif }}
+            style={styles.stickerImage}
+            resizeMode="contain"
+            onError={(error) => {
+              console.log('🎭 Error loading preview sticker:', sticker.id);
             }}
           />
         ) : (
@@ -79,6 +89,13 @@ export const StickerMessage: React.FC<StickerMessageProps> = React.memo(({
           </View>
         )}
       </TouchableOpacity>
+      
+      {/* Source indicator for development */}
+      {sticker.source && __DEV__ && (
+        <Text style={styles.sourceIndicator}>
+          {sticker.source === 'stipop' ? '✨' : sticker.source === 'giphy' ? '🎬' : '😊'}
+        </Text>
+      )}
       
       {/* Accessibility label */}
       <Text style={styles.stickerName} accessibilityLabel={sticker.name || sticker.title}>
@@ -135,6 +152,18 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     marginTop: 4,
+  },
+  sourceIndicator: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    fontSize: 12,
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });
 

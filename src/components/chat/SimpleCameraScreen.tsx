@@ -410,18 +410,19 @@ const SimpleCameraScreenComponent: React.FC<SimpleCameraScreenProps> = ({
                   </TouchableOpacity>
                 </Animated.View>
 
-                {/* Lens Effects - Horizontal ScrollView like reference */}
-                <FlatList
-                  data={[0, 1, 2, 3]}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity key={item} style={styles.effectButton}>
-                      <MaterialIcons name="face" size={20} color={Colors.white} />
-                    </TouchableOpacity>
-                  )}
-                  horizontal
-                  contentContainerStyle={styles.effectsContainer}
-                  showsHorizontalScrollIndicator={false}
-                />
+                {/* Lens Effects */}
+                <View style={styles.effectsContainer}>
+                  <FlatList
+                    data={[0, 1, 2, 3]}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity key={item} style={styles.effectButton}>
+                        <MaterialIcons name="face" size={20} color={Colors.white} />
+                      </TouchableOpacity>
+                    )}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                  />
+                </View>
               </View>
 
               {/* Bottom Controls */}
@@ -523,6 +524,7 @@ const styles = StyleSheet.create({
   },
   mainActionRow: {
     width: '100%',
+    height: 100,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -531,12 +533,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
   },
   gallerySection: {
-    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingRight: 20,
+    gap: 8,
+    flex: 0.8,
+    maxWidth: 120,
   },
   recentPhotosContainer: {
-    gap: 6,
+    gap: 8,
   },
   recentPhoto: {
     height: 40,
@@ -545,6 +550,8 @@ const styles = StyleSheet.create({
   },
   captureButtonContainer: {
     alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
   },
   captureButton: {
     width: 90,
@@ -589,7 +596,12 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
   },
   effectsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+    flex: 0.8,
+    maxWidth: 120,
+    justifyContent: 'flex-end',
   },
   effectButton: {
     width: 40,
@@ -600,6 +612,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
+    marginHorizontal: 4,
   },
   bottomControls: {
     position: 'absolute',

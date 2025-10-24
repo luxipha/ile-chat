@@ -15,7 +15,7 @@ import { Card } from '../ui/Card';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import QRCode from 'react-native-qrcode-svg';
 import Service from '../../services/Service';
-import aptosService from '../../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
 
 interface DepositFlowProps {
@@ -27,15 +27,15 @@ type DepositStep = 'method' | 'network' | 'address';
 type CryptoNetwork = 'USDC_ETHEREUM' | 'USDC_APTOS' | 'BASE_NETWORK';
 
 const USDC_NETWORKS = [
-  { 
-    id: 'USDC_APTOS' as CryptoNetwork,
-    name: 'Aptos Testnet', 
-    token: 'USDC',
-    icon: 'account-balance-wallet',
-    chain: 'aptos-testnet',
-    description: 'USDC on Aptos testnet',
-    type: 'aptos' as const
-  },
+  // { 
+  //   id: 'USDC_APTOS' as CryptoNetwork,
+  //   name: 'Aptos Testnet', 
+  //   token: 'USDC',
+  //   icon: 'account-balance-wallet',
+  //   chain: 'aptos-testnet',
+  //   description: 'USDC on Aptos testnet',
+  //   type: 'aptos' as const
+  // },
   { 
     id: 'BASE_NETWORK' as CryptoNetwork,
     name: 'Base Sepolia', 
@@ -169,9 +169,9 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                   }
                 }
               } else {
-                // No wallet found anywhere - create a new one
-                console.log('🆕 No Aptos wallet found, creating new wallet...');
-                const walletResult = await aptosService.generateWallet(200_000_000); // 2 APT pre-funding
+                // No wallet found anywhere - Aptos wallet creation removed
+                console.log('🆕 Aptos wallet creation disabled - support removed');
+                const walletResult = { success: false, error: 'Aptos support removed' };
                 
                 if (walletResult.success && walletResult.address) {
                   console.log('✅ Created new Aptos wallet:', walletResult.address);

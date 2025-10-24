@@ -15,7 +15,7 @@ import { Button } from '../ui/Button';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import { RecipientPicker } from './RecipientPicker';
 import Service from '../../services/Service';
-import aptosService from '../../services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
 
 interface Contact {
@@ -72,20 +72,9 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
   const fetchWalletBalances = async () => {
     setIsLoadingBalances(true);
     try {
-      // Fetch Aptos balances
-      const walletResult = await aptosService.getWallet();
-      if (walletResult.success && walletResult.address) {
-        const balancesResult = await aptosService.getAllBalances(walletResult.address);
-        if (balancesResult.success && balancesResult.balances) {
-          console.log('💰 Real Aptos wallet balances:', balancesResult.balances);
-          setRealBalances(balancesResult.balances);
-          
-          // Also fetch APT balance for gas fee checking
-          const aptRaw = balancesResult.balances['APT'] || '0';
-          const aptBalance = parseFloat(aptRaw) / 100_000_000;
-          setAptBalance(aptBalance);
-        }
-      }
+      // Aptos service removed - set empty balances
+      setRealBalances({});
+      setAptBalance(0);
 
       // Fetch Base balances using the corrected Service method
       try {
@@ -258,13 +247,8 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
       
       // Send using appropriate blockchain based on token network
       if (selectedToken.network === 'aptos') {
-        if (selectedToken.symbol === 'APT') {
-          result = await aptosService.sendAPT(selectedRecipient.address, parseFloat(amount));
-        } else if (selectedToken.symbol === 'USDC') {
-          result = await aptosService.sendUSDC(selectedRecipient.address, parseFloat(amount));
-        } else {
-          throw new Error(`Unsupported Aptos token: ${selectedToken.symbol}`);
-        }
+        // Aptos service removed
+        throw new Error('Aptos transfers temporarily unavailable - support removed');
       } else if (selectedToken.network === 'base') {
         if (selectedToken.symbol === 'ETH') {
           result = await baseService.sendETH(selectedRecipient.address, parseFloat(amount));
@@ -304,22 +288,13 @@ export const P2PSendFlow: React.FC<P2PSendFlowProps> = ({
           [
             { text: 'OK', onPress: () => {} },
             { 
-              text: 'Copy Address', 
-              onPress: async () => {
-                try {
-                  const walletResult = await aptosService.getWalletAddress();
-                  if (walletResult.success && walletResult.address) {
-                    console.log('Wallet address to fund:', walletResult.address);
-                    Alert.alert(
-                      'Wallet Address', 
-                      `Copy this address to fund your account:\n\n${walletResult.address}\n\nNext steps:\n1. Copy the address above\n2. Go to https://aptos.dev/network/faucet\n3. Paste your address\n4. Click "Fund Account"\n5. Return here and try again`,
-                      [{ text: 'Got it!', onPress: () => {} }]
-                    );
-                  }
-                } catch (e) {
-                  console.error('Failed to get wallet address:', e);
-                  Alert.alert('Error', 'Failed to get wallet address. Please try again.');
-                }
+              text: 'Info', 
+              onPress: () => {
+                Alert.alert(
+                  'Aptos Support Removed', 
+                  'Aptos transfers are no longer supported. Please use Base USDC or ETH instead.',
+                  [{ text: 'Got it!', onPress: () => {} }]
+                );
               }
             }
           ]

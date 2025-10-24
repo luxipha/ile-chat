@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Text, Button, Card, Avatar } from '@ui-kitten/components';
+import { Layout, Text, Button, Card, Avatar } from '../components/compat/UIKittenCompat';
 import { ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SendMoneyModal } from '../components/wallet/SendMoneyModal';

@@ -14,6 +14,8 @@ import { Avatar } from './src/components/ui/Avatar';
 import { Colors, Spacing, BorderRadius } from './src/theme';
 import { ConversationList, Conversation } from './src/components/chat/ConversationList';
 import { ChatScreen } from './src/components/chat/ChatScreen';
+// import { VideoCallScreen } from './src/components/call/VideoCallScreen';
+// import { useVideoCall } from './src/hooks/useVideoCall';
 import { ProfileScreen } from './src/components/profile/ProfileScreen';
 import { SettingsScreen } from './src/components/profile/SettingsScreen';
 import { InviteToEarnScreen } from './src/components/profile/InviteToEarnScreen';
@@ -36,7 +38,7 @@ import { BlockedUsersScreen } from './src/components/settings/BlockedUsersScreen
 import { SendFeedbackScreen } from './src/components/settings/SendFeedbackScreen';
 import { AboutScreen } from './src/components/settings/AboutScreen';
 import { QRCodeScreen } from './src/components/profile/QRCodeScreen';
-import { QRReceiveFlow } from './src/components/wallet/QRReceiveFlow';
+import { DepositFlow } from './src/components/wallet/DepositFlow';
 import { CreateGroupModal } from './src/components/chat/CreateGroupModal';
 import { GroupChatDebugPanel } from './src/components/debug/GroupChatDebugPanel';
 import { GroupCreationErrorHandler, useGroupCreationErrorHandler } from './src/components/chat/GroupCreationErrorHandler';
@@ -68,7 +70,7 @@ import { communityService, CommunityPost } from './src/services/communityService
 import profileService from './src/services/profileService';
 import chatService, { createConversationId, createTradeConversationId } from './src/services/chatService';
 import fxService from './src/services/fxService';
-import aptosService from './src/services/aptosService';
+// aptosService removed - using Circle/Hedera instead
 import friendService from './src/services/friendService';
 import emailAuthService from './src/services/emailAuthService';
 import { apiService } from './src/services/api';
@@ -121,6 +123,9 @@ const queryClient = new QueryClient({
 // Main App component
 function App() {
   //  functionality removed - focusing on Aptos wallet only
+  
+  // Video calling functionality - temporarily disabled
+  // const { isInCall, callData, startCall, endCall } = useVideoCall();
   
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -471,6 +476,40 @@ function App() {
     setShowDeleteMenu(showDeleteMenu === momentId ? null : momentId);
   };
 
+  // Helper function to extract other participant ID from chat ID
+  const getOtherParticipantId = (chatId: string, currentUserId: string): string | null => {
+    // Chat IDs are formatted as "userId1_userId2" (sorted)
+    // For trade conversations: "trade_userId1_userId2_tradeId"
+    // For trade rooms: "traderoom_tradeId"
+    
+    if (chatId.startsWith('trade_') || chatId.startsWith('traderoom_')) {
+      // For now, trade calls are not supported
+      return null;
+    }
+    
+    const parts = chatId.split('_');
+    if (parts.length === 2) {
+      // Standard 1-on-1 conversation: "userId1_userId2"
+      const [userId1, userId2] = parts;
+      return userId1 === currentUserId ? userId2 : userId1;
+    }
+    
+    return null;
+  };
+
+  // Call handlers - in-app video calling - temporarily disabled
+  // const handleStartVideoCall = async () => {
+  //   if (!selectedChat) return;
+  //   console.log('📹 Starting video call with:', selectedChat.name);
+  //   await startCall(selectedChat.name, selectedChat.avatar, true);
+  // };
+
+  // const handleStartVoiceCall = async () => {
+  //   if (!selectedChat) return;
+  //   console.log('📞 Starting voice call with:', selectedChat.name);
+  //   await startCall(selectedChat.name, selectedChat.avatar, false);
+  // };
+
   // Check if user has  wallet and fetch balance
   const checkWalletStatus = async () => {
     try {
@@ -515,52 +554,11 @@ function App() {
           console.warn('⚠️ Failed to update AsyncStorage:', storageError);
         }
         
-        // Run blockchain checks on the database wallet
-        await aptosService.debugAccountState(backendAptosWallet.wallet.address);
-        
-        // Activation Check: Ensure the account is active on-chain
-        try {
-          const balanceCheck = await aptosService.getAllBalances(backendAptosWallet.wallet.address);
-          if (balanceCheck.success) {
-            console.log('✅ Database Aptos account is active on-chain.');
-          } else {
-            console.log('⚠️ Database Aptos account might not be active. Activating with faucet...');
-            await aptosService.fundWithFaucet(backendAptosWallet.wallet.address);
-            console.log('🚰 Database Aptos wallet funded to activate on-chain.');
-          }
-        } catch (activationError) {
-          console.error('⚠️ Activation check failed for database wallet:', activationError);
-        }
-      } else {
-        // No database wallet, check AsyncStorage but DON'T auto-create
-        const localAptosConnected = await aptosService.hasWallet();
-        console.log('📱 Local Aptos wallet connected:', localAptosConnected);
-        
-        if (localAptosConnected) {
-          const aptosWallet = await aptosService.getWallet();
-          if (aptosWallet.success && aptosWallet.address) {
-            console.log('⚠️ Found Aptos wallet in AsyncStorage but not in database:', aptosWallet.address);
-            console.log('🔄 Saving existing wallet to database...');
-            
-            //  service removed - skip saving wallet to backend
-            console.log('⚠️  service not available - skipping wallet save to backend');
-            // Simulate successful save for local workflow
-            console.log('✅ Aptos wallet available locally (backend save skipped)');
-            setAptosAddress(aptosWallet.address);
-            aptosConnected = true;
-          }
-        } else {
-          console.log('ℹ️ No Aptos wallet found. User needs to create one from the main screen.');
-          aptosConnected = false;
-        }
+        // Aptos service removed - using Circle/Hedera instead
+        console.log('✅ Database wallet found (Aptos support removed).');
       }
       
-      console.log('🎯 Final wallet status:', {
-        aptos: aptosConnected
-      });
-      
-      setHasWallet(aptosConnected);
-      setHasAptosWallet(aptosConnected);
+      console.log('🎯 Aptos support removed - using Circle/Hedera instead');
       
       console.log('🔧 State will be updated to:', {
         hasWallet: aptosConnected,
@@ -1444,20 +1442,18 @@ function App() {
               <Typography variant="h6" style={{ marginBottom: Spacing.md }}>Portfolio</Typography>
               <View style={styles.portfolioGrid}>
                 <TouchableOpacity 
-                  style={[styles.portfolioItem, previewMode && styles.disabledItem]}
-                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('tokens')}
-                  disabled={previewMode}
+                  style={[styles.portfolioItem, styles.disabledItem]}
+                  disabled={true}
                 >
-                  <MaterialIcons name="toll" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
-                  <Typography variant="caption" style={[styles.portfolioLabel, previewMode && { color: Colors.gray400 }]}>Tokens</Typography>
+                  <MaterialIcons name="toll" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" style={[styles.portfolioLabel, { color: Colors.gray400 }]}>Tokens</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={[styles.portfolioItem, previewMode && styles.disabledItem]}
-                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('webview')}
-                  disabled={previewMode}
+                  style={[styles.portfolioItem, styles.disabledItem]}
+                  disabled={true}
                 >
-                  <MaterialIcons name="home" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
-                  <Typography variant="caption" style={[styles.portfolioLabel, previewMode && { color: Colors.gray400 }]}>Properties</Typography>
+                  <MaterialIcons name="home" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" style={[styles.portfolioLabel, { color: Colors.gray400 }]}>Properties</Typography>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1471,12 +1467,11 @@ function App() {
                   <Typography variant="caption" color="textSecondary">Stake</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={[styles.serviceItem, previewMode && styles.disabledItem]}
-                  onPress={previewMode ? handleSignupPress : () => setCurrentWalletScreen('lending')}
-                  disabled={previewMode}
+                  style={[styles.serviceItem, styles.disabledItem]}
+                  disabled={true}
                 >
-                  <MaterialIcons name="handshake" size={24} color={previewMode ? Colors.gray400 : Colors.primary} />
-                  <Typography variant="caption" style={[styles.serviceLabel, previewMode && { color: Colors.gray400 }]}>Lending</Typography>
+                  <MaterialIcons name="handshake" size={24} color={Colors.gray400} />
+                  <Typography variant="caption" style={[styles.serviceLabel, { color: Colors.gray400 }]}>Lending</Typography>
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.serviceItem, previewMode && styles.disabledItem]}
@@ -2827,6 +2822,8 @@ function App() {
             setSelectedChat(null);
             setActiveTab('moments');
           }}
+          // onStartVideoCall={handleStartVideoCall}
+          // onStartVoiceCall={handleStartVoiceCall}
         />
       );
     }
@@ -3009,12 +3006,10 @@ function App() {
           }}
         />
 
-        {/* QR Receive Flow Modal */}
-        <QRReceiveFlow
+        {/* Deposit Flow Modal */}
+        <DepositFlow
           visible={showDepositFlow}
           onClose={() => setShowDepositFlow(false)}
-          userHandle={currentUser?.username || ''}
-          showAdvanced={true}
         />
 
         {/* Create Group Modal */}
@@ -3219,6 +3214,17 @@ function App() {
         )}
         {/* In-App Notifications */}
         <AppNotificationWrapper />
+
+        {/* Video Call Screen - temporarily disabled */}
+        {/* {isInCall && callData && (
+          <VideoCallScreen
+            contactName={callData.contactName}
+            contactAvatar={callData.contactAvatar}
+            isVideo={callData.isVideo}
+            onEndCall={endCall}
+          />
+        )} */}
+
       </SafeAreaView>
     </SafeAreaProvider>
     </ErrorBoundary>
