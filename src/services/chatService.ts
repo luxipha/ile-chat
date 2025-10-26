@@ -1,32 +1,44 @@
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  orderBy,
-  addDoc,
-  serverTimestamp,
-  doc,
-  updateDoc,
-  setDoc,
-  limit,
-  getDocs,
-  getDoc,
-  startAfter,
-  writeBatch,
-  deleteDoc,
-} from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { getFirestore, getFirebaseFieldValue, getFirebaseAuth, isUsingExpoFirebase } from './firebaseConfig';
 import { Conversation } from '../components/chat/ConversationList';
 import { apiClient } from './api';
 import { API_BASE_URL } from '../config/apiConfig';
 import profileService from './profileService';
 import { StickerData } from '../types/sticker';
 
-// Firestore collections
-const conversationsCollection = collection(db, 'conversations');
-const messagesCollection = (conversationId: string) => collection(db, `conversations/${conversationId}/messages`);
+const db = getFirestore();
+const FieldValue = getFirebaseFieldValue();
+const firebaseAuthInstance = getFirebaseAuth();
 
+console.log(
+  '🔥 [Chat Debug] Firebase auth state at chatService init:',
+  {
+    isUsingExpo: isUsingExpoFirebase(),
+    currentUid: firebaseAuthInstance?.currentUser?.uid || null,
+    hasCurrentUser: !!firebaseAuthInstance?.currentUser,
+  }
+);
+
+console.log(
+  '🔧 [Chat Debug] Using',
+  isUsingExpoFirebase() ? 'Firebase Web compat SDK' : 'React Native Firebase',
+  'for chat service'
+);
+
+// Firestore collections using React Native Firebase
+const conversationsCollection = db.collection('conversations');
+const messagesCollection = (conversationId: string) => db.collection(`conversations/${conversationId}/messages`);
+
+const snapshotExists = (snapshot: any): boolean => {
+  if (!snapshot) {
+    return false;
+  }
+
+  if (typeof snapshot.exists === 'function') {
+    return snapshotExists(snapshot);
+  }
+
+  return !!snapshot.exists;
+};
 
 // Helper function to create consistent conversation IDs
 const createConversationId = (userId1: string, userId2: string): string => {
@@ -145,13 +157,16 @@ const chatService = {
    */
   getConversations: (userId: string, callback: (conversations: Conversation[]) => void) => {
     console.log('🔄 Loading conversations for userId:', userId);
+    console.log('🔥 [Chat Debug] Auth state before conversations query:', {
+      currentUid: firebaseAuthInstance?.currentUser?.uid || null,
+      hasCurrentUser: !!firebaseAuthInstance?.currentUser,
+      providerData: firebaseAuthInstance?.currentUser?.providerData || [],
+    });
     
-    const q = query(
-      conversationsCollection,
-      where('participants', 'array-contains', userId)
-    );
+    const q = conversationsCollection
+      .where('participants', 'array-contains', userId);
 
-    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+    const unsubscribe = q.onSnapshot(async (querySnapshot) => {
       console.log('📱 Firestore conversations query result:', {
         docsCount: querySnapshot.docs.length,
         isEmpty: querySnapshot.empty
@@ -324,7 +339,7 @@ const chatService = {
     
     const messageData = {
       text: messageText,
-      createdAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       user: cleanSender,
       type: messageType,
       ...metadata, // Include payment data, etc.
@@ -339,7 +354,7 @@ const chatService = {
         messagesRefPath: `conversations/${conversationId}/messages`
       });
       
-      const messageDoc = await addDoc(messagesRef, messageData);
+      const messageDoc = await messagesRef.add(messageData);
       
       console.log('✅ ChatService: Message sent successfully:', {
         messageId: messageDoc.id,
@@ -358,17 +373,17 @@ const chatService = {
     }
 
     // Update or create the parent conversation document with the last message
-    const conversationRef = doc(db, 'conversations', conversationId);
+    const conversationRef = db.doc(`conversations/${conversationId}`);
     try {
       console.log('📝 ChatService: Updating conversation document:', conversationId);
       
-      await updateDoc(conversationRef, {
+      await conversationRef.update( {
         lastMessage: {
           text: messageText,
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: sender._id,
         },
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ ChatService: Conversation updated successfully');
@@ -392,15 +407,15 @@ const chatService = {
         console.log('👥 ChatService: Conversation participants:', participants);
         
         try {
-          await setDoc(conversationRef, {
+          await conversationRef.set( {
             participants: participants,
             type: 'direct',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
             expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
             lastMessage: {
               text: messageText,
-              createdAt: serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
               senderId: sender._id,
             },
           });
@@ -443,7 +458,7 @@ const chatService = {
 
     const messageData = {
       text: sticker.title || sticker.name || '🎭 Sticker', // Use title, name, or fallback text
-      createdAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       user: sender,
       type: 'sticker',
       stickerData: sticker,
@@ -451,7 +466,7 @@ const chatService = {
 
     // Add the message to the messages subcollection
     const messagesRef = messagesCollection(conversationId);
-    const messageDoc = await addDoc(messagesRef, messageData);
+    const messageDoc = await messagesRef.add(messageData);
 
     console.log('✅ ChatService: Sticker message sent successfully:', {
       messageId: messageDoc.id,
@@ -460,12 +475,12 @@ const chatService = {
     });
 
     // Update or create the parent conversation document with the last message
-    const conversationRef = doc(db, 'conversations', conversationId);
+    const conversationRef = db.doc(`conversations/${conversationId}`);
     try {
-      await updateDoc(conversationRef, {
+      await conversationRef.update( {
         lastMessage: {
           text: '[sticker]', // Show generic sticker text in conversation list
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: sender._id,
         },
       });
@@ -481,14 +496,14 @@ const chatService = {
 
         console.log('👥 Conversation participants:', participants);
 
-        await setDoc(conversationRef, {
+        await conversationRef.set( {
           participants: participants,
           type: 'direct',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
           lastMessage: {
             text: '[sticker]',
-            createdAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
             senderId: sender._id,
           },
         });
@@ -505,9 +520,11 @@ const chatService = {
    * @returns An unsubscribe function to stop listening for updates.
    */
   getMessages: (conversationId: string, callback: (messages: ChatMessage[]) => void) => {
-    const q = query(messagesCollection(conversationId), orderBy('createdAt', 'asc'), limit(50));
+    const q = messagesCollection(conversationId)
+      .orderBy('createdAt', 'asc')
+      .limit(50);
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const unsubscribe = q.onSnapshot((querySnapshot) => {
       const messages: ChatMessage[] = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -563,8 +580,8 @@ const chatService = {
    * Trade conversations have shorter expiry times than normal conversations.
    */
   ensureConversation: async (conversationId: string, participants: string[], isGroup: boolean = false) => {
-    const conversationRef = doc(db, 'conversations', conversationId);
-    const snap = await getDoc(conversationRef);
+    const conversationRef = db.doc(`conversations/${conversationId}`);
+    const snap = await conversationRef.get();
     
     // Determine expiry time based on conversation type
     const isTradeChat = isTradeConversation(conversationId);
@@ -572,19 +589,19 @@ const chatService = {
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)  // 7 days for trade chats
       : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days for normal chats
     
-    if (!snap.exists()) {
-      await setDoc(conversationRef, {
+    if (!snapshotExists(snap)) {
+      await conversationRef.set( {
         participants,
         type: isGroup ? 'group' : 'direct',
         isTradeChat,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
         expiresAt: expiryTime,
       });
     } else {
       const data = snap.data();
       if (!data.expiresAt || (isTradeChat && !data.isTradeChat)) {
-        await updateDoc(conversationRef, {
+        await conversationRef.update( {
           expiresAt: expiryTime,
           isTradeChat,
         });
@@ -694,7 +711,7 @@ const chatService = {
       const messageData = {
         _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         text: '', // Empty text for audio messages
-        createdAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         user: sender,
         type: 'audio',
         audioUrl: audioUrl,
@@ -706,24 +723,24 @@ const chatService = {
       };
 
       const messagesRef = messagesCollection(conversationId);
-      const docRef = await addDoc(messagesRef, messageData);
+      const docRef = await messagesRef.add(messageData);
       
       console.log('✅ Audio message sent successfully:', docRef.id);
 
       // Update conversation's last message
-      const conversationRef = doc(conversationsCollection, conversationId);
-      await updateDoc(conversationRef, {
+      const conversationRef = conversationsCollection.doc(conversationId);
+      await conversationRef.update( {
         lastMessage: {
           text: '🎵 Voice message',
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: sender._id,
         },
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       // Schedule deletion of audio file from server after 30 days
       const deleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      await updateDoc(docRef, {
+      await docRef.update( {
         deleteAt: deleteAt,
       });
 
@@ -777,7 +794,7 @@ const chatService = {
 
     const messageData = {
       text: `📍 ${locationData.name || 'Shared Location'}`, // Display text for location
-      createdAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       user: cleanSender,
       type: 'location',
       locationData: locationData,
@@ -792,7 +809,7 @@ const chatService = {
         messagesRefPath: `conversations/${conversationId}/messages`
       });
       
-      const messageDoc = await addDoc(messagesRef, messageData);
+      const messageDoc = await messagesRef.add(messageData);
       
       console.log('✅ ChatService: Location message sent successfully:', {
         messageId: messageDoc.id,
@@ -810,17 +827,17 @@ const chatService = {
     }
 
     // Update or create the parent conversation document with the last message
-    const conversationRef = doc(db, 'conversations', conversationId);
+    const conversationRef = db.doc(`conversations/${conversationId}`);
     try {
       console.log('📝 ChatService: Updating conversation document:', conversationId);
       
-      await updateDoc(conversationRef, {
+      await conversationRef.update( {
         lastMessage: {
           text: `📍 ${locationData.name || 'Location'}`,
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: sender._id,
         },
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ ChatService: Conversation updated successfully');
@@ -844,14 +861,14 @@ const chatService = {
         console.log('👥 ChatService: Conversation participants:', participants);
         
         try {
-          await setDoc(conversationRef, {
+          await conversationRef.set( {
             participants: participants,
             type: 'direct',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
             lastMessage: {
               text: `📍 ${locationData.name || 'Location'}`,
-              createdAt: serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
               senderId: sender._id,
             },
           });
@@ -879,9 +896,9 @@ const chatService = {
     conversationId: string,
     callback: (meta: { participants: string[]; expiresAt?: Date }) => void
   ) => {
-    const conversationRef = doc(db, 'conversations', conversationId);
-    const unsubscribe = onSnapshot(conversationRef, (snap) => {
-      if (!snap.exists()) {
+    const conversationRef = db.doc(`conversations/${conversationId}`);
+    const unsubscribe = conversationRef.onSnapshot((snap) => {
+      if (!snapshotExists(snap)) {
         callback({ participants: [], expiresAt: undefined });
         return;
       }
@@ -919,8 +936,8 @@ const chatService = {
       avatar: avatar || undefined, // Add avatar field
       createdBy: participants[0], // Store the creator
       admins: isGroup ? [participants[0]] : [], // Creator is initial admin for groups
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
       settings: isGroup ? {
         allowMembersToAddOthers: true,
         onlyAdminsCanSend: false,
@@ -929,7 +946,7 @@ const chatService = {
       } : undefined,
       lastMessage: {
         text: isGroup ? `${name} group created` : '',
-        createdAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         senderId: participants[0], // Creator is first participant
       },
     };
@@ -940,7 +957,7 @@ const chatService = {
       participantIds: participants
     });
 
-    const docRef = await addDoc(conversationsCollection, conversationData);
+    const docRef = await conversationsCollection.add(conversationData);
     const conversationId = docRef.id;
     
     console.log('✅ ChatService: Conversation created successfully:', {
@@ -959,13 +976,11 @@ const chatService = {
    * @returns Conversation ID if found, null otherwise
    */
   findDirectConversation: async (userId1: string, userId2: string): Promise<string | null> => {
-    const q = query(
-      conversationsCollection,
-      where('participants', 'array-contains', userId1),
-      where('type', '==', 'direct')
-    );
+    const q = conversationsCollection
+      .where('participants', 'array-contains', userId1)
+      .where('type', '==', 'direct');
 
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await q.get();
     
     for (const doc of querySnapshot.docs) {
       const data = doc.data();
@@ -986,10 +1001,10 @@ const chatService = {
     try {
       console.log('🔄 ChatService: Fetching group details for:', groupId);
       
-      const groupRef = doc(db, 'conversations', groupId);
-      const groupSnapshot = await getDoc(groupRef);
+      const groupRef = db.doc(`conversations/${groupId}`);
+      const groupSnapshot = await groupRef.get();
       
-      if (!groupSnapshot.exists()) {
+      if (!snapshotExists(groupSnapshot)) {
         console.warn('⚠️ Group not found:', groupId);
         return null;
       }
@@ -1139,9 +1154,9 @@ const chatService = {
     try {
       console.log('🔄 ChatService: Updating group settings for:', groupId, settings);
       
-      const groupRef = doc(db, 'conversations', groupId);
+      const groupRef = db.doc(`conversations/${groupId}`);
       const updateData: any = {
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       };
       
       // Update basic info
@@ -1171,7 +1186,7 @@ const chatService = {
         updateData['settings'] = settingsUpdate;
       }
       
-      await updateDoc(groupRef, updateData);
+      await groupRef.update( updateData);
       
       console.log('✅ Group settings updated successfully');
       
@@ -1191,10 +1206,10 @@ const chatService = {
     try {
       console.log('🔄 ChatService: Updating member role:', { groupId, userId, makeAdmin });
       
-      const groupRef = doc(db, 'conversations', groupId);
-      const groupSnapshot = await getDoc(groupRef);
+      const groupRef = db.doc(`conversations/${groupId}`);
+      const groupSnapshot = await groupRef.get();
       
-      if (!groupSnapshot.exists()) {
+      if (!snapshotExists(groupSnapshot)) {
         throw new Error('Group not found');
       }
       
@@ -1218,9 +1233,9 @@ const chatService = {
         }
       }
       
-      await updateDoc(groupRef, {
+      await groupRef.update( {
         admins: newAdmins,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ Member role updated successfully:', {
@@ -1244,10 +1259,10 @@ const chatService = {
     try {
       console.log('🔄 ChatService: Removing member from group:', { groupId, userId });
       
-      const groupRef = doc(db, 'conversations', groupId);
-      const groupSnapshot = await getDoc(groupRef);
+      const groupRef = db.doc(`conversations/${groupId}`);
+      const groupSnapshot = await groupRef.get();
       
-      if (!groupSnapshot.exists()) {
+      if (!snapshotExists(groupSnapshot)) {
         throw new Error('Group not found');
       }
       
@@ -1271,10 +1286,10 @@ const chatService = {
         throw new Error('Cannot remove the last member from the group');
       }
       
-      await updateDoc(groupRef, {
+      await groupRef.update( {
         participants: newParticipants,
         admins: newAdmins,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ Member removed from group successfully:', {
@@ -1316,13 +1331,12 @@ const chatService = {
   subscribeToGroupDetails: (groupId: string, callback: (groupDetails: GroupDetails | null) => void) => {
     console.log('🔄 ChatService: Setting up real-time listener for group:', groupId);
     
-    const groupRef = doc(db, 'conversations', groupId);
+    const groupRef = db.doc(`conversations/${groupId}`);
     
-    const unsubscribe = onSnapshot(
-      groupRef,
+    const unsubscribe = groupRef.onSnapshot(
       (docSnapshot) => {
         try {
-          if (!docSnapshot.exists()) {
+          if (!snapshotExists(docSnapshot)) {
             console.warn('⚠️ Group document does not exist:', groupId);
             callback(null);
             return;
@@ -1391,13 +1405,12 @@ const chatService = {
   subscribeToGroupMembers: (groupId: string, callback: (members: GroupMember[]) => void) => {
     console.log('🔄 ChatService: Setting up real-time listener for group members:', groupId);
     
-    const groupRef = doc(db, 'conversations', groupId);
+    const groupRef = db.doc(`conversations/${groupId}`);
     
-    const unsubscribe = onSnapshot(
-      groupRef,
+    const unsubscribe = groupRef.onSnapshot(
       async (docSnapshot) => {
         try {
-          if (!docSnapshot.exists()) {
+          if (!snapshotExists(docSnapshot)) {
             console.warn('⚠️ Group document does not exist:', groupId);
             callback([]);
             return;
@@ -1504,23 +1517,19 @@ const chatService = {
       
       // Build query for media messages - avoid composite index requirement
       // Instead of using 'in' query with orderBy, we'll fetch all messages and filter client-side
-      let mediaQuery = query(
-        messagesCollection(groupId),
-        orderBy('createdAt', 'desc'),
-        limit(queryLimit * 2) // Get more docs to account for filtering
-      );
+      let mediaQuery = messagesCollection(groupId)
+        .orderBy('createdAt', 'desc')
+        .limit(queryLimit * 2); // Get more docs to account for filtering
       
       // Add pagination if provided
       if (startAfter) {
-        mediaQuery = query(
-          messagesCollection(groupId),
-          orderBy('createdAt', 'desc'),
-          startAfter(startAfter),
-          limit(queryLimit * 2) // Get more docs to account for filtering
-        );
+        mediaQuery = messagesCollection(groupId)
+          .orderBy('createdAt', 'desc')
+          .startAfter(startAfter)
+          .limit(queryLimit * 2); // Get more docs to account for filtering
       }
       
-      const querySnapshot = await getDocs(mediaQuery);
+      const querySnapshot = await mediaQuery.get();
       
       // First filter for media messages (client-side to avoid index requirement)
       let mediaMessages = querySnapshot.docs
@@ -1609,14 +1618,11 @@ const chatService = {
     const { limit: queryLimit = 50, mediaType } = options;
     
     // Use simpler query to avoid composite index requirement
-    const mediaQuery = query(
-      messagesCollection(groupId),
-      orderBy('createdAt', 'desc'),
-      limit(queryLimit * 2) // Get more docs to account for client-side filtering
-    );
+    const mediaQuery = messagesCollection(groupId)
+      .orderBy('createdAt', 'desc')
+      .limit(queryLimit * 2); // Get more docs to account for client-side filtering
     
-    const unsubscribe = onSnapshot(
-      mediaQuery,
+    const unsubscribe = mediaQuery.onSnapshot(
       (querySnapshot) => {
         try {
           let mediaMessages = querySnapshot.docs
@@ -1692,10 +1698,10 @@ const chatService = {
     try {
       console.log('🔄 ChatService: Inviting users to group:', { groupId, userIds });
       
-      const groupRef = doc(db, 'conversations', groupId);
-      const groupSnapshot = await getDoc(groupRef);
+      const groupRef = db.doc(`conversations/${groupId}`);
+      const groupSnapshot = await groupRef.get();
       
-      if (!groupSnapshot.exists()) {
+      if (!snapshotExists(groupSnapshot)) {
         throw new Error('Group not found');
       }
       
@@ -1711,9 +1717,9 @@ const chatService = {
       
       const updatedParticipants = [...currentParticipants, ...newUsers];
       
-      await updateDoc(groupRef, {
+      await groupRef.update( {
         participants: updatedParticipants,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ Users invited to group successfully:', {
@@ -1745,7 +1751,7 @@ const chatService = {
       
       // Get all messages in the conversation
       const messagesRef = messagesCollection(conversationId);
-      const snapshot = await getDocs(messagesRef);
+      const snapshot = await messagesRef.get();
       
       if (snapshot.empty) {
         console.log('ℹ️ No messages to clear for conversation:', conversationId);
@@ -1757,7 +1763,7 @@ const chatService = {
       // Delete all messages in batches (Firestore has a limit of 500 operations per batch)
       const batchSize = 500;
       const batches: any[] = [];
-      let currentBatch = writeBatch(db);
+      let currentBatch = db.batch();
       let currentBatchSize = 0;
       
       snapshot.docs.forEach((messageDoc) => {
@@ -1766,7 +1772,7 @@ const chatService = {
         
         if (currentBatchSize === batchSize) {
           batches.push(currentBatch);
-          currentBatch = writeBatch(db);
+          currentBatch = db.batch();
           currentBatchSize = 0;
         }
       });
@@ -1782,14 +1788,14 @@ const chatService = {
       }
       
       // Update the conversation's last message to indicate it was cleared
-      const conversationRef = doc(db, 'conversations', conversationId);
-      await updateDoc(conversationRef, {
+      const conversationRef = db.doc(`conversations/${conversationId}`);
+      await conversationRef.update( {
         lastMessage: {
           text: 'Messages cleared',
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: 'system',
         },
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ ChatService: Successfully cleared all messages from conversation:', conversationId);
@@ -1811,7 +1817,7 @@ const chatService = {
       
       // First, delete all messages in the conversation
       const messagesRef = messagesCollection(conversationId);
-      const snapshot = await getDocs(messagesRef);
+      const snapshot = await messagesRef.get();
       
       if (!snapshot.empty) {
         console.log(`🗑️ Deleting ${snapshot.size} messages`);
@@ -1819,7 +1825,7 @@ const chatService = {
         // Delete messages in batches (Firestore has a limit of 500 operations per batch)
         const batchSize = 500;
         const batches: any[] = [];
-        let currentBatch = writeBatch(db);
+        let currentBatch = db.batch();
         let currentBatchSize = 0;
         
         snapshot.docs.forEach((messageDoc) => {
@@ -1828,7 +1834,7 @@ const chatService = {
           
           if (currentBatchSize === batchSize) {
             batches.push(currentBatch);
-            currentBatch = writeBatch(db);
+            currentBatch = db.batch();
             currentBatchSize = 0;
           }
         });
@@ -1845,8 +1851,8 @@ const chatService = {
       }
       
       // Then delete the conversation document itself
-      const conversationRef = doc(db, 'conversations', conversationId);
-      await deleteDoc(conversationRef);
+      const conversationRef = db.doc(`conversations/${conversationId}`);
+      await conversationRef.delete();
       
       console.log('✅ ChatService: Successfully deleted conversation:', conversationId);
       
@@ -1867,25 +1873,25 @@ const chatService = {
       console.log('🚫 ChatService: Blocking user:', userId, 'by:', currentUserId);
       
       // Create or update a blocked users collection for the current user
-      const blockedUsersRef = collection(db, 'users', currentUserId, 'blockedUsers');
-      const blockDoc = doc(blockedUsersRef, userId);
+      const blockedUsersRef = db.collection(`users/${currentUserId}/blockedUsers`);
+      const blockDoc = blockedUsersRef.doc(userId);
       
-      await setDoc(blockDoc, {
+      await blockDoc.set( {
         userId: userId,
-        blockedAt: serverTimestamp(),
+        blockedAt: FieldValue.serverTimestamp(),
         blockedBy: currentUserId,
       });
       
       // Also block them in the conversations - prevent new messages
       const conversationId = createConversationId(currentUserId, userId);
-      const conversationRef = doc(db, 'conversations', conversationId);
+      const conversationRef = db.doc(`conversations/${conversationId}`);
       
       // Check if conversation exists
-      const conversationDoc = await getDoc(conversationRef);
-      if (conversationDoc.exists()) {
-        await updateDoc(conversationRef, {
-          [`blockedBy.${currentUserId}`]: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+      const conversationDoc = await conversationRef.get();
+      if (snapshotExists(conversationDoc)) {
+        await conversationRef.update( {
+          [`blockedBy.${currentUserId}`]: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
       
@@ -1910,17 +1916,17 @@ const chatService = {
       console.log('🚨 ChatService: Reporting user:', userId, 'by:', currentUserId, 'reason:', reason);
       
       // Create a report in the reports collection
-      const reportsRef = collection(db, 'reports');
+      const reportsRef = db.collection('reports');
       
-      await addDoc(reportsRef, {
+      await reportsRef.add({
         reportedUserId: userId,
         reporterUserId: currentUserId,
         reason: reason,
         additionalInfo: additionalInfo || '',
         status: 'pending',
         type: 'user_report',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       
       console.log('✅ ChatService: Successfully reported user:', userId);
@@ -1939,9 +1945,9 @@ const chatService = {
    */
   isUserBlocked: async (userId: string, currentUserId: string): Promise<boolean> => {
     try {
-      const blockDoc = doc(db, 'users', currentUserId, 'blockedUsers', userId);
-      const docSnapshot = await getDoc(blockDoc);
-      return docSnapshot.exists();
+      const blockDoc = db.doc(`users/${currentUserId}/blockedUsers/${userId}`);
+      const docSnapshot = await blockDoc.get();
+      return snapshotExists(docSnapshot);
     } catch (error) {
       console.error('❌ Failed to check if user is blocked:', error);
       return false;
@@ -1959,18 +1965,18 @@ const chatService = {
       console.log('✅ ChatService: Unblocking user:', userId, 'by:', currentUserId);
       
       // Remove from blocked users collection
-      const blockDoc = doc(db, 'users', currentUserId, 'blockedUsers', userId);
-      await deleteDoc(blockDoc);
+      const blockDoc = db.doc(`users/${currentUserId}/blockedUsers/${userId}`);
+      await blockDoc.delete();
       
       // Remove block from conversation
       const conversationId = createConversationId(currentUserId, userId);
-      const conversationRef = doc(db, 'conversations', conversationId);
+      const conversationRef = db.doc(`conversations/${conversationId}`);
       
-      const conversationDoc = await getDoc(conversationRef);
-      if (conversationDoc.exists()) {
-        await updateDoc(conversationRef, {
+      const conversationDoc = await conversationRef.get();
+      if (snapshotExists(conversationDoc)) {
+        await conversationRef.update( {
           [`blockedBy.${currentUserId}`]: null,
-          updatedAt: serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
       
@@ -1991,8 +1997,8 @@ const chatService = {
     try {
       console.log('📋 ChatService: Getting blocked users for:', currentUserId);
       
-      const blockedUsersRef = collection(db, 'users', currentUserId, 'blockedUsers');
-      const snapshot = await getDocs(blockedUsersRef);
+      const blockedUsersRef = db.collection(`users/${currentUserId}/blockedUsers`);
+      const snapshot = await blockedUsersRef.get();
       
       const blockedUsers = snapshot.docs.map(doc => {
         const data = doc.data();
@@ -2108,7 +2114,7 @@ const chatService = {
       const messageData = {
         _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         text: '', // Empty text for image messages
-        createdAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         user: sender,
         type: 'image',
         imageUrl: imageUrl,
@@ -2119,19 +2125,19 @@ const chatService = {
       };
 
       const messagesRef = messagesCollection(conversationId);
-      const docRef = await addDoc(messagesRef, messageData);
+      const docRef = await messagesRef.add(messageData);
       
       console.log('✅ Image message sent successfully:', docRef.id);
 
       // Update conversation's last message
-      const conversationRef = doc(conversationsCollection, conversationId);
-      await updateDoc(conversationRef, {
+      const conversationRef = conversationsCollection.doc(conversationId);
+      await conversationRef.update( {
         lastMessage: {
           text: '📷 Image',
-          createdAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
           senderId: sender._id,
         },
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       // If it's a direct message, ensure both participants have the conversation
@@ -2139,16 +2145,16 @@ const chatService = {
         const participants = [sender._id, recipientId];
         
         for (const participantId of participants) {
-          const userConversationRef = doc(db, `users/${participantId}/conversations`, conversationId);
-          await setDoc(userConversationRef, {
+          const userConversationRef = db.doc(`users/${participantId}/conversations/${conversationId}`);
+          await userConversationRef.set( {
             conversationId,
             participants,
             lastMessage: {
               text: '📷 Image',
-              createdAt: serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
               senderId: sender._id,
             },
-            updatedAt: serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
             isGroup: false,
           }, { merge: true });
         }
@@ -2170,7 +2176,7 @@ const chatService = {
           const messageData = {
             _id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             text: '',
-            createdAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
             user: sender,
             type: 'image',
             imageUrl: imageUri, // Use local URI as fallback
@@ -2182,17 +2188,17 @@ const chatService = {
           };
 
           const messagesRef = messagesCollection(conversationId);
-          const docRef = await addDoc(messagesRef, messageData);
+          const docRef = await messagesRef.add(messageData);
           
           // Update conversation's last message
-          const conversationRef = doc(conversationsCollection, conversationId);
-          await updateDoc(conversationRef, {
+          const conversationRef = conversationsCollection.doc(conversationId);
+          await conversationRef.update( {
             lastMessage: {
               text: '📷 Image (Dev)',
-              createdAt: serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
               senderId: sender._id,
             },
-            updatedAt: serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
           });
 
           console.log('✅ Mock image message created:', docRef.id);
@@ -2224,18 +2230,18 @@ const chatService = {
     try {
       console.log('🔥 Setting typing status:', { conversationId, userId, userName, isTyping });
       
-      const typingRef = doc(db, 'conversations', conversationId, 'typing', userId);
+      const typingRef = db.doc(`conversations/${conversationId}/typing/${userId}`);
       
       if (isTyping) {
-        await setDoc(typingRef, {
+        await typingRef.set( {
           userId,
           userName,
           isTyping: true,
-          timestamp: serverTimestamp(),
+          timestamp: FieldValue.serverTimestamp(),
         });
         console.log('✅ Typing status set to true in Firebase');
       } else {
-        await deleteDoc(typingRef);
+        await typingRef.delete();
         console.log('✅ Typing status cleared from Firebase');
       }
     } catch (error) {
@@ -2256,9 +2262,9 @@ const chatService = {
     callback: (typingUsers: { userId: string; userName: string }[]) => void
   ) => {
     console.log('🎧 Subscribing to typing status:', { conversationId, currentUserId });
-    const typingRef = collection(db, 'conversations', conversationId, 'typing');
+    const typingRef = db.collection(`conversations/${conversationId}/typing`);
     
-    const unsubscribe = onSnapshot(typingRef, (snapshot) => {
+    const unsubscribe = typingRef.onSnapshot((snapshot) => {
       console.log('📡 Typing status snapshot received, docs count:', snapshot.docs.length);
       const typingUsers: { userId: string; userName: string }[] = [];
       
@@ -2290,8 +2296,8 @@ const chatService = {
   clearTypingStatus: async (conversationId: string, userId: string) => {
     try {
       console.log('🧹 Clearing typing status:', { conversationId, userId });
-      const typingRef = doc(db, 'conversations', conversationId, 'typing', userId);
-      await deleteDoc(typingRef);
+      const typingRef = db.doc(`conversations/${conversationId}/typing/${userId}`);
+      await typingRef.delete();
       console.log('✅ Typing status cleared from Firebase');
     } catch (error) {
       console.error('❌ Failed to clear typing status:', error);

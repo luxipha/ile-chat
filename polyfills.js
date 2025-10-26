@@ -1,32 +1,36 @@
 // Polyfills for React Native - must be loaded before any other code
 import "react-native-get-random-values";
 import "react-native-url-polyfill/auto";
+console.log("🔧 [Polyfill Debug] URL polyfill enabled");
 
-// Event polyfill
-if (typeof global.Event === 'undefined') {
-  global.Event = function Event(type, options = {}) {
-    this.type = type;
-    this.target = options.target || null;
-    this.currentTarget = options.currentTarget || null;
-    this.bubbles = options.bubbles || false;
-    this.cancelable = options.cancelable || false;
-    this.defaultPrevented = false;
-    this.eventPhase = 0;
-    this.timeStamp = Date.now();
+// React Native Reanimated will be loaded conditionally by components that need it
+
+// Event polyfill - TEMPORARILY DISABLED
+// if (typeof global.Event === 'undefined') {
+//   global.Event = function Event(type, options = {}) {
+//     this.type = type;
+//     this.target = options.target || null;
+//     this.currentTarget = options.currentTarget || null;
+//     this.bubbles = options.bubbles || false;
+//     this.cancelable = options.cancelable || false;
+//     this.defaultPrevented = false;
+//     this.eventPhase = 0;
+//     this.timeStamp = Date.now();
     
-    this.preventDefault = function() {
-      this.defaultPrevented = true;
-    };
+//     this.preventDefault = function() {
+//       this.defaultPrevented = true;
+//     };
     
-    this.stopPropagation = function() {
-      // No-op
-    };
+//     this.stopPropagation = function() {
+//       // No-op
+//     };
     
-    this.stopImmediatePropagation = function() {
-      // No-op
-    };
-  };
-}
+//     this.stopImmediatePropagation = function() {
+//       // No-op
+//     };
+//   };
+// }
+console.log("🔧 [Polyfill Debug] Event polyfill disabled");
 
 // EventTarget polyfill
 if (typeof global.EventTarget === 'undefined') {

@@ -167,11 +167,7 @@ export const MessageComposer = forwardRef<MessageComposerRef, MessageComposerPro
   return (
     <View style={[styles.wrapper, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       
-      <View style={[
-        styles.container, 
-        isExpanded && styles.expandedContainer,
-        showActions && styles.stickerModeContainer
-      ]}>
+      <View style={[styles.container, isExpanded && styles.expandedContainer]}>
         <View style={styles.inputContainer}>
         {/* Voice button - in the + position */}
         <TouchableOpacity style={[styles.voiceButton, isRecording && styles.recordingButton]} onPress={handleVoicePress}>
@@ -247,8 +243,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: ChatSpacing.lg * 0.9, // Reduce horizontal padding by 10%
-    paddingTop: ChatSpacing.md,
-    paddingBottom: ChatSpacing.md, // This creates space with stickers
+    paddingVertical: ChatSpacing.md,
     backgroundColor: ChatTheme.background1,
     borderTopWidth: 1,
     borderTopColor: ChatTheme.border,
@@ -303,9 +298,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: ChatTheme.sendBubbleBackground,
     marginLeft: ChatSpacing.xs,
-  },
-  stickerModeContainer: {
-    paddingBottom: 0, // Remove bottom padding when stickers are shown
-    borderBottomWidth: 0, // Remove bottom border for seamless connection
   },
 });

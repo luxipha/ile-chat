@@ -23,6 +23,7 @@ export interface Message {
   senderAvatar?: string;
   type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location'; // No change needed here, just for context
   imageUrl?: string; // For image messages
+  isDoodle?: boolean; // Flag for doodle images
   audioUrl?: string; // For audio messages
   audioDuration?: number; // Audio duration in milliseconds
   locationData?: LocationData; // For location messages
@@ -130,6 +131,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <ImageMessage
             imageUrl={message.imageUrl}
             isOwn={message.isOwn}
+            isDoodle={message.isDoodle}
           />
         );
       

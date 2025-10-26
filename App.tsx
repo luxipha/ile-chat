@@ -75,8 +75,8 @@ import friendService from './src/services/friendService';
 import emailAuthService from './src/services/emailAuthService';
 import { apiService } from './src/services/api';
 import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
-import { signInWithCustomToken } from 'firebase/auth'; // Import from Firebase SDK
-import { auth as firebaseAuth } from './src/services/firebaseConfig'; // Assuming you have a firebaseConfig.ts
+// Firebase Web SDK imports removed - using React Native Firebase only
+// Firebase auth handled via firebaseAuthService.ts
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
 import { useMainNavVisibility } from './src/hooks/useMainNavVisibility';

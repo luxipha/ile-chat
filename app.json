@@ -1,12 +1,11 @@
 {
   "expo": {
-    "name": "ilePayMobile",
-    "slug": "ilePayMobile",
+    "name": "ileChat",
+    "slug": "ileChat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -14,13 +13,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ile.chat.app",
+      "bundleIdentifier": "com.ile.chat",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.ile.chat.app",
+      "package": "com.ile.chat",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -41,12 +40,10 @@
         "projectId": "031a8885-9919-4bef-85a2-71e1a2dfe8f2"
       }
     },
-    "env": {
-      "EXPO_PUBLIC_API_BASE_URL": "https://api.ile.africa"
-    },
     "plugins": [
       "expo-video",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-font"
     ]
   }
 }

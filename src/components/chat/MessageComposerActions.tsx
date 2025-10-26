@@ -8,6 +8,7 @@ import { Colors, Spacing, BorderRadius } from '../../theme';
 import { KlipyStickerGrid } from './UnifiedStickerGrid';
 import { StickerData } from '../../types/sticker';
 import { SimpleCameraScreen } from './SimpleCameraScreen';
+import { DoodleCanvas } from './DoodleCanvas';
 
 
 interface MessageComposerActionsProps {
@@ -20,6 +21,7 @@ interface MessageComposerActionsProps {
   onSendDocument?: (documentUri: string) => void;
   onSendSticker?: (sticker: StickerData) => void;
   onSendAudio?: (audioUri: string, duration: number) => void;
+  onStartWatchTogether?: (videoUrl: string, videoTitle: string) => void; // New prop for shared video
   onSendLocation?: () => void;
   onStartVideoCall?: () => void;
   onStartVoiceCall?: () => void;
@@ -34,6 +36,7 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   onSendDocument,
   onSendSticker,
   onSendAudio,
+  onStartWatchTogether, // Destructure new prop
   onSendLocation,
   onStartVideoCall,
   onStartVoiceCall,
@@ -42,6 +45,8 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   const slideAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const [showCamera, setShowCamera] = useState(false);
+  const [showDoodle, setShowDoodle] = useState(false);
+  const [activeStickerTab, setActiveStickerTab] = useState<'klipy'>('klipy');
 
   useEffect(() => {
     if (visible) {
@@ -77,10 +82,14 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
 
   const handleTakePhoto = async () => {
     try {
-      console.log('📷 Camera action requested');
-      console.log('📷 Setting showCamera to true...');
+      if (__DEV__) {
+        console.log('📷 Camera action requested');
+        console.log('📷 Setting showCamera to true...');
+      }
       setShowCamera(true);
-      console.log('📷 showCamera state updated');
+      if (__DEV__) {
+        console.log('📷 showCamera state updated');
+      }
     } catch (error) {
       console.error('Error opening camera:', error);
       Alert.alert('Error', 'Failed to open camera');
@@ -88,14 +97,18 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   };
 
   const handlePhotoTaken = (uri: string) => {
-    console.log('📸 Photo taken:', uri);
+    if (__DEV__) {
+      console.log('📸 Photo taken:', uri);
+    }
     onSendImage?.(uri);
     setShowCamera(false);
     onClose();
   };
 
   const handleVideoRecorded = (uri: string) => {
-    console.log('🎥 Video recorded:', uri);
+    if (__DEV__) {
+      console.log('🎥 Video recorded:', uri);
+    }
     onSendImage?.(uri); // For now, treat video same as image
     setShowCamera(false);
     onClose();
@@ -103,7 +116,9 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
 
   const handleSelectImage = async () => {
     try {
-      console.log('🖼️ Photo library action requested');
+      if (__DEV__) {
+        console.log('🖼️ Photo library action requested');
+      }
       
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -119,7 +134,9 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
       });
 
       if (!result.canceled && result.assets[0]) {
-        console.log('🖼️ Photo selected:', result.assets[0].uri);
+        if (__DEV__) {
+          console.log('🖼️ Photo selected:', result.assets[0].uri);
+        }
         onSendImage?.(result.assets[0].uri);
         onClose();
       }
@@ -131,7 +148,9 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
 
   const handleSelectDocument = async () => {
     try {
-      console.log('📎 Document selection requested');
+      if (__DEV__) {
+        console.log('📎 Document selection requested');
+      }
       
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
@@ -139,7 +158,9 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
       });
 
       if (!result.canceled && result.assets[0]) {
-        console.log('📎 Document selected:', result.assets[0].uri);
+        if (__DEV__) {
+          console.log('📎 Document selected:', result.assets[0].uri);
+        }
         onSendDocument?.(result.assets[0].uri);
         onClose();
       }
@@ -154,7 +175,43 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     onSendMoney();
   };
 
+  const handleWatchTogetherPress = () => {
+    // For now, just close the panel and let the parent handle the modal
+    onClose();
+    onStartWatchTogether?.('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'Rick Astley - Never Gonna Give You Up'); // Example
+  };
 
+
+  // Add header with tabs and close button for sticker mode
+  const renderStickerHeader = () => (
+    <View style={styles.stickerHeader}>
+      {/* Sticker Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeStickerTab === 'klipy' && styles.activeTab
+          ]}
+          onPress={() => setActiveStickerTab('klipy')}
+        >
+          <Typography
+            variant="body2"
+            style={[
+              styles.tabText,
+              activeStickerTab === 'klipy' && styles.activeTabText
+            ]}
+          >
+            Stickers & GIFs ✨
+          </Typography>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Close Button */}
+      <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+        <MaterialIcons name="close" size={24} color={Colors.gray600} />
+      </TouchableOpacity>
+    </View>
+  );
 
   if (!visible) {
     return null;
@@ -165,14 +222,18 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     outputRange: [20, 0], // Slide up from 20px below - more subtle
   });
 
-  // Render sticker grid mode with unified component
+  // Render sticker grid mode with tabs
   const renderStickerGrid = () => (
     <View style={styles.stickerContainer}>
-      {/* Klipy Sticker Grid */}
+      {renderStickerHeader()}
+      
+      {/* Unified Sticker Grid */}
       <KlipyStickerGrid
         currentUserId={currentUserId}
         onStickerSelect={(sticker: StickerData) => {
-          console.log('🎭 Unified sticker selected:', sticker);
+          if (__DEV__) {
+            console.log('🎭 Sticker selected:', sticker);
+          }
           onSendSticker?.(sticker);
           onClose();
         }}
@@ -234,6 +295,19 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity> */}
 
+        {/* Draw/Doodle Option */}
+        <TouchableOpacity 
+          onPress={() => setShowDoodle(true)} 
+          style={styles.actionItem}
+        >
+          <View style={styles.actionIcon}>
+            <MaterialIcons name="brush" size={24} color={Colors.primary} />
+          </View>
+          <Typography variant="caption" style={styles.actionText}>
+            Draw
+          </Typography>
+        </TouchableOpacity>
+
         {/* Send Money Option */}
         <TouchableOpacity 
           onPress={handleSendMoneyPress} 
@@ -281,6 +355,21 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
           </Typography>
         </TouchableOpacity> */}
 
+        {/* Watch Together Option (New) */}
+        <TouchableOpacity 
+          onPress={handleWatchTogetherPress} 
+          style={styles.actionItem}
+        >
+          <View style={styles.actionIcon}>
+            <MaterialIcons name="movie" size={24} color={Colors.primary} />
+          </View>
+          <Typography variant="caption" style={styles.actionText}>
+            Watch Together
+          </Typography>
+        </TouchableOpacity>
+
+        {/* Empty slot for future features */}
+        <View style={styles.actionItem} />
         {/* Empty slots for future features */}
         <View style={styles.actionItem} />
         <View style={styles.actionItem} />
@@ -293,7 +382,6 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
       <Animated.View
         style={[
           styles.container,
-          mode === 'stickers' && styles.stickerModeContainer,
           {
             transform: [{ translateY }],
             opacity: opacityAnim,
@@ -305,15 +393,30 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
       </Animated.View>
 
       {/* Camera Screen */}
-      {console.log('📷 MessageComposerActions render - showCamera:', showCamera)}
+      {__DEV__ && console.log('📷 MessageComposerActions render - showCamera:', showCamera)}
       <SimpleCameraScreen
         visible={showCamera}
         onClose={() => {
-          console.log('📷 Camera close requested');
+          if (__DEV__) {
+            console.log('📷 Camera close requested');
+          }
           setShowCamera(false);
         }}
         onPhotoTaken={handlePhotoTaken}
         onVideoRecorded={handleVideoRecorded}
+      />
+      
+      {/* Doodle Canvas */}
+      <DoodleCanvas
+        visible={showDoodle}
+        onClose={() => setShowDoodle(false)}
+        onSendImage={(imageUri) => {
+          if (__DEV__) {
+            console.log('🎨 Doodle image created:', imageUri);
+          }
+          onSendImage?.(imageUri);
+          onClose();
+        }}
       />
     </>
   );
@@ -365,8 +468,14 @@ const styles = StyleSheet.create({
   stickerContainer: {
     height: 250, // Increased to accommodate tabs
     backgroundColor: Colors.surface,
-    margin: 0, // Remove all margins
-    padding: 0, // Remove all padding
+  },
+  stickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray200,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -398,9 +507,5 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: Spacing.xs,
-  },
-  stickerModeContainer: {
-    paddingTop: 0, // Remove only top padding to eliminate space above categories
-    borderTopWidth: 0, // Remove top border for stickers mode
   },
 });

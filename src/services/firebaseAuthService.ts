@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { signInWithCustomFirebaseToken } from './firebaseConfig';
+import { signInWithCustomFirebaseToken, getFirebaseStatus, getFirebaseAuth } from './firebaseConfig';
 import { API_BASE_URL } from '../config/apiConfig';
 
 export interface FirebaseAuthResponse {
@@ -75,10 +75,26 @@ class FirebaseAuthService {
    */
   async authenticateWithFirebase(): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log('🔥 [FirebaseAuth Debug] Starting Firebase authentication process...');
+      
+      // Check Firebase status first
+      const firebaseStatus = await getFirebaseStatus();
+      console.log('🔥 [FirebaseAuth Debug] Current Firebase status:', firebaseStatus);
+      
       // Step 1: Get custom token from backend
+      console.log('🔥 [FirebaseAuth Debug] Step 1: Getting custom token from backend...');
       const tokenResponse = await this.getCustomFirebaseToken();
       
+      console.log('🔥 [FirebaseAuth Debug] Backend token response:', {
+        success: tokenResponse.success,
+        hasToken: !!tokenResponse.customToken,
+        tokenLength: tokenResponse.customToken?.length,
+        message: tokenResponse.message,
+        error: tokenResponse.error
+      });
+      
       if (!tokenResponse.success || !tokenResponse.customToken) {
+        console.log('🔥 [FirebaseAuth Debug] Failed to get custom token from backend');
         return {
           success: false,
           error: tokenResponse.message || 'Failed to get custom token'
@@ -86,31 +102,44 @@ class FirebaseAuthService {
       }
 
       // Step 2: Sign into Firebase with the custom token
-      console.log('🔍 Attempting to sign into Firebase with custom token...');
+      console.log('🔥 [FirebaseAuth Debug] Step 2: Attempting to sign into Firebase with custom token...');
+      
       const userCredential = await signInWithCustomFirebaseToken(tokenResponse.customToken);
       
-      console.log('🔍 Firebase sign-in result:', { 
+      console.log('🔥 [FirebaseAuth Debug] Firebase sign-in result:', { 
         hasCredential: !!userCredential, 
         hasUser: !!userCredential?.user,
-        uid: userCredential?.user?.uid 
+        uid: userCredential?.user?.uid,
+        email: userCredential?.user?.email,
+        isAnonymous: userCredential?.user?.isAnonymous
       });
       
       if (userCredential && userCredential.user) {
         // Store Firebase UID for future reference
-        await AsyncStorage.setItem('firebaseUid', userCredential.user.uid);
+        const firebaseUid = userCredential.user.uid;
+        await AsyncStorage.setItem('firebaseUid', firebaseUid);
         
-        console.log('✅ Firebase authentication successful:', userCredential.user.uid);
-        console.log('🔍 Firebase user stored in AsyncStorage');
+        console.log('🔥 [FirebaseAuth Debug] Firebase authentication successful');
+        console.log('🔥 [FirebaseAuth Debug] Firebase UID stored:', firebaseUid);
+        console.log('🔥 [FirebaseAuth Debug] AsyncStorage update completed');
+        
         return { success: true };
       }
 
+      console.log('🔥 [FirebaseAuth Debug] No user credential returned from Firebase');
       return {
         success: false,
-        error: 'Failed to authenticate with Firebase'
+        error: 'Failed to authenticate with Firebase - no user credential'
       };
 
     } catch (error) {
-      console.error('Firebase authentication error:', error);
+      console.error('🔥 [FirebaseAuth Debug] Firebase authentication error:', error);
+      console.error('🔥 [FirebaseAuth Debug] Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Firebase authentication failed'
@@ -124,8 +153,22 @@ class FirebaseAuthService {
    */
   async isFirebaseAuthenticated(): Promise<boolean> {
     try {
-      const firebaseUid = await AsyncStorage.getItem('firebaseUid');
-      return !!firebaseUid;
+      const authInstance = getFirebaseAuth();
+      const currentUid = authInstance?.currentUser?.uid || null;
+
+      if (currentUid) {
+        return true;
+      }
+
+      const storedFirebaseUid = await AsyncStorage.getItem('firebaseUid');
+
+      if (storedFirebaseUid) {
+        console.log('🔥 [FirebaseAuth Debug] Stored Firebase UID found but no current user. Re-authentication required.', {
+          storedFirebaseUid,
+        });
+      }
+
+      return false;
     } catch {
       return false;
     }
@@ -136,7 +179,11 @@ class FirebaseAuthService {
    */
   async clearFirebaseAuth(): Promise<void> {
     try {
+      const authInstance = getFirebaseAuth();
       await AsyncStorage.removeItem('firebaseUid');
+      if (authInstance?.currentUser) {
+        await authInstance.signOut();
+      }
     } catch (error) {
       console.error('Error clearing Firebase auth:', error);
     }
@@ -152,6 +199,29 @@ class FirebaseAuthService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Debug function to test Firebase setup
+   */
+  async debugFirebaseSetup(): Promise<void> {
+    console.log('🔧 [FirebaseAuth Debug] === Firebase Setup Debug ===');
+    
+    try {
+      const status = await getFirebaseStatus();
+      console.log('🔧 [FirebaseAuth Debug] Firebase Status:', status);
+      
+      const authToken = await AsyncStorage.getItem('authToken');
+      console.log('🔧 [FirebaseAuth Debug] Has Auth Token:', !!authToken);
+      
+      const firebaseUid = await AsyncStorage.getItem('firebaseUid');
+      console.log('🔧 [FirebaseAuth Debug] Has Firebase UID:', !!firebaseUid, firebaseUid);
+      
+    } catch (error) {
+      console.error('🔧 [FirebaseAuth Debug] Debug setup failed:', error);
+    }
+    
+    console.log('🔧 [FirebaseAuth Debug] === End Debug ===');
   }
 }
 

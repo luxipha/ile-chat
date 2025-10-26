@@ -43,5 +43,8 @@ yarn-error.*
 .env
 .env.local
 .env.production
-CLAUDE.md
-.md
+.rules
+log.md
+openjdk.jdk
+.yaml
+*.md

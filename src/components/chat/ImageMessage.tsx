@@ -7,6 +7,7 @@ interface ImageMessageProps {
   imageUrl: string;
   isOwn: boolean;
   onPress?: () => void;
+  isDoodle?: boolean; // Flag to indicate if this is a doodle image
 }
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -15,6 +16,7 @@ export const ImageMessage: React.FC<ImageMessageProps> = ({
   imageUrl,
   isOwn,
   onPress,
+  isDoodle = false,
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -42,7 +44,7 @@ export const ImageMessage: React.FC<ImageMessageProps> = ({
     <>
       <TouchableOpacity 
         onPress={handleImagePress}
-        style={styles.imageContainer}
+        style={[styles.imageContainer, isDoodle && styles.doodleImageContainer]}
         activeOpacity={0.8}
       >
         {isLoading && (
@@ -112,6 +114,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: ChatTheme.background1,
     marginBottom: ChatSpacing.xs,
+  },
+  doodleImageContainer: {
+    width: Math.min(screenWidth * 0.8, 300),
+    height: Math.min(screenWidth * 0.8 * 0.75, 225), // 4:3 aspect ratio
   },
   image: {
     width: '100%',
