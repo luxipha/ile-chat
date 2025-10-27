@@ -46,7 +46,6 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const [showCamera, setShowCamera] = useState(false);
   const [showDoodle, setShowDoodle] = useState(false);
-  const [activeStickerTab, setActiveStickerTab] = useState<'klipy'>('klipy');
 
   useEffect(() => {
     if (visible) {
@@ -180,39 +179,6 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
     onClose();
     onStartWatchTogether?.('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'Rick Astley - Never Gonna Give You Up'); // Example
   };
-
-
-  // Add header with tabs and close button for sticker mode
-  const renderStickerHeader = () => (
-    <View style={styles.stickerHeader}>
-      {/* Sticker Tabs */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeStickerTab === 'klipy' && styles.activeTab
-          ]}
-          onPress={() => setActiveStickerTab('klipy')}
-        >
-          <Typography
-            variant="body2"
-            style={[
-              styles.tabText,
-              activeStickerTab === 'klipy' && styles.activeTabText
-            ]}
-          >
-            Stickers & GIFs ✨
-          </Typography>
-        </TouchableOpacity>
-      </View>
-      
-      {/* Close Button */}
-      <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-        <MaterialIcons name="close" size={24} color={Colors.gray600} />
-      </TouchableOpacity>
-    </View>
-  );
-
   if (!visible) {
     return null;
   }
@@ -225,7 +191,15 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   // Render sticker grid mode with tabs
   const renderStickerGrid = () => (
     <View style={styles.stickerContainer}>
-      {renderStickerHeader()}
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Close sticker panel"
+        onPress={onClose}
+        activeOpacity={0.8}
+        style={styles.dragHandleContainer}
+      >
+        <View style={styles.dragHandle} />
+      </TouchableOpacity>
       
       {/* Unified Sticker Grid */}
       <KlipyStickerGrid
@@ -244,13 +218,17 @@ export const MessageComposerActions: React.FC<MessageComposerActionsProps> = ({
   // Render action buttons mode
   const renderActionButtons = () => (
     <>
-      {/* Header with close button */}
-       <View style={styles.header}>
-         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-           <MaterialIcons name="close" size={24} color={Colors.gray600} />
-         </TouchableOpacity>
-       </View>
-      
+      <View style={styles.dragHandleContainer}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Close actions panel"
+          onPress={onClose}
+          activeOpacity={0.8}
+        >
+          <View style={styles.dragHandle} />
+        </TouchableOpacity>
+      </View>
+
       {/* First Row */}
       <View style={styles.row}>
         {/* Camera Option */}
@@ -426,9 +404,17 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.surface || '#F5F5F5',
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray200 || '#E0E0E0',
+    paddingTop: 0,
+    paddingBottom: Spacing.md,
+    borderTopWidth: 0.5,
+    borderTopColor: Colors.gray300 || '#D4D4D8',
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    shadowColor: Colors.black,
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 8,
   },
   row: {
     flexDirection: 'row',
@@ -466,46 +452,21 @@ const styles = StyleSheet.create({
   },
   // Sticker styles
   stickerContainer: {
-    height: 250, // Increased to accommodate tabs
+    height: 250,
     backgroundColor: Colors.surface,
+    paddingTop: 0,
   },
-  stickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  dragHandleContainer: {
+    width: '100%',
     alignItems: 'center',
-    paddingBottom: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
+    paddingVertical: 0,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
-  tabContainer: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  tab: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginRight: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.gray100,
-  },
-  activeTab: {
-    backgroundColor: Colors.primary,
-  },
-  tabText: {
-    color: Colors.gray600,
-    fontWeight: '500',
-    fontSize: 12,
-  },
-  activeTabText: {
-    color: Colors.white,
-    fontWeight: '600',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingBottom: Spacing.sm,
-  },
-  closeButton: {
-    padding: Spacing.xs,
+  dragHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: Colors.gray200,
   },
 });

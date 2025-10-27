@@ -14,6 +14,7 @@ import {
   Dimensions,
   Alert,
 } from 'react-native';
+import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Typography } from '../ui/Typography';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import klipyService, { KlipyGif, KlipySticker, KlipyClip, KlipyStickerCategory, KlipyClipCategory } from '../../services/klipyService';
@@ -45,6 +46,19 @@ const KLIPY_CATEGORIES = [
   { id: 'stickers', name: 'Stickers', klipyQuery: 'stickers', type: 'stickers' },
   { id: 'clips', name: 'Clips', klipyQuery: 'clips', type: 'clips' },
 ];
+
+const CATEGORY_ICONS: Record<string, { name: string; family?: 'material-community' }> = {
+  recent: { name: 'history' },
+  pinned: { name: 'push-pin' },
+  popular: { name: 'whatshot' },
+  animation: { name: 'movie-filter' },
+  animals: { name: 'pets' },
+  celebrity: { name: 'emoji-events' },
+  food: { name: 'restaurant' },
+  reactions: { name: 'emoji-emotions' },
+  stickers: { name: 'sticker-emoji', family: 'material-community' },
+  clips: { name: 'movie-creation' },
+};
 
 // Cache for storing results
 const stickerCache = new Map<string, { data: StickerData[], timestamp: number }>();
@@ -265,6 +279,18 @@ export const KlipyStickerGrid: React.FC<KlipyStickerGridProps> = ({
       ]}
       onPress={() => setSelectedCategory(item.id)}
     >
+      {(() => {
+        const iconConfig = CATEGORY_ICONS[item.id] || { name: 'apps' };
+        const IconComponent = iconConfig.family === 'material-community' ? MaterialCommunityIcons : MaterialIcons;
+        return (
+          <IconComponent
+            name={iconConfig.name as any}
+            size={16}
+            color={selectedCategory === item.id ? Colors.white : Colors.gray500}
+            style={styles.categoryIcon}
+          />
+        );
+      })()}
       <Typography
         variant="caption"
         style={[
@@ -406,24 +432,33 @@ const styles = StyleSheet.create({
   },
   categoriesContentContainer: {
     paddingHorizontal: Spacing.xs,
+    gap: Spacing.xs,
   },
   categoryItem: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginHorizontal: Spacing.xs,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.gray100,
-    minWidth: 80,
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    marginHorizontal: 0,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.gray100,
+    minWidth: 0,
   },
   selectedCategoryItem: {
     backgroundColor: Colors.primary,
+    shadowColor: Colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryIcon: {
+    marginRight: Spacing.xs,
   },
   categoryText: {
     color: Colors.gray600,
     fontWeight: '500',
     fontSize: 12,
-    textAlign: 'center',
   },
   selectedCategoryText: {
     color: Colors.white,
