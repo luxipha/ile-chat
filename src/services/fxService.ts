@@ -86,8 +86,7 @@ class FXService {
 
   private async getAuthToken(): Promise<string | undefined> {
     try {
-      const AsyncStorage = await import('@react-native-async-storage/async-storage');
-      const token = await AsyncStorage.default.getItem('authToken');
+      const token = await AsyncStorage.getItem('authToken');
       return token || undefined;
     } catch (error) {
       console.error('Failed to get auth token:', error);

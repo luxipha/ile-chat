@@ -3,7 +3,7 @@ import './polyfills';
 
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl, Alert } from 'react-native';
+import { View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl, Alert } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +12,7 @@ import { Card } from './src/components/ui/Card';
 import { Typography } from './src/components/ui/Typography';
 import { Avatar } from './src/components/ui/Avatar';
 import { Colors, Spacing, BorderRadius } from './src/theme';
+import { styles } from './src/styles/appStyles';
 import { ConversationList, Conversation } from './src/components/chat/ConversationList';
 import { ChatScreen } from './src/components/chat/ChatScreen';
 // import { VideoCallScreen } from './src/components/call/VideoCallScreen';
@@ -48,6 +49,7 @@ import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView'
 import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
 import { QRScannerModal } from './src/components/scanner/QRScannerModal';
 import { AddContactScreen } from './src/components/contacts/AddContactScreen';
+import { GameModal } from './src/components/games/GameModal';
 import { FriendRequestsScreen } from './src/components/friends/FriendRequestsScreen';
 import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
 import { MainNavigation, TabName } from './src/components/ui/MainNavigation';
@@ -75,8 +77,10 @@ import friendService from './src/services/friendService';
 import emailAuthService from './src/services/emailAuthService';
 import { apiService } from './src/services/api';
 import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
+import { API_BASE_URL } from './src/config/apiConfig';
 // Firebase Web SDK imports removed - using React Native Firebase only
 // Firebase auth handled via firebaseAuthService.ts
+import firebaseAuthService from './src/services/firebaseAuthService';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
 import { useMainNavVisibility } from './src/hooks/useMainNavVisibility';
@@ -181,6 +185,7 @@ function App() {
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showCreateMoment, setShowCreateMoment] = useState(false);
+  const [showGameModal, setShowGameModal] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
 
   // Group creation error handling
@@ -264,9 +269,6 @@ function App() {
         try {
           console.log('🔥 Setting up Firebase chat for user:', currentUser.email);
           
-          // Import Firebase auth service
-          const firebaseAuthService = (await import('./src/services/firebaseAuthService')).default;
-          
           // Check if user is already authenticated with Firebase
           const isFirebaseAuth = await firebaseAuthService.isFirebaseAuthenticated();
           
@@ -283,7 +285,6 @@ function App() {
           
           // Setup conversations listener
           console.log('🔄 Setting up conversations listener...');
-          const chatService = (await import('./src/services/chatService')).default;
           const unsubscribe = chatService.getConversations(currentUser.id, (firebaseConversations) => {
             console.log('📱 Conversations update received:', {
               count: firebaseConversations.length,
@@ -1582,6 +1583,29 @@ function App() {
                     News Hub
                   </Typography>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.serviceItem,
+                    previewMode && styles.disabledItem,
+                  ]}
+                  onPress={() => {
+                    if (previewMode) return;
+                    setShowGameModal(true);
+                  }}
+                  disabled={previewMode}
+                >
+                  <MaterialIcons
+                    name="sports-esports"
+                    size={24}
+                    color={previewMode ? Colors.gray400 : Colors.primary}
+                  />
+                  <Typography
+                    variant="caption"
+                    color={previewMode ? 'textSecondary' : 'primary'}
+                  >
+                    Play & Earn
+                  </Typography>
+                </TouchableOpacity>
               </View>
             </View>
           </ScrollView>
@@ -2200,7 +2224,6 @@ function App() {
     } else if (data.startsWith('contact:')) {
       // Parse contact QR code and send friend request
       try {
-        const friendService = (await import('./src/services/friendService')).default;
         const contactInfo = friendService.parseContactQRData(data);
         
         if (contactInfo && contactInfo.userId !== currentUser?.id) {
@@ -3187,6 +3210,14 @@ function App() {
           description="Scan any QR code for payments, contacts, or other actions"
         />
 
+        {/* Game Modal */}
+        <GameModal
+          visible={showGameModal}
+          onClose={() => setShowGameModal(false)}
+          gameUrl={`${API_BASE_URL}/public/game/`}
+          gameTitle="Ile Match Game"
+        />
+
         {/* Global Loading Overlay */}
         <LoadingOverlay
           visible={isLoadingGeneral}
@@ -3242,700 +3273,3 @@ export default function AppWrapper() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  disabledSection: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.xl,
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.lg,
-    marginTop: Spacing.xl,
-    opacity: 0.7,
-  },
-  disabledText: {
-    color: Colors.gray700,
-    textAlign: 'center',
-  },
-  content: {
-    flex: 1,
-    padding: Spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: Spacing.sm,
-  },
-  
-  // Header
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing['3xl'],
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationButton: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.error,
-  },
-  signupButton: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  signupButtonText: {
-    color: Colors.background,
-    fontWeight: '600',
-  },
-  disabledItem: {
-    opacity: 0.5,
-  },
-  
-  // Cards
-  balanceCard: {
-    alignItems: 'center',
-    marginBottom: Spacing['3xl'],
-  },
-  
-  // Action Buttons
-  actionButtons: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginBottom: Spacing['4xl'],
-  },
-  
-  // Sections
-  section: {
-    marginBottom: Spacing['3xl'],
-  },
-  
-  // Wallet Screen
-  walletHeader: {
-    marginBottom: Spacing['3xl'],
-  },
-  connectCard: {
-    alignItems: 'center',
-  },
-  
-  // Placeholder
-  placeholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing['4xl'],
-  },
-  
-  // Chat
-  chatContainer: {
-    flex: 1,
-    backgroundColor: Colors.surface,
-  },
-  chatHeader: {
-    padding: Spacing.lg,
-    backgroundColor: Colors.surface,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  
-  // Token row
-  tokenRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  tokenInfo: {
-    flex: 1,
-  },
-  tokenBalance: {
-    alignItems: 'flex-end',
-  },
-  
-  // Contact row
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-  contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  contactInfo: {
-    flex: 1,
-  },
-  
-  // Enhanced Contact Styles
-  contactsContainer: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  enhancedHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.background,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  addContactButton: {
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary + '10',
-  },
-  requestsButton: {
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary + '10',
-    position: 'relative',
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: Colors.error,
-    borderRadius: BorderRadius.full,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: {
-    color: Colors.white,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  friendRequestsSection: {
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  friendRequestRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-  friendRequestAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  friendRequestInfo: {
-    flex: 1,
-  },
-  pendingRequestsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  pendingRequestsTitle: {
-    fontWeight: '600',
-  },
-  viewAllRequestsButton: {
-    padding: Spacing.xs,
-  },
-  pendingIndicator: {
-    backgroundColor: Colors.warning + '20',
-    borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  pendingIndicatorText: {
-    color: Colors.warning,
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  sentIndicator: {
-    backgroundColor: Colors.info + '20',
-    borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  sentIndicatorText: {
-    color: Colors.info,
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  pendingRequestActions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginTop: Spacing.xs,
-  },
-  acceptButton: {
-    backgroundColor: Colors.success,
-    borderRadius: BorderRadius.full,
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rejectButton: {
-    backgroundColor: Colors.error,
-    borderRadius: BorderRadius.full,
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-    backgroundColor: Colors.background,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.gray200,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.sm,
-    fontSize: 16,
-    color: Colors.gray700,
-  },
-  clearSearchButton: {
-    padding: Spacing.xs,
-  },
-  filterContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
-    backgroundColor: Colors.background,
-  },
-  filterTab: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.surface,
-    marginRight: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.gray200,
-    minWidth: 60,
-    alignItems: 'center',
-    height: 32,
-  },
-  activeFilterTab: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterTabText: {
-    color: Colors.gray600,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  activeFilterTabText: {
-    color: Colors.white,
-    fontWeight: '600',
-  },
-  contactList: {
-    flex: 1,
-  },
-  enhancedContactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray200,
-  },
-  enhancedContactInfo: {
-    flex: 1,
-    paddingRight: Spacing.sm,
-    marginLeft: Spacing.md,
-  },
-  contactNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  contactName: {
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  trustBadge: {
-    marginLeft: Spacing.xs,
-  },
-  contactRole: {
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  contactStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  contactActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionButton: {
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary + '10',
-  },
-  
-  // Profile
-  profileSection: {
-    alignItems: 'center',
-  },
-  profileAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  // Menu item
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.xs,
-  },
-  
-  // Profile section updates
-  profileBricks: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: Spacing.sm,
-  },
-  
-  // Invite badge
-  inviteBadge: {
-    backgroundColor: Colors.secondary,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs / 2,
-    borderRadius: BorderRadius.full,
-    marginLeft: 'auto',
-  },
-  inviteBadgeText: {
-    color: Colors.background,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  debugBadge: {
-    backgroundColor: Colors.warning,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs / 2,
-    borderRadius: BorderRadius.full,
-    marginLeft: 'auto',
-  },
-  debugBadgeText: {
-    color: Colors.background,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-
-  // Token row spacing
-  tokenRowSpacing: {
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-
-  // Empty state
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
-  },
-
-  // Menu item spacing
-  menuItemSpacing: {
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-
-  // Moment item (removed card styling for more space)
-  momentItem: {
-    backgroundColor: Colors.background,
-    marginBottom: 0,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.lg,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.gray200,
-  },
-  momentUserHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  momentUserInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-
-  momentUserDetails: {
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
-  momentUserName: {
-    fontWeight: '600',
-  },
-  momentDeleteContainer: {
-    position: 'relative',
-  },
-  momentDeleteButton: {
-    padding: Spacing.xs,
-  },
-  deleteDropdown: {
-    position: 'absolute',
-    top: 30,
-    right: 0,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.xs,
-    minWidth: 100,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 1000,
-  },
-  deleteOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  deleteOptionText: {
-    marginLeft: Spacing.xs,
-  },
-  momentPostContent: {
-    marginBottom: Spacing.md,
-    lineHeight: 20,
-  },
-  momentPostImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
-  },
-  momentActions: {
-    flexDirection: 'row',
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray100,
-  },
-  momentActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: Spacing.xl,
-  },
-  momentActionText: {
-    marginLeft: Spacing.xs,
-    color: Colors.gray600,
-  },
-  fabButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 8,
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  momentsContainer: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  momentsScrollView: {
-    flex: 1,
-    paddingHorizontal: Spacing.lg,
-  },
-  refreshHint: {
-    marginTop: Spacing.xs,
-    textAlign: 'center',
-  },
-  errorContainer: {
-    marginBottom: Spacing.md,
-  },
-  pullToRefreshText: {
-    textAlign: 'center',
-    marginTop: Spacing.sm,
-  },
-  
-  // Tab Bar
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: Colors.background,
-    paddingVertical: Spacing.md,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    gap: Spacing.xs,
-  },
-  
-  // Wallet Specific Styles
-  backButton: {
-    padding: Spacing.sm,
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  portfolioSection: {
-    marginBottom: Spacing.xl,
-  },
-  portfolioGrid: {
-    flexDirection: 'row',
-    gap: Spacing.lg,
-  },
-  portfolioItem: {
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.lg,
-    flex: 1,
-  },
-  portfolioLabel: {
-    marginTop: Spacing.sm,
-    fontWeight: '500',
-    color: Colors.primary,
-  },
-  servicesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-  },
-  serviceItem: {
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.md,
-    backgroundColor: Colors.gray100,
-    borderRadius: BorderRadius.lg,
-    width: '22%', // 4 items per row with gaps
-    minHeight: 80,
-    justifyContent: 'center',
-  },
-  serviceLabel: {
-    marginTop: Spacing.sm,
-    fontWeight: '500',
-    color: Colors.primary,
-    textAlign: 'center',
-    fontSize: 10,
-  },
-  
-  // Device Contacts Styles
-  deviceContactsPrompt: {
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.lg,
-  },
-  deviceContactsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-    gap: Spacing.sm,
-  },
-  deviceContactsTitle: {
-    fontWeight: '600',
-  },
-  deviceContactsDescription: {
-    marginBottom: Spacing.lg,
-    lineHeight: 20,
-  },
-  syncContactsButton: {
-    width: '100%',
-  },
-  deviceContactsSection: {
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.md,
-  },
-  deviceContactItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray100,
-  },
-  inviteButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  showMoreButton: {
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    marginTop: Spacing.sm,
-  },
-  avatarText: {
-    color: Colors.gray600,
-    fontWeight: '600',
-  },
-});

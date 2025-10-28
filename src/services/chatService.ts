@@ -4,6 +4,7 @@ import { apiClient } from './api';
 import { API_BASE_URL } from '../config/apiConfig';
 import profileService from './profileService';
 import { StickerData } from '../types/sticker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const db = getFirestore();
 const FieldValue = getFirebaseFieldValue();
@@ -643,8 +644,7 @@ const chatService = {
       // Get auth token for the request
       const getAuthToken = async (): Promise<string | undefined> => {
         try {
-          const AsyncStorage = await import('@react-native-async-storage/async-storage');
-          const token = await AsyncStorage.default.getItem('authToken');
+          const token = await AsyncStorage.getItem('authToken');
           return token || undefined;
         } catch (error) {
           console.error('Error getting auth token:', error);
@@ -2045,8 +2045,7 @@ const chatService = {
       // Get auth token for the request
       const getAuthToken = async (): Promise<string | undefined> => {
         try {
-          const AsyncStorage = await import('@react-native-async-storage/async-storage');
-          const token = await AsyncStorage.default.getItem('authToken');
+          const token = await AsyncStorage.getItem('authToken');
           return token || undefined;
         } catch (error) {
           console.error('Error getting auth token:', error);
