@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   FlatList,
-  Image,
   Alert,
   Modal,
   ActivityIndicator,
@@ -21,6 +20,7 @@ import { FXTheme, FXColors } from '../../theme/fxTheme';
 import { FXOffer, FXFilter, Currency, PaymentMethod } from '../../types/fx';
 import fxService, { FXDebugUtils } from '../../services/fxService';
 import authService from '../../services/authService';
+import { Avatar } from '../ui/Avatar';
 
 interface FXMarketplaceProps {
   onOfferSelect: (offer: FXOffer) => void;
@@ -420,36 +420,27 @@ export const FXMarketplace: React.FC<FXMarketplaceProps> = ({
         <Card style={FXTheme.cards.base}>
         <View style={FXTheme.layouts.rowBetween}>
           <View style={FXTheme.layouts.row}>
-            <View style={FXTheme.layouts.centerHorizontal}>
-              <View style={[
-                {
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: Colors.primary,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: Spacing.sm,
-                }
-              ]}>
-                <Typography variant="body2" style={{ color: Colors.primary, ...FXTheme.text.bold }}>
-                  {offer.maker.name.charAt(0)}
-                </Typography>
-              </View>
+            <View style={{ position: 'relative', marginRight: Spacing.sm }}>
+              <Avatar
+                userId={offer.maker.profileUserId || offer.maker.firebaseUid || offer.maker.id}
+                name={offer.maker.name}
+                imageUrl={offer.maker.avatar}
+                size={40}
+              />
               {offer.maker.onlineStatus === 'online' && (
-                <View style={[
-                  {
+                <View
+                  style={{
                     position: 'absolute',
                     bottom: -2,
-                    right: Spacing.sm - 2,
+                    right: -2,
                     width: 10,
                     height: 10,
                     borderRadius: 5,
                     backgroundColor: Colors.success,
                     borderWidth: 2,
                     borderColor: Colors.white,
-                  }
-                ]} />
+                  }}
+                />
               )}
             </View>
             <View style={FXTheme.layouts.column}>

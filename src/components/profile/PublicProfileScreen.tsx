@@ -19,6 +19,7 @@ import { ProfileActionsMenu } from './ProfileActionsMenu';
 import { Colors, Spacing, BorderRadius } from '../../theme';
 import friendService, { FriendshipStatus } from '../../services/friendService';
 import { communityService, CommunityPost } from '../../services/communityService';
+import profileService from '../../services/profileService';
 
 interface PublicProfileScreenProps {
   onBack: () => void;
@@ -72,14 +73,15 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
   const [userMoments, setUserMoments] = useState<CommunityPost[]>([]);
   const [loadingMoments, setLoadingMoments] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [profileData, setProfileData] = useState<{ name: string; avatar?: string } | null>(null);
   // Mock user data - in real app, fetch based on userId
   const userProfile: PublicUserProfile = {
-    name: userName,
+    name: profileData?.name || userName,
     role: 'Property Investor',
     region: 'Lagos, Nigeria',
     joinDate: 'Recently', // Fallback for when no actual date is available
     bricksCount: 2450,
-    profilePicture: userAvatar,
+    profilePicture: profileData?.avatar || userAvatar,
     trustBadge: 'verified',
     trustLevel: 4, // 4 out of 5 stars
     momentThumbnails: [
@@ -111,8 +113,29 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
     ],
   };
 
-  // Load user moments when component mounts
+  const loadProfile = async () => {
+    try {
+      const result = await profileService.getUserProfile(userId, true);
+      if (result.success && result.profile) {
+        setProfileData({
+          name: result.profile.name,
+          avatar: result.profile.avatar,
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('❌ Error loading public profile:', error);
+    }
+
+    setProfileData({
+      name: userName,
+      avatar: userAvatar,
+    });
+  };
+
+  // Load user details when component mounts
   useEffect(() => {
+    loadProfile();
     loadUserMoments();
   }, [userId]);
 
@@ -145,6 +168,7 @@ export const PublicProfileScreen: React.FC<PublicProfileScreenProps> = ({
 
   const renderProfileCard = () => (
     <ProfileCard
+      userId={userId}
       name={userProfile.name}
       role={userProfile.role}
       region={userProfile.region}

@@ -593,127 +593,6 @@ export const styles = StyleSheet.create({
     color: Colors.success,
   },
 
-  // Moments
-  momentsContainer: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  momentsScrollView: {
-    flex: 1,
-  },
-  momentsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
-  refreshHint: {
-    marginTop: Spacing.xs,
-  },
-  momentItem: {
-    backgroundColor: Colors.background,
-    marginBottom: 0,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.lg,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.gray200,
-  },
-  momentUserHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  momentUserInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  momentUserDetails: {
-    gap: 2,
-  },
-  momentUserName: {
-    fontWeight: '600',
-  },
-  momentDeleteContainer: {
-    position: 'relative',
-  },
-  momentDeleteButton: {
-    padding: Spacing.xs,
-  },
-  deleteDropdown: {
-    position: 'absolute',
-    top: 28,
-    right: 0,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.xs,
-    minWidth: 100,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 1000,
-  },
-  deleteOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  deleteOptionText: {
-    marginLeft: Spacing.xs,
-  },
-  momentPostContent: {
-    marginBottom: Spacing.md,
-    lineHeight: 20,
-  },
-  momentPostImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
-  },
-  momentActions: {
-    flexDirection: 'row',
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.gray100,
-  },
-  momentActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: Spacing.xl,
-  },
-  momentActionText: {
-    marginLeft: Spacing.xs,
-    color: Colors.gray600,
-  },
-  fabButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 8,
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  errorContainer: {
-    marginBottom: Spacing.md,
-  },
-  pullToRefreshText: {
-    textAlign: 'center',
-    marginTop: Spacing.sm,
-  },
 
   // Menu Items
   menuItem: {
@@ -807,5 +686,185 @@ export const styles = StyleSheet.create({
     marginTop: Spacing.lg,
     alignItems: 'center',
     gap: Spacing.sm,
+  },
+
+  // Profile Edit Screen Styles
+  profileEditContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  profileEditHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray300,
+  },
+  profileEditBackButton: {
+    padding: Spacing.sm,
+    marginLeft: -Spacing.sm,
+  },
+  profileEditHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  profileEditSaveButton: {
+    paddingHorizontal: Spacing.md,
+  },
+  profileEditContent: {
+    flex: 1,
+  },
+  profileEditAvatarSection: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    backgroundColor: Colors.surface,
+  },
+  profileEditAvatarContainer: {
+    position: 'relative',
+    marginBottom: Spacing.sm,
+  },
+  profileEditAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  profileEditAvatarPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.gray200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileEditAvatarEditIcon: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.white,
+  },
+  profileEditAvatarHint: {
+    textAlign: 'center',
+  },
+  profileEditUploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileEditUploadSpinner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileEditUploadText: {
+    color: Colors.white,
+    marginTop: 4,
+    fontSize: 10,
+  },
+  profileEditAvatarEditIconDisabled: {
+    backgroundColor: Colors.gray400,
+  },
+  profileEditAvatarError: {
+    marginTop: Spacing.sm,
+    alignItems: 'center',
+  },
+  profileEditForm: {
+    padding: Spacing.lg,
+    gap: Spacing.lg,
+  },
+  profileEditField: {
+    gap: Spacing.sm,
+  },
+  profileEditLabel: {
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  profileEditInput: {
+    borderWidth: 1,
+    borderColor: Colors.gray300,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    fontSize: 16,
+    color: Colors.gray900,
+    backgroundColor: Colors.white,
+  },
+  profileEditInputError: {
+    borderColor: Colors.error,
+  },
+  profileEditInputText: {
+    color: Colors.gray900,
+  },
+  profileEditPlaceholderText: {
+    color: Colors.gray400,
+  },
+  profileEditTextArea: {
+    borderWidth: 1,
+    borderColor: Colors.gray300,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    fontSize: 16,
+    color: Colors.gray900,
+    backgroundColor: Colors.white,
+    height: 100,
+  },
+  profileEditCharCount: {
+    alignItems: 'flex-end',
+    marginTop: 4,
+  },
+  profileEditPickerInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: Colors.gray300,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.white,
+  },
+  profileEditModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  profileEditModalContent: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    paddingBottom: Spacing.xl,
+  },
+  profileEditModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray300,
+  },
+  profileEditModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  profileEditModalOptionText: {
+    flex: 1,
   },
 });

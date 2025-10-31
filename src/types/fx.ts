@@ -28,13 +28,23 @@ export interface FXOffer {
   id: string;
   maker: {
     id: string;
+    profileUserId?: string;
+    firebaseUid?: string;
     name: string;
+    email?: string;
     avatar?: string;
     trustScore: number; // 0-100
     trustBadge?: 'verified' | 'premium' | 'pro' | null;
     completedTrades: number;
     responseTime: string; // e.g., "~10 minutes"
     onlineStatus: 'online' | 'offline' | 'away';
+    stats?: {
+      totalTrades?: number;
+      completedTrades?: number;
+      tradingVolume?: number;
+      averageRating?: number;
+      responseTime?: number;
+    };
   };
   
   // Trade details

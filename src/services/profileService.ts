@@ -30,6 +30,13 @@ class ProfileService {
   private cachedProfile: UserProfileData | null = null;
   private userProfileCache = new Map<string, ChatUserProfile>();
 
+  // Force clear all caches
+  clearAllCaches(): void {
+    this.cachedProfile = null;
+    this.userProfileCache.clear();
+    console.log('🗑️ All profile caches cleared');
+  }
+
   async getProfile(forceRefresh = false): Promise<{ success: boolean; profile?: UserProfileData; error?: string }> {
     try {
       // Return cached profile if available and not forcing refresh
@@ -70,7 +77,7 @@ class ProfileService {
       console.log('🔍 Fetching user profile for Firebase UID:', firebaseUid);
       
       // Fetch from backend API
-      const response = await apiClient.get(`/api/user/profile/${firebaseUid}`);
+      const response = await apiClient.get(`/api/users/profile/${firebaseUid}`);
       
       console.log('🔍 DEBUG: Full API response:', JSON.stringify(response, null, 2));
       
@@ -121,7 +128,7 @@ class ProfileService {
       console.log('🔄 Updating user profile via API for UID:', firebaseUid, 'Updates:', updates);
       
       // Update via backend API (same system that getUserProfile fetches from)
-      const response = await apiClient.put(`/api/user/profile/${firebaseUid}`, updates);
+      const response = await apiClient.put(`/api/users/profile/${firebaseUid}`, updates);
       
       if (response.success && response.data) {
         const profileData = response.data as { success: boolean; profile: ChatUserProfile };

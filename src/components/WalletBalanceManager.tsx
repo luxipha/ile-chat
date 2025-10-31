@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text } from 'react-native';
 import Service from '../services/Service';
+import { HederaBalanceService } from './wallet/HederaBalanceService';
 // aptosService removed - using Circle/Hedera instead
 
 interface WalletBalance {
@@ -26,7 +27,7 @@ interface WalletBalanceManagerProps {
   onBalanceUpdate?: (balanceData: CombinedBalanceData) => void;
   autoRefresh?: boolean;
   refreshInterval?: number; // in milliseconds
-  children?: (balanceData: CombinedBalanceData, refreshBalance: () => void) => React.ReactNode;
+  children?: (balanceData: CombinedBalanceData, refreshBalance: () => void, forceRefresh: () => void) => React.ReactNode;
 }
 
 const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
@@ -44,23 +45,20 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
 
   const [refreshTimer, setRefreshTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
-  const MINIMUM_FETCH_INTERVAL = 15000; // Minimum 15 seconds between fetches
+  const MINIMUM_FETCH_INTERVAL = 5000; // Minimum 5 seconds between fetches (reduced for better UX)
 
   // Combined balance fetching for Base (Aptos removed)
-  const fetchCombinedBalances = useCallback(async () => {
+  const fetchCombinedBalances = useCallback(async (forceRefresh: boolean = false) => {
     const now = Date.now();
     
-    // Rate limiting: prevent too frequent requests
-    if (now - lastFetchTime < MINIMUM_FETCH_INTERVAL) {
-      console.log('⚠️ Balance fetch rate limited, skipping...', {
-        timeSinceLastFetch: now - lastFetchTime,
-        minimumInterval: MINIMUM_FETCH_INTERVAL
-      });
+    // Silent rate limiting: prevent too frequent requests (but allow manual force refresh)
+    if (!forceRefresh && now - lastFetchTime < MINIMUM_FETCH_INTERVAL) {
+      // Silently skip - no need to log rate limiting for automatic calls
       return;
     }
     
     if (balanceData.isLoading) {
-      console.log('⚠️ Balance fetch already in progress, skipping...');
+      // Silently skip if already loading
       return;
     }
     
@@ -87,6 +85,17 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
           .catch((error: any) => {
             console.error('❌ Base balance fetch error:', error);
             return { type: 'base', data: { error: error.message } };
+          })
+      );
+
+      // 3. Hedera balance with delay to stagger requests
+      balancePromises.push(
+        new Promise(resolve => setTimeout(resolve, 1000))
+          .then(() => HederaBalanceService.getCurrentUserBalance())
+          .then((data: any) => ({ type: 'hedera', data }))
+          .catch((error: any) => {
+            console.error('❌ Hedera balance fetch error:', error);
+            return { type: 'hedera', data: { error: error.message } };
           })
       );
 
@@ -172,6 +181,29 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
               totalUSDValue += usdAmount;
               
               console.log(`✅ ${type} balance: ${ethBalance}, ${usdcBalance} USDC (${balanceUSD} USD)`);
+            } else if (type === 'hedera') {
+              // Handle Hedera balances - only show USDC (HBAR is for gas fees only)
+              console.log('🔗 [WalletBalanceManager] Raw Hedera balance data:', JSON.stringify(data, null, 2));
+              
+              const usdcBalance = data.usdcBalance || '0.00';
+              
+              console.log('🔗 [WalletBalanceManager] Parsed Hedera USDC balance:', {
+                usdcBalance
+              });
+              
+              wallets.push({
+                chain: type,
+                balance: `${usdcBalance} USDC`,
+                balanceUSD: usdcBalance.toString(), // USDC is 1:1 with USD
+                usdcBalance: usdcBalance,
+                address: data.address || 'N/A'
+              });
+              
+              // Add USDC to total USD value
+              const usdAmount = parseFloat(usdcBalance) || 0;
+              totalUSDValue += usdAmount;
+              
+              console.log(`✅ ${type} balance: ${usdcBalance} USDC (${usdAmount.toFixed(2)} USD)`);
             } else {
               // Fallback for other chain types
               const balance = data.balance || '0.00';
@@ -255,14 +287,19 @@ const WalletBalanceManager: React.FC<WalletBalanceManagerProps> = ({
     };
   }, [refreshTimer]);
 
-  // Manual refresh function
+  // Manual refresh function (respects rate limiting)
   const refreshBalance = useCallback(() => {
     fetchCombinedBalances();
   }, [fetchCombinedBalances]);
 
+  // Force refresh function (bypasses rate limiting for manual user actions)
+  const forceRefresh = useCallback(() => {
+    fetchCombinedBalances(true);
+  }, [fetchCombinedBalances]);
+
   // If children render prop is provided, use it
   if (children) {
-    return <>{children(balanceData, refreshBalance)}</>;
+    return <>{children(balanceData, refreshBalance, forceRefresh)}</>;
   }
 
   // Default UI component

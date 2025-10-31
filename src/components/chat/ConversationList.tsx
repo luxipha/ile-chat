@@ -33,6 +33,7 @@ export interface Conversation {
   bricksCount?: number;
   trustBadge?: 'verified' | 'premium' | 'agent' | null;
   participantIds?: string[];
+  profileUserId?: string;
 }
 
 interface ConversationListProps {
@@ -176,12 +177,16 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       >
         {item.isPinned && <View style={styles.pinIndicator}><MaterialIcons name="push-pin" size={12} color={ChatTheme.accent} /></View>}
         <Avatar 
-          userId={item.id}
+          userId={item.profileUserId}
           name={item.name} 
+          imageUrl={item.avatar}
           online={item.isOnline} 
           size="medium" 
-          
-          onPress={onAvatarPress ? () => onAvatarPress(item) : undefined}
+          disableAutoLoad={!!(item.name && item.avatar) || !item.profileUserId}
+          onPress={onAvatarPress ? () => {
+            console.log('🔍 ConversationList Avatar pressed:', { id: item.id, name: item.name, avatar: item.avatar });
+            onAvatarPress(item);
+          } : undefined}
         />
         <View style={styles.contentContainer}>
           <View style={styles.headerRow}>
@@ -233,6 +238,15 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   }, [conversations, searchQuery]);
 
   const renderConversation = ({ item }: { item: Conversation }) => {
+    // Debug logging for conversation data
+    console.log('🔍 ConversationList rendering item:', { 
+      id: item.id, 
+      name: item.name, 
+      avatar: item.avatar, 
+      hasAvatar: !!item.avatar,
+      avatarLength: item.avatar?.length 
+    });
+    
     return (
       <ConversationRow
         item={item}

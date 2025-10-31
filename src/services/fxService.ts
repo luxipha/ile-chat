@@ -1186,11 +1186,21 @@ class FXService {
       // Enhanced merchant data handling for ObjectId vs populated object
       let merchantInfo = {
         id: '',
+        profileUserId: undefined as string | undefined,
+        firebaseUid: undefined as string | undefined,
         name: 'Unknown Merchant',
-        avatar: '/api/placeholder/40/40',
+        avatar: undefined as string | undefined,
         trustScore: 85,
         completedTrades: 0,
-        responseTime: '~5 minutes'
+        responseTime: '~5 minutes',
+        email: undefined as string | undefined,
+        stats: undefined as {
+          totalTrades?: number;
+          completedTrades?: number;
+          tradingVolume?: number;
+          averageRating?: number;
+          responseTime?: number;
+        } | undefined,
       };
       
       if (merchantData) {
@@ -1202,24 +1212,92 @@ class FXService {
           // If merchant is a populated object
           merchantInfo.id = merchantData._id || merchantData.id;
           merchantInfo.name = merchantData.name || merchantData.userName || 'Merchant';
-          merchantInfo.avatar = merchantData.avatar || merchantData.profilePicture || '/api/placeholder/40/40';
+          merchantInfo.avatar = merchantData.avatar || merchantData.profilePicture || undefined;
           merchantInfo.trustScore = merchantData.merchantProfile?.stats?.averageRating || merchantData.trustScore || 85;
           merchantInfo.completedTrades = merchantData.merchantProfile?.stats?.completedTrades || merchantData.completedTrades || 0;
           merchantInfo.responseTime = merchantData.merchantProfile?.stats?.responseTime ? `~${merchantData.merchantProfile.stats.responseTime} min` : '~5 minutes';
+          merchantInfo.email = merchantData.email || merchantData.contactEmail;
+          merchantInfo.stats = merchantData.merchantProfile?.stats;
+
+          const profileCandidates = [
+            merchantData.profileUserId,
+            merchantData.profile_user_id,
+            merchantData.firebaseUid,
+            merchantData.firebaseUID,
+            merchantData.firebase_uid,
+            merchantData.authUid,
+            merchantData.authUID,
+            merchantData.uid,
+            merchantData.userId,
+            merchantData.userFirebaseUid,
+            merchantData.userAuthUid,
+            merchantData.user?.firebaseUid,
+            merchantData.user?.authUid,
+            merchantData.user?.uid,
+            merchantData.firebase?.uid,
+            merchantData.firebase?.userId,
+            merchantData.owner?.firebaseUid,
+            merchantData.owner?.authUid,
+            merchantData.merchantProfile?.firebaseUid,
+          ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+
+          if (profileCandidates.length) {
+            merchantInfo.profileUserId = profileCandidates[0];
+          }
+
+          const firebaseUid =
+            profileCandidates.find((candidate) => candidate.length >= 10) ||
+            merchantData.firebaseUid ||
+            merchantData.firebaseUID ||
+            merchantData.firebase_uid ||
+            merchantData.firebase?.uid;
+
+          if (firebaseUid) {
+            merchantInfo.firebaseUid = firebaseUid;
+          }
         }
+      }
+      if (!merchantInfo.profileUserId) {
+        const offerLevelCandidates = [
+          offer.merchantFirebaseUid,
+          offer.makerFirebaseUid,
+          offer.merchantUid,
+          offer.makerUid,
+          offer.merchantProfile?.firebaseUid,
+        ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+        if (offerLevelCandidates.length) {
+          merchantInfo.profileUserId = offerLevelCandidates[0];
+        }
+      }
+      if (!merchantInfo.firebaseUid && merchantInfo.profileUserId) {
+        merchantInfo.firebaseUid = merchantInfo.profileUserId;
+      }
+      
+      if (!merchantInfo.id && merchantInfo.profileUserId) {
+        merchantInfo.id = merchantInfo.profileUserId;
+      }
+      if (!merchantInfo.profileUserId && merchantInfo.id) {
+        merchantInfo.profileUserId = merchantInfo.id;
+      }
+      if (!merchantInfo.firebaseUid && merchantInfo.profileUserId) {
+        merchantInfo.firebaseUid = merchantInfo.profileUserId;
       }
       
       return {
         id: offer._id || offer.id,
         maker: {
           id: merchantInfo.id,
+          profileUserId: merchantInfo.profileUserId,
+          firebaseUid: merchantInfo.firebaseUid,
           name: merchantInfo.name,
+          email: merchantInfo.email,
           avatar: merchantInfo.avatar,
           trustScore: merchantInfo.trustScore,
           trustBadge: this.getTrustBadge(merchantInfo.trustScore),
           completedTrades: merchantInfo.completedTrades,
           responseTime: merchantInfo.responseTime,
           onlineStatus: 'online', // For now, assume all merchants are online
+          stats: merchantInfo.stats,
         },
         sellCurrency: this.transformCurrency(offer.fromCurrency || offer.sellCurrency),
         buyCurrency: this.transformCurrency(offer.toCurrency || offer.buyCurrency),

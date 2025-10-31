@@ -17,6 +17,8 @@ import QRCode from 'react-native-qrcode-svg';
 import Service from '../../services/Service';
 // aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
+import { HederaWalletHandler } from './HederaWalletHandler';
+import { RequestMoneyModal } from './RequestMoneyModal';
 
 interface DepositFlowProps {
   visible: boolean;
@@ -24,18 +26,9 @@ interface DepositFlowProps {
 }
 
 type DepositStep = 'method' | 'network' | 'address';
-type CryptoNetwork = 'USDC_ETHEREUM' | 'USDC_APTOS' | 'BASE_NETWORK';
+type CryptoNetwork = 'USDC_ETHEREUM' | 'BASE_NETWORK' | 'HEDERA_NETWORK';
 
 const USDC_NETWORKS = [
-  // { 
-  //   id: 'USDC_APTOS' as CryptoNetwork,
-  //   name: 'Aptos Testnet', 
-  //   token: 'USDC',
-  //   icon: 'account-balance-wallet',
-  //   chain: 'aptos-testnet',
-  //   description: 'USDC on Aptos testnet',
-  //   type: 'aptos' as const
-  // },
   { 
     id: 'BASE_NETWORK' as CryptoNetwork,
     name: 'Base Sepolia', 
@@ -44,6 +37,15 @@ const USDC_NETWORKS = [
     chain: 'base-sepolia',
     description: 'ETH and USDC on Base network (L2)',
     type: 'base' as const
+  },
+  { 
+    id: 'HEDERA_NETWORK' as CryptoNetwork,
+    name: 'Hedera Testnet', 
+    token: 'USDC',
+    icon: 'account-balance-wallet',
+    chain: 'hedera-testnet',
+    description: 'USDC on Hedera Hashgraph testnet',
+    type: 'hedera' as const
   },
   { 
     id: 'USDC_ETHEREUM' as CryptoNetwork,
@@ -65,6 +67,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
   const [selectedNetwork, setSelectedNetwork] = useState<CryptoNetwork | null>(null);
   const [walletAddresses, setWalletAddresses] = useState<{[key: string]: string}>({});
   const [isLoadingAddress, setIsLoadingAddress] = useState(false);
+  const [showRequestMoney, setShowRequestMoney] = useState(false);
   
   const resetFlow = () => {
     setCurrentStep('method');
@@ -73,6 +76,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
 
   const handleClose = () => {
     resetFlow();
+    setShowRequestMoney(false);
     onClose();
   };
 
@@ -97,119 +101,6 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             ...prev,
             [networkData.chain]: testAddress
           }));
-        } else if (networkData.type === 'aptos') {
-          // Check if Aptos wallet exists in backend database
-          console.log('🔍 Checking Aptos wallet for chain:', networkData.chain);
-          console.log('🔍 Looking for wallet type: aptos');
-          let backendWallet;
-          try {
-            console.log('🔍 Calling Service.getWalletFromBackend...');
-            backendWallet = await Service.getWalletFromBackend(networkData.chain, 'aptos');
-            console.log('🔍 Backend wallet response:', {
-              success: backendWallet?.success,
-              hasWallet: !!backendWallet?.wallet,
-              walletAddress: backendWallet?.wallet?.address,
-              error: backendWallet?.error
-            });
-          } catch (error) {
-            console.log('⚠️ Error checking backend wallet:', error);
-            console.log('⚠️ Error details:', {
-              message: error instanceof Error ? error.message : 'Unknown error',
-              stack: error instanceof Error ? error.stack : null
-            });
-            backendWallet = { success: false };
-          }
-          
-          if (backendWallet && backendWallet.success && backendWallet.wallet) {
-            // Wallet exists in database, use it
-            console.log('✅ Using existing Aptos wallet from database:', backendWallet.wallet.address);
-            setWalletAddresses(prev => ({
-              ...prev,
-              [networkData.chain]: backendWallet.wallet!.address
-            }));
-            
-            // Also update AsyncStorage to match database
-            try {
-              if (backendWallet.wallet) {
-                await AsyncStorage.setItem('aptosWalletAddress', backendWallet.wallet.address);
-                if (backendWallet.wallet.privateKey) {
-                  await AsyncStorage.setItem('aptosWalletPrivateKey', backendWallet.wallet.privateKey);
-                }
-                console.log('✅ Updated AsyncStorage with database wallet');
-              }
-            } catch (storageError) {
-              console.warn('⚠️ Failed to update AsyncStorage:', storageError);
-            }
-          } else {
-            // Fallback: Check AsyncStorage like the main app does
-            console.log('🔍 Database failed, checking AsyncStorage as fallback...');
-            try {
-              const localAddress = await AsyncStorage.getItem('aptosWalletAddress');
-              if (localAddress) {
-                console.log('✅ Found Aptos wallet in AsyncStorage:', localAddress);
-                setWalletAddresses(prev => ({
-                  ...prev,
-                  [networkData.chain]: localAddress
-                }));
-                
-                // Also try to save to database for next time
-                const localPrivateKey = await AsyncStorage.getItem('aptosWalletPrivateKey');
-                if (localPrivateKey) {
-                  console.log('🔄 Attempting to save AsyncStorage wallet to database...');
-                  try {
-                    await Service.saveWalletToBackend({
-                      address: localAddress,
-                      chain: 'aptos-testnet',
-                      type: 'aptos',
-                      privateKey: localPrivateKey
-                    });
-                    console.log('✅ Successfully saved wallet to database for future use');
-                  } catch (saveError) {
-                    console.warn('⚠️ Failed to save to database, but continuing with AsyncStorage:', saveError);
-                  }
-                }
-              } else {
-                // No wallet found anywhere - Aptos wallet creation removed
-                console.log('🆕 Aptos wallet creation disabled - support removed');
-                const walletResult = { success: false, error: 'Aptos support removed' };
-                
-                if (walletResult.success && walletResult.address) {
-                  console.log('✅ Created new Aptos wallet:', walletResult.address);
-                  setWalletAddresses(prev => ({
-                    ...prev,
-                    [networkData.chain]: walletResult.address!
-                  }));
-                  
-                  // Save to database for future use
-                  if (walletResult.privateKey) {
-                    try {
-                      await Service.saveWalletToBackend({
-                        address: walletResult.address,
-                        chain: 'aptos-testnet',
-                        type: 'aptos',
-                        privateKey: walletResult.privateKey
-                      });
-                      console.log('✅ Saved new wallet to database');
-                    } catch (saveError) {
-                      console.warn('⚠️ Failed to save to database, but wallet created:', saveError);
-                    }
-                  }
-                  
-                  // Show success message
-                  Alert.alert(
-                    '🎉 Wallet Created!',
-                    `Your Aptos wallet has been created and pre-funded with 2 APT.\n\nAddress: ${walletResult.address.slice(0, 12)}...${walletResult.address.slice(-12)}`,
-                    [{ text: 'Continue', style: 'default' }]
-                  );
-                } else {
-                  throw new Error(walletResult.error || 'Failed to create Aptos wallet');
-                }
-              }
-            } catch (storageError) {
-              console.error('❌ AsyncStorage fallback failed:', storageError);
-              throw new Error('No Aptos wallet found. Please create a wallet first.');
-            }
-          }
         } else if (networkData.type === 'base') {
           // Check if Base wallet exists in backend database
           console.log('🔵 Checking Base wallet for chain:', networkData.chain);
@@ -291,6 +182,32 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
               throw new Error('No Base wallet found. Please create a wallet first.');
             }
           }
+        } else if (networkData.type === 'hedera') {
+          // Handle Hedera wallet using the component
+          console.log('🔗 Checking Hedera wallet for chain:', networkData.chain);
+          try {
+            const walletResult = await HederaWalletHandler.getOrCreateWallet(networkData.chain);
+            
+            if (walletResult.success && walletResult.address) {
+              console.log('✅ Got Hedera wallet:', walletResult.address);
+              setWalletAddresses(prev => ({
+                ...prev,
+                [networkData.chain]: walletResult.address!
+              }));
+              
+              // Show wallet creation success if it was newly created
+              Alert.alert(
+                '🔗 Hedera Wallet Ready!',
+                `Your Hedera wallet is ready for USDC transactions.\n\nAddress: ${walletResult.address.slice(0, 12)}...${walletResult.address.slice(-12)}\n\nThis is a Hedera testnet address for receiving USDC.`,
+                [{ text: 'Continue', style: 'default' }]
+              );
+            } else {
+              throw new Error(walletResult.error || 'Failed to get Hedera wallet');
+            }
+          } catch (hederaError) {
+            console.error('❌ Hedera wallet failed:', hederaError);
+            throw new Error(`Failed to set up Hedera wallet: ${hederaError instanceof Error ? hederaError.message : 'Unknown error'}`);
+          }
         }
       } catch (error: any) {
         console.error('❌ Failed to load wallet address:', error);
@@ -365,6 +282,24 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
           </View>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.methodOption}
+          onPress={() => setShowRequestMoney(true)}
+        >
+          <MaterialIcons name="request-quote" size={32} color={Colors.primary} />
+          <Typography variant="h6" style={styles.methodTitle}>
+            Request Money
+          </Typography>
+          <Typography variant="body2" color="textSecondary" style={styles.methodDescription}>
+            Generate a shareable link or QR code to get paid
+          </Typography>
+          <View style={styles.methodBadge}>
+            <Typography variant="caption" style={styles.methodBadgeText}>
+              Share
+            </Typography>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.methodOption, styles.disabledMethod]} disabled>
           <MaterialIcons name="credit-card" size={32} color={Colors.gray400} />
           <Typography variant="h6" style={[styles.methodTitle, { color: Colors.gray400 }]}>
@@ -403,7 +338,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
             </Typography>
             <View style={styles.methodBadge}>
               <Typography variant="caption" style={styles.methodBadgeText}>
-                {network.type === 'aptos' ? 'Aptos' : ''}
+                {network.type === 'base' ? 'EVM' : network.type === 'hedera' ? 'Hedera' : ''}
               </Typography>
             </View>
           </TouchableOpacity>
@@ -423,10 +358,11 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
               Setting up your {selectedNetworkData.name} wallet...
             </Typography>
             <Typography variant="body2" color="textSecondary" style={styles.loadingSubtext}>
-              {selectedNetworkData.type === 'aptos' 
-                ? 'Loading your existing Aptos wallet from database...' 
-                : 'Loading your existing  wallet...'
-              }
+              {selectedNetworkData.type === 'base' 
+                ? 'Loading your existing Base wallet from database...' 
+                : selectedNetworkData.type === 'hedera'
+                  ? 'Creating your Hedera wallet...'
+                  : 'Loading your existing wallet...'}
             </Typography>
           </View>
         ) : currentAddress ? (
@@ -469,7 +405,7 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
                 Network: {selectedNetworkData.name}
               </Typography>
               <Typography variant="caption" style={styles.networkBadgeText}>
-                Wallet: {selectedNetworkData.type === 'aptos' ? 'Aptos' : selectedNetworkData.type === 'base' ? 'Base' : 'EVM'}
+                Wallet: {selectedNetworkData.type === 'base' ? 'Base' : selectedNetworkData.type === 'hedera' ? 'Hedera' : 'EVM'}
               </Typography>
             </View>
             
@@ -478,8 +414,8 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
               <Typography variant="caption" color="warning" style={styles.warningText}>
                 {selectedNetworkData.type === 'base' 
                   ? `Only send ETH or USDC on ${selectedNetworkData.name} to this address. This is a Base testnet address.`
-                  : selectedNetworkData.type === 'aptos'
-                    ? `Only send USDC on ${selectedNetworkData.name} to this address. This is an Aptos testnet address.`
+                  : selectedNetworkData.type === 'hedera'
+                    ? `Only send USDC on ${selectedNetworkData.name} to this address. This is a Hedera testnet address.`
                     : `Only send USDC on ${selectedNetworkData.name} to this address. This is a managed address for EVM testnets.`
                 } Sending other tokens or using wrong network may result in permanent loss.
               </Typography>
@@ -540,6 +476,11 @@ export const DepositFlow: React.FC<DepositFlowProps> = ({
         {currentStep === 'network' && renderNetworkSelection()}
         {currentStep === 'address' && renderAddressDisplay()}
       </View>
+
+      <RequestMoneyModal
+        visible={showRequestMoney}
+        onClose={() => setShowRequestMoney(false)}
+      />
     </Modal>
   );
 };

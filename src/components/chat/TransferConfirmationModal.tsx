@@ -16,6 +16,7 @@ import { ChatTheme, ChatSpacing } from '../../theme/chatTheme';
 // aptosService removed - using Circle/Hedera instead
 import Service from '../../services/Service';
 import { useBalance } from '../../hooks/useBalance';
+import { HederaBalanceService } from '../wallet/HederaBalanceService';
 
 interface ChatUserProfile {
   id: string;
@@ -56,14 +57,16 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
   const [isProcessing, setIsProcessing] = useState(false);
   const [aptosBalances, setAptosBalances] = useState<Record<string, string>>({});
   const [baseBalances, setBaseBalances] = useState<{usdcBalance?: string, balance?: string}>({});
+  const [hederaBalances, setHederaBalances] = useState<{usdcBalance?: string, hbarBalance?: string}>({});
 
   // Use real wallet balances
   const { balances: Balances, isLoading: Loading } = useBalance();
 
-  // Fetch Base balances (Aptos support removed)
+  // Fetch Base and Hedera balances (Aptos support removed)
   useEffect(() => {
-    const fetchBaseBalances = async () => {
+    const fetchBalances = async () => {
       try {
+        // Fetch Base balances
         const baseBalanceResult = await Service.getCurrentUserBaseBalance();
         if (baseBalanceResult.success) {
           console.log('🔵 Base balances for transfer:', baseBalanceResult);
@@ -72,13 +75,23 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
             balance: baseBalanceResult.balance || '0.000000 ETH'
           });
         }
+
+        // Fetch Hedera balances
+        const hederaBalanceResult = await HederaBalanceService.getCurrentUserBalance();
+        if (hederaBalanceResult.success) {
+          console.log('🔗 Hedera balances for transfer:', hederaBalanceResult);
+          setHederaBalances({
+            usdcBalance: hederaBalanceResult.usdcBalance || '0',
+            hbarBalance: hederaBalanceResult.hbarBalance || '0'
+          });
+        }
       } catch (error) {
-        console.error('Failed to fetch Base balances:', error);
+        console.error('Failed to fetch balances:', error);
       }
     };
 
     if (visible) {
-      fetchBaseBalances();
+      fetchBalances();
       // Aptos balance fetching removed
       setAptosBalances({}); // Set empty balances
     }
@@ -107,6 +120,15 @@ export const TransferConfirmationModal: React.FC<TransferConfirmationModalProps>
       id: 'usdc_base',
       name: 'USDC (Base)',
       balance: parseFloat(baseBalances.usdcBalance || '0'),
+      currency: 'USDC',
+      icon: 'account-balance-wallet',
+      type: 'crypto' as const,
+    },
+    // Include Hedera USDC
+    {
+      id: 'usdc_hedera',
+      name: 'USDC (Hedera)',
+      balance: parseFloat(hederaBalances.usdcBalance || '0'),
       currency: 'USDC',
       icon: 'account-balance-wallet',
       type: 'crypto' as const,

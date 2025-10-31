@@ -7,15 +7,23 @@ import { MerchantDashboard } from './merchant/MerchantDashboard';
 import { MerchantOfferDetail } from './merchant/MerchantOfferDetail';
 import { UserTradesDashboard } from './user/UserTradesDashboard';
 import { PendingTradesScreen } from './merchant/PendingTradesScreen';
+import { MerchantProfileScreen } from './merchant/MerchantProfileScreen';
 import { TradeRoom } from './TradeRoom';
 import { CreateFXOffer } from './CreateFXOffer';
 import fxService from '../../services/fxService';
 import authService from '../../services/authService';
 import { FXOffer, FXTrade } from '../../types/fx';
-import { User } from '../../services/authService';
+import { User, MerchantProfile } from '../../services/authService';
 import { FXTheme } from '../../theme/fxTheme';
 
-export type FXScreen = 'marketplace' | 'offer_detail' | 'trade_room' | 'create_offer' | 'user_trades' | 'pending_trades';
+export type FXScreen =
+  | 'marketplace'
+  | 'offer_detail'
+  | 'trade_room'
+  | 'create_offer'
+  | 'user_trades'
+  | 'pending_trades'
+  | 'merchant_profile';
 
 interface FXContainerProps {
   currentUser: User | null;
@@ -35,6 +43,15 @@ export const FXContainer: React.FC<FXContainerProps> = ({
   const [selectedOffer, setSelectedOffer] = useState<FXOffer | null>(null);
   const [currentTrade, setCurrentTrade] = useState<FXTrade | null>(null);
   const [userActiveTrades, setUserActiveTrades] = useState<FXTrade[]>([]);
+  const [selectedMerchant, setSelectedMerchant] = useState<
+    (Partial<User> & { id?: string; profileUserId?: string; firebaseUid?: string; stats?: MerchantProfile['stats'] }) | null
+  >(null);
+  const [previousScreen, setPreviousScreen] = useState<FXScreen>('marketplace');
+
+  const goToScreen = (nextScreen: FXScreen) => {
+    setPreviousScreen(currentFXScreen);
+    setCurrentFXScreen(nextScreen);
+  };
 
   // Debug logging for user data
   useEffect(() => {
@@ -158,7 +175,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
   // Merchant-specific handlers
   const handleEditOffer = (offer: FXOffer) => {
     setSelectedOffer(offer);
-    setCurrentFXScreen('create_offer'); // Reuse create offer screen for editing
+    goToScreen('create_offer'); // Reuse create offer screen for editing
   };
 
   const handleDeleteOffer = async (offerId: string) => {
@@ -167,6 +184,10 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       // TODO: Implement delete offer API call
       console.log('Deleting offer:', offerId);
       // await fxService.deleteOffer(offerId);
+      setSelectedMerchant(null);
+      setCurrentTrade(null);
+      setSelectedOffer(null);
+      setPreviousScreen('marketplace');
       setCurrentFXScreen('marketplace');
       setSelectedOffer(null);
     } catch (error) {
@@ -229,7 +250,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
                 'One Trade at a Time',
                 `You already have ${activeTrades.length} active trade${activeTrades.length > 1 ? 's' : ''}. Please complete or close your existing trade before starting a new one.\n\nThis ensures better trade completion and user experience.`,
                 [
-                  { text: 'View My Trades', onPress: () => setCurrentFXScreen('user_trades') },
+                  { text: 'View My Trades', onPress: () => goToScreen('user_trades') },
                   { text: 'OK', style: 'cancel' }
                 ]
               );
@@ -256,7 +277,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
         if (response.success && response.trade) {
           console.log('✅ Trade accepted by seller:', response.trade);
           setCurrentTrade(response.trade);
-          setCurrentFXScreen('trade_room');
+          goToScreen('trade_room');
         } else {
           console.error('❌ Failed to accept trade:', response.error);
           Alert.alert('Error', response.error || 'Failed to accept trade');
@@ -579,7 +600,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
       });
       
       setCurrentTrade(tradeForOffer);
-      setCurrentFXScreen('trade_room');
+      goToScreen('trade_room');
     } else {
       console.warn('❌ [FXContainer] No trade context available - cannot navigate to trade room');
     }
@@ -588,7 +609,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
   // Navigation handlers
   const handleOfferSelect = async (offer: FXOffer) => {
     setSelectedOffer(offer);
-    setCurrentFXScreen('offer_detail');
+    goToScreen('offer_detail');
     
     // Check for existing pending trade for this offer
     if (currentUser) {
@@ -629,25 +650,80 @@ export const FXContainer: React.FC<FXContainerProps> = ({
   };
 
   const handleBackToMarketplace = () => {
-    setCurrentFXScreen('marketplace');
     setSelectedOffer(null);
     setCurrentTrade(null);
+    setSelectedMerchant(null);
+    setPreviousScreen('marketplace');
+    setCurrentFXScreen('marketplace');
   };
 
   const handleCreateOffer = () => {
-    setCurrentFXScreen('create_offer');
+    goToScreen('create_offer');
   };
 
   const handleOfferCreated = () => {
+    setSelectedOffer(null);
+    setCurrentTrade(null);
+    setSelectedMerchant(null);
+    setPreviousScreen('marketplace');
     setCurrentFXScreen('marketplace');
   };
 
   const handleViewPendingTrades = () => {
-    setCurrentFXScreen('pending_trades');
+    goToScreen('pending_trades');
   };
 
   const handleViewUserTrades = () => {
-    setCurrentFXScreen('user_trades');
+    goToScreen('user_trades');
+  };
+
+  const handleViewProfile = (merchant?: Partial<User>) => {
+    const merchantData = merchant || currentUser;
+    if (!merchantData?.id) {
+      return;
+    }
+    setSelectedMerchant({
+      ...merchantData,
+      profileUserId: merchantData.profileUserId || merchantData.firebaseUid || merchantData.id,
+      firebaseUid: merchantData.firebaseUid,
+    });
+    goToScreen('merchant_profile');
+  };
+
+  const handleViewMerchantProfile = (merchant: FXOffer['maker']) => {
+    setSelectedMerchant({
+      id: merchant.id,
+      profileUserId: merchant.profileUserId || merchant.firebaseUid,
+      firebaseUid: merchant.firebaseUid,
+      name: merchant.name,
+      avatar: merchant.avatar,
+      email: merchant.email,
+      trustScore: merchant.trustScore,
+      trustBadge: merchant.trustBadge,
+      completedTrades: merchant.completedTrades,
+      responseTime: merchant.responseTime,
+      onlineStatus: merchant.onlineStatus,
+      stats: merchant.stats,
+    });
+    goToScreen('merchant_profile');
+  };
+
+  const handleBackFromProfile = () => {
+    const target = previousScreen || 'marketplace';
+    setCurrentFXScreen(target);
+    if (target === 'marketplace') {
+      setSelectedOffer(null);
+      setCurrentTrade(null);
+    }
+    setSelectedMerchant(null);
+  };
+
+  const handleViewOffersFromProfile = (_merchantId: string) => {
+    setSelectedOffer(null);
+    setCurrentTrade(null);
+    setSelectedMerchant(null);
+    setPreviousScreen('marketplace');
+    setCurrentFXScreen('marketplace');
   };
 
   // FX Screen Navigation Logic
@@ -663,6 +739,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
               onViewPendingTrades={handleViewPendingTrades}
               onBack={onBack}
               currentUser={currentUser}
+              onViewProfile={handleViewProfile}
             />
           );
         } else {
@@ -671,6 +748,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
               onOfferSelect={handleOfferSelect}
               onBack={onBack}
               onViewMyTrades={handleViewUserTrades}
+              onViewMerchantProfile={handleViewMerchantProfile}
               userActiveTrades={userActiveTrades}
             />
           );
@@ -708,7 +786,16 @@ export const FXContainer: React.FC<FXContainerProps> = ({
                 onBack={handleBackToMarketplace}
                 onStartTrade={handleStartTrade}
                 onContactTrader={handleContactTrader}
+                onTradeRoomNavigate={() => {
+                  if (currentTrade) {
+                    goToScreen('trade_room');
+                  } else {
+                    Alert.alert('Trade Room Unavailable', 'You must start a trade before accessing the trade room.');
+                  }
+                }}
                 currentTrade={currentTrade}
+                userActiveTrades={userActiveTrades}
+                onViewMerchantProfile={handleViewMerchantProfile}
               />
             );
           }
@@ -755,7 +842,7 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             onBack={handleBackToMarketplace}
             onTradeSelect={(trade) => {
               setCurrentTrade(trade);
-              setCurrentFXScreen('trade_room');
+              goToScreen('trade_room');
             }}
           />
         );
@@ -766,11 +853,25 @@ export const FXContainer: React.FC<FXContainerProps> = ({
             onBack={handleBackToMarketplace}
             onTradeSelect={(trade) => {
               setCurrentTrade(trade);
-              setCurrentFXScreen('trade_room');
+              goToScreen('trade_room');
             }}
             currentUser={currentUser}
           />
         );
+      case 'merchant_profile': {
+        const merchantForProfile = selectedMerchant || currentUser || null;
+        const isOwnProfileView =
+          !!(merchantForProfile?.id && currentUser?.id && merchantForProfile.id === currentUser.id);
+
+        return (
+          <MerchantProfileScreen
+            merchant={merchantForProfile}
+            isOwnProfile={isOwnProfileView}
+            onBack={handleBackFromProfile}
+            onViewOffers={handleViewOffersFromProfile}
+          />
+        );
+      }
 
       default:
         return null;

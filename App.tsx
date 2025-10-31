@@ -1,9 +1,9 @@
 // Polyfills must be imported first
 import './polyfills';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, TouchableOpacity, ScrollView, Image, TextInput, RefreshControl, Alert } from 'react-native';
+import { View, TouchableOpacity, ScrollView, TextInput, Alert, Linking } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,7 +11,7 @@ import { Button } from './src/components/ui/Button';
 import { Card } from './src/components/ui/Card';
 import { Typography } from './src/components/ui/Typography';
 import { Avatar } from './src/components/ui/Avatar';
-import { Colors, Spacing, BorderRadius } from './src/theme';
+import { Colors, Spacing } from './src/theme';
 import { styles } from './src/styles/appStyles';
 import { ConversationList, Conversation } from './src/components/chat/ConversationList';
 import { ChatScreen } from './src/components/chat/ChatScreen';
@@ -46,7 +46,7 @@ import { GroupCreationErrorHandler, useGroupCreationErrorHandler } from './src/c
 import { LoginScreen } from './src/components/auth/LoginScreen';
 import { OnboardingModal } from './src/components/auth/OnboardingModal';
 import { MarketplaceWebView } from './src/components/webview/MarketplaceWebView';
-import { CreateMomentModal } from './src/components/moments/CreateMomentModal';
+import { MomentsContainer } from './src/components/moments';
 import { QRScannerModal } from './src/components/scanner/QRScannerModal';
 import { AddContactScreen } from './src/components/contacts/AddContactScreen';
 import { GameModal } from './src/components/games/GameModal';
@@ -54,12 +54,12 @@ import { FriendRequestsScreen } from './src/components/friends/FriendRequestsScr
 import { LoadingSpinner } from './src/components/ui/LoadingSpinner';
 import { MainNavigation, TabName } from './src/components/ui/MainNavigation';
 import { LoadingOverlay } from './src/components/ui/LoadingOverlay';
-import { SkeletonContactItem, SkeletonCard } from './src/components/ui/SkeletonLoader';
+import { SkeletonContactItem } from './src/components/ui/SkeletonLoader';
 import Toast from 'react-native-toast-message';
 import { ErrorBoundary } from './src/components/ui/ErrorBoundary';
 import { ErrorMessage, NetworkError, ValidationError, PaymentError } from './src/components/ui/ErrorMessage';
 import { ErrorScreen, NoInternetScreen, ServerErrorScreen } from './src/components/ui/ErrorScreen';
-import { EmptyState, EmptyContacts, EmptyMoments, EmptyChat, EmptyWallet, EmptyProperties, EmptyTransactions, EmptySearch } from './src/components/ui/EmptyState';
+import { EmptyState, EmptyContacts, EmptyChat, EmptyWallet, EmptyProperties, EmptyTransactions, EmptySearch } from './src/components/ui/EmptyState';
 import { ProfileEditScreen } from './src/components/profile/ProfileEditScreen';
 import WalletBalanceManager, { CombinedBalanceData } from './src/components/WalletBalanceManager';
 import { NotificationScreen } from './src/components/notifications/NotificationScreen';
@@ -68,7 +68,6 @@ import { InAppNotification } from './src/components/notifications/InAppNotificat
 import { NotificationProvider, useNotifications } from './src/contexts/NotificationContext';
 import NewsHubScreen from './src/components/news/NewsHubScreen';
 import authService, { User } from './src/services/authService';
-import { communityService, CommunityPost } from './src/services/communityService';
 import profileService from './src/services/profileService';
 import chatService, { createConversationId, createTradeConversationId } from './src/services/chatService';
 import fxService from './src/services/fxService';
@@ -77,6 +76,7 @@ import friendService from './src/services/friendService';
 import emailAuthService from './src/services/emailAuthService';
 import { apiService } from './src/services/api';
 import { contactsService, ContactDiscoveryResult, DiscoveredContact } from './src/services/contactsService';
+import paymentRequestService from './src/services/paymentRequestService';
 import { API_BASE_URL } from './src/config/apiConfig';
 // Firebase Web SDK imports removed - using React Native Firebase only
 // Firebase auth handled via firebaseAuthService.ts
@@ -84,8 +84,10 @@ import firebaseAuthService from './src/services/firebaseAuthService';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { debugGroupAction, printGroupChatDebugSummary } from './src/utils/groupChatDebugHelper';
 import { useMainNavVisibility } from './src/hooks/useMainNavVisibility';
+import { clearAllAppCaches } from './src/utils/cacheUtils';
 
 import { FXOffer, FXTrade } from './src/types/fx';
+import { PaymentRequest } from './src/types';
 
 type MeScreen = 'main' | 'profile' | 'editProfile' | 'settings' | 'invite' | 'setPin' | 'changePassword' | 'walletSettings' | 'privacySettings' | 'blockedUsers' | 'sendFeedback' | 'about' | 'qrCode';
 type WalletScreen = 'main' | 'tokens' | 'properties' | 'lending' | 'marketplace' | 'webview' | 'notifications' | 'notificationSettings' | 'news';
@@ -177,14 +179,14 @@ function App() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [sentRequests, setSentRequests] = useState<any[]>([]);
   const [friends, setFriends] = useState<any[]>([]);
-  const [showDeleteMenu, setShowDeleteMenu] = useState<string | null>(null);
-  const [showP2PSend, setShowP2PSend] = useState(false);
-  const [showLoanRequest, setShowLoanRequest] = useState(false);
+const [showP2PSend, setShowP2PSend] = useState(false);
+const [pendingPaymentRequest, setPendingPaymentRequest] = useState<PaymentRequest | null>(null);
+const [isFetchingPaymentRequest, setIsFetchingPaymentRequest] = useState(false);
+const [showLoanRequest, setShowLoanRequest] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<any>(null);
   const [showCreateFXOffer, setShowCreateFXOffer] = useState(false);
   const [showDepositFlow, setShowDepositFlow] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const [showCreateMoment, setShowCreateMoment] = useState(false);
   const [showGameModal, setShowGameModal] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
 
@@ -196,7 +198,6 @@ function App() {
     handleGroupCreationError,
     handleValidationErrors 
   } = useGroupCreationErrorHandler();
-  const [moments, setMoments] = useState<any[]>([]);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [contactFilter, setContactFilter] = useState<'all' | 'friends'>('all');
@@ -207,8 +208,6 @@ function App() {
   const [loginInitialEmail, setLoginInitialEmail] = useState<string | undefined>(undefined);
   const [loginInitialStep, setLoginInitialStep] = useState<'email' | 'verification' | 'complete'>('email');
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
-  const [isLoadingMoments, setIsLoadingMoments] = useState(false);
-  const [refreshingMoments, setRefreshingMoments] = useState(false);
   
   // Use the custom hook for MainNavigation visibility
   const isMainNavVisible = useMainNavVisibility({
@@ -225,7 +224,6 @@ function App() {
   const [networkError, setNetworkError] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [contactsError, setContactsError] = useState<string | null>(null);
-  const [momentsError, setMomentsError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   // const [hiddenConversations, setHiddenConversations] = useState<string[]>([]); // TODO: Implement hide feature later
   
@@ -259,6 +257,8 @@ function App() {
 
   // Check for existing authentication on app start
   useEffect(() => {
+    // Clear all caches on app start to ensure fresh data
+    clearAllAppCaches();
     checkAuthStatus();
   }, []);
 
@@ -313,169 +313,9 @@ function App() {
       setupFirebaseChat();
     }
   }, [isAuthenticated, currentUser]);
-  // Community posts loading function
-  const loadPosts = async (refresh = false, retryCount = 0) => {
-    console.log('📱 App.loadPosts() called:', { refresh, retryCount, isAuthenticated, currentUserId: currentUser?.id });
-    
-    if (refresh) {
-      console.log('🔄 Setting refresh state...');
-      setRefreshingMoments(true);
-    } else {
-      console.log('🔄 Setting loading state...');
-      setIsLoadingMoments(true);
-    }
-    setMomentsError(null);
-    
-    try {
-      // Add a small delay to prevent rapid consecutive fetch calls
-      if (retryCount === 0) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-      
-      console.log('🔄 Calling communityService.getPosts(1, 20)...');
-      const response = await communityService.getPosts(1, 20);
-      console.log('📥 getPosts response received:', {
-        success: response.success,
-        error: response.error,
-        postsCount: response.data?.posts?.length || 0
-      });
-      
-      if (response.success) {
-        console.log('✅ Posts loaded successfully, formatting for UI...');
-        const formattedPosts = (response.data?.posts || []).map(post => 
-          communityService.formatPostForUI(post, currentUser?.id)
-        );
-        console.log('📝 Formatted posts:', {
-          count: formattedPosts.length,
-          firstPostId: formattedPosts[0]?.id || 'none'
-        });
-        setMoments(formattedPosts);
-      } else {
-        console.log('❌ Failed to load posts:', response.error);
-        
-        // Retry once for authentication-related errors
-        if ((response.error?.includes('token') || response.error?.includes('auth') || response.error?.includes('Access token required')) && retryCount === 0) {
-          console.log('🔄 Retrying due to auth error...');
-          setTimeout(() => loadPosts(refresh, retryCount + 1), 1000);
-          return;
-        }
-        
-        // Don't show error message when refreshing, just silently fail
-        if (!refresh) {
-          setMomentsError(response.error || 'Failed to load posts');
-        }
-      }
-    } catch (error: any) {
-      console.error('❌ Exception in loadPosts:', error);
-      
-      // Create a safe error object to prevent issues with non-Error objects
-      const safeError = error instanceof Error ? error : new Error(String(error));
-      
-      console.error('❌ Exception details:', {
-        message: safeError.message,
-        name: safeError.name
-      });
-      
-      // Retry once for network errors
-      if (retryCount === 0 && (
-        safeError.message?.includes('network') || 
-        safeError.message?.includes('fetch') || 
-        safeError.message?.includes('Failed to fetch')
-      )) {
-        console.log('🔄 Retrying due to network error...');
-        setTimeout(() => loadPosts(refresh, retryCount + 1), 1000);
-        return;
-      }
-      
-      // Don't show error message when refreshing, just silently fail
-      if (!refresh) {
-        setMomentsError('Failed to load posts. Pull down to refresh.');
-      }
-    } finally {
-      console.log('🏁 loadPosts cleanup - setting loading states to false');
-      setIsLoadingMoments(false);
-      setRefreshingMoments(false);
-    }
-  };
-
-  // Load posts when moments tab is active and user is authenticated
-  useEffect(() => {
-    console.log('🔄 Posts loading effect triggered:', {
-      activeTab,
-      isAuthenticated,
-      isCheckingAuth,
-      shouldLoad: activeTab === 'moments' && isAuthenticated && !isCheckingAuth
-    });
-    
-    if (activeTab === 'moments' && isAuthenticated && !isCheckingAuth) {
-      console.log('📡 Loading posts because conditions are met');
-      loadPosts();
-    } else if (activeTab === 'moments' && !isAuthenticated && !isCheckingAuth) {
-      console.log('❌ Cannot load posts - not authenticated');
-      setMomentsError('Authentication required to view moments');
-    }
-  }, [activeTab, isAuthenticated, isCheckingAuth]);
 
   // Navigation visibility conditions tracking removed to reduce frequent logging
 
-  // Moments interaction handlers
-  const handleLike = async (momentId: string) => {
-    try {
-      console.log('👍 handleLike called with momentId:', { momentId, type: typeof momentId });
-      
-      if (!momentId) {
-        console.error('❌ momentId is undefined or null');
-        return;
-      }
-      
-      const response = await communityService.likePost(momentId);
-      console.log('📥 Like response:', { success: response?.success, error: response?.error });
-      
-      if (response && response.success) {
-        setMoments(prev => prev.map(post => 
-          post.id === momentId 
-            ? { ...post, likes: response.data.likes, isLikedByUser: response.data.isLiked }
-            : post
-        ));
-      } else {
-        console.error('❌ Like failed:', response?.error);
-      }
-    } catch (error) {
-      console.error('❌ Failed to like post:', error);
-    }
-  };
-
-  const handleShare = async (momentId: string) => {
-    try {
-      const response = await communityService.sharePost(momentId);
-      if (response.success) {
-        setMoments(prev => prev.map(post => 
-          post.id === momentId 
-            ? { ...post, shares: response.data.shares }
-            : post
-        ));
-      }
-    } catch (error) {
-      console.error('Failed to share post:', error);
-    }
-  };
-
-  const handleDeleteMoment = async (momentId: string) => {
-    try {
-      const response = await communityService.deletePost(momentId);
-      if (response.success) {
-        setMoments(prev => prev.filter(post => post.id !== momentId));
-      }
-    } catch (error) {
-      console.error('Failed to delete post:', error);
-    } finally {
-      setShowDeleteMenu(null);
-    }
-  };
-
-  const handleDeleteMenuToggle = (momentId: string) => {
-    setShowDeleteMenu(showDeleteMenu === momentId ? null : momentId);
-  };
 
   // Helper function to extract other participant ID from chat ID
   const getOtherParticipantId = (chatId: string, currentUserId: string): string | null => {
@@ -631,6 +471,24 @@ function App() {
   const handleBalanceUpdate = (balanceData: CombinedBalanceData) => {
     console.log('💎 Received combined balance update:', balanceData);
     
+    // Check if any wallets exist and are working (not errored)
+    const workingWallets = balanceData.wallets.filter(wallet => !wallet.error && wallet.address);
+    const hasBaseWallet = workingWallets.some(wallet => wallet.chain === 'base');
+    const hasHederaWallet = workingWallets.some(wallet => wallet.chain === 'hedera');
+    const hasAnyWallet = workingWallets.length > 0;
+    
+    console.log('💎 Wallet existence check:', {
+      totalWallets: balanceData.wallets.length,
+      workingWallets: workingWallets.length,
+      hasBaseWallet,
+      hasHederaWallet,
+      hasAnyWallet
+    });
+    
+    // Update wallet existence states based on actual wallet data
+    setHasWallet(hasAnyWallet);
+    setHasAptosWallet(hasAnyWallet); // Legacy state, now represents "has any wallet"
+    
     // Update wallet balance state for UI display
     const combinedBalances: { [key: string]: number } = {};
     let totalUSDCValue = parseFloat(balanceData.totalUSD) || 0;
@@ -651,6 +509,10 @@ function App() {
         if (wallet.ethBalance) {
           combinedBalances['ETH'] = parseFloat(wallet.ethBalance.replace(' ETH', ''));
         }
+      } else if (wallet.chain === 'hedera') {
+        if (wallet.usdcBalance) {
+          combinedBalances['USDC'] = (combinedBalances['USDC'] || 0) + parseFloat(wallet.usdcBalance);
+        }
       }
     });
     
@@ -666,11 +528,16 @@ function App() {
   };
 
   // Ref to trigger balance refresh
-  const walletBalanceManagerRef = React.useRef<{ refreshBalance: () => void } | null>(null);
+  const walletBalanceManagerRef = React.useRef<{ refreshBalance: () => void; forceRefresh: () => void } | null>(null);
   
   // Function to trigger balance refresh (replaces fetchCombinedBalances)
   const fetchCombinedBalances = () => {
     walletBalanceManagerRef.current?.refreshBalance();
+  };
+
+  // Function to force refresh (bypasses rate limiting for manual actions)
+  const forceRefreshBalances = () => {
+    walletBalanceManagerRef.current?.forceRefresh();
   };
 
   // REMOVED: handleCreateWallet function - wallet creation now happens at chain level during deposit
@@ -798,9 +665,6 @@ function App() {
         gender: '',
       });
       
-      // Clear community data
-      setMoments([]);
-      setMomentsError(null);
       
       // Reset all navigation state variables to default values
       console.log('🔧 handleLogout: Resetting all navigation state to defaults');
@@ -853,9 +717,6 @@ function App() {
         case 'contacts':
           setContactsError(message || 'Failed to load contacts');
           break;
-        case 'moments':
-          setMomentsError(message || 'Failed to load moments');
-          break;
         case 'payment':
           setPaymentError(message || 'Payment failed');
           break;
@@ -870,7 +731,6 @@ function App() {
     setNetworkError(false);
     setWalletError(null);
     setContactsError(null);
-    setMomentsError(null);
     setPaymentError(null);
   };
 
@@ -1137,10 +997,6 @@ function App() {
         simulateLoading(setIsLoadingContacts, 1500);
         setTimeout(() => simulateError('contacts'), 1500);
         break;
-      case 'moments':
-        simulateLoading(setIsLoadingMoments, 1200);
-        setTimeout(() => simulateError('moments'), 1200);
-        break;
       case 'wallet':
         simulateLoading(setIsLoadingWallet, 1000);
         setTimeout(() => simulateError('wallet'), 1000);
@@ -1370,7 +1226,7 @@ function App() {
                   <Typography variant="caption" color="textSecondary">Total Portfolio</Typography>
                   {!previewMode && (hasWallet || hasAptosWallet) && (
                     <TouchableOpacity onPress={() => {
-                      fetchCombinedBalances(); // Refetch combined balances
+                      forceRefreshBalances(); // Force refresh for manual user action
                     }} disabled={isLoadingWallet}>
                       <MaterialIcons 
                         name="refresh" 
@@ -1387,8 +1243,8 @@ function App() {
                   Total USDC Balance
                 </Typography>
                 
-                {/* Show empty state only when no balance */}
-                {!previewMode && (!(hasWallet || hasAptosWallet) || Object.keys(walletBalance).length === 0) ? (
+                {/* Show empty state only when no wallet or no balance */}
+                {!previewMode && (!(hasWallet || hasAptosWallet) || (totalPortfolioValue === 0 && Object.keys(walletBalance).length === 0)) ? (
                   <View style={{ marginTop: Spacing.lg, alignItems: 'center' }}>
                     <Typography variant="body2" color="textSecondary" align="center" style={{ marginBottom: Spacing.sm }}>
                       {(hasWallet || hasAptosWallet) ? 'Your wallet is empty' : 'Create a wallet to get started'}
@@ -2120,84 +1976,99 @@ function App() {
   };
 
 
-  const handleCreateMoment = async (content: string, image?: string) => {
-    try {
-      console.log('📝 App.handleCreateMoment() called:', { content, hasImage: !!image, currentUserId: currentUser?.id });
-      
-      setIsLoadingGeneral(true);
-      setGeneralLoadingMessage('Creating moment...');
-      
-      console.log('🔄 Calling communityService.createPost...');
-      const postData = { content };
-      if (image) {
-        console.log('📷 Including image in post data:', {
-          imageSize: image.length,
-          imageType: image.substring(0, 30) + '...',
-          isBase64: image.startsWith('data:')
-        });
-        // For now, we'll include the image in the post data
-        // In a real implementation, you'd upload to Cloudinary first
-        (postData as any).image = image;
-      } else {
-        console.log('📷 No image provided for post');
-      }
-      const response = await communityService.createPost(postData);
-      console.log('📥 Create post response:', {
-        success: response.success,
-        error: response.error,
-        hasData: !!response.data
-      });
-      
-      if (response.success) {
-        console.log('✅ Post created successfully, formatting for UI...');
-        
-        // Debug the complete response structure
-        console.log('🔍 Complete response structure:', JSON.stringify(response, null, 2));
-        
-        // Backend returns { message, post } or just the post directly
-        const postData = response.data;
-        console.log('📝 Raw post data from backend:', {
-          hasPost: !!response.data,
-          postData: postData,
-          postKeys: postData ? Object.keys(postData) : null,
-          authorName: postData?.author?.name || postData?.authorName,
-          hasImage: !!postData?.image,
-          imageSize: postData?.image ? postData.image.length : 0
-        });
-        
-        // Format the new post and add it to the beginning of the list
-        const formattedPost = communityService.formatPostForUI(postData, currentUser?.id);
-        console.log('📝 Formatted post for UI:', {
-          id: formattedPost.id,
-          _id: formattedPost._id,
-          hasId: !!formattedPost.id,
-          authorName: formattedPost.authorName,
-          content: formattedPost.content,
-          hasImage: !!formattedPost.image
-        });
-        console.log('📝 Adding new post to moments list');
-        // Ensure the new post has a unique ID before adding to list
-        if (!formattedPost.id && !formattedPost._id) {
-          formattedPost.id = `temp_${Date.now()}_${Math.random()}`;
-        }
-        setMoments(prev => [formattedPost, ...prev]);
-        
-        console.log('✅ handleCreateMoment completed successfully');
-      } else {
-        console.error('❌ Failed to create post:', response.error);
-        setMomentsError(response.error || 'Failed to create moment');
-        throw new Error(response.error || 'Failed to create moment');
-      }
-    } catch (error: any) {
-      console.error('❌ Error creating moment:', error);
-      setMomentsError('Failed to create moment. Please try again.');
-    } finally {
-      setIsLoadingGeneral(false);
-    }
-  };
 
   const [lastScannedData, setLastScannedData] = useState<string | null>(null);
   const [lastScannedTime, setLastScannedTime] = useState<number>(0);
+
+  const handlePaymentRequestLink = useCallback(async (requestId: string) => {
+    if (!requestId) {
+      return;
+    }
+
+    if (isFetchingPaymentRequest) {
+      console.log('🔗 Payment request fetch already in progress');
+      return;
+    }
+
+    if (pendingPaymentRequest?.id === requestId && showP2PSend) {
+      console.log('🔗 Payment request already open:', requestId);
+      return;
+    }
+
+    console.log('🔗 Fetching payment request:', requestId);
+    setIsFetchingPaymentRequest(true);
+    try {
+      const response = await paymentRequestService.getRequest(requestId);
+
+      if (!response.success || !response.data?.request) {
+        Alert.alert('Payment Request', response.error || 'Unable to open this payment request.');
+        return;
+      }
+
+      const request = response.data.request;
+
+      if (request.status && request.status !== 'pending') {
+        Alert.alert('Payment Request', `This payment request is already ${request.status}.`);
+        return;
+      }
+
+      const hasRequiredWallet = (() => {
+        if (!request.creatorProfile) return false;
+        if (request.network === 'hedera') {
+          return !!request.creatorProfile.hederaAccountId;
+        }
+        const lowerWallets = request.creatorProfile.wallets || [];
+        const baseMatch = lowerWallets.find((wallet) => wallet.chain?.toLowerCase().includes('base'));
+        return !!request.creatorProfile.baseWalletAddress || !!baseMatch;
+      })();
+
+      if (!hasRequiredWallet) {
+        Alert.alert(
+          'Payment Request',
+          'The sender has not configured a wallet for this network yet. You can still view the request details.'
+        );
+      }
+
+      setPendingPaymentRequest(request);
+      setShowP2PSend(true);
+      setActiveTab('wallet');
+    } catch (error) {
+      console.error('Failed to load payment request:', error);
+      Alert.alert('Payment Request', 'Unable to open this payment request. Please try again later.');
+    } finally {
+      setIsFetchingPaymentRequest(false);
+    }
+  }, [isFetchingPaymentRequest, pendingPaymentRequest?.id, showP2PSend]);
+
+  const handleIncomingUrl = useCallback((incomingUrl: string | null) => {
+    if (!incomingUrl) {
+      return;
+    }
+
+    console.log('🔗 Received deep link:', incomingUrl);
+
+    const requestMatch = incomingUrl.match(/ilepay:\/\/(?:app\/)?request\/(.+?)(?:[?/].*)?$/i);
+    if (requestMatch && requestMatch[1]) {
+      handlePaymentRequestLink(requestMatch[1]);
+      return;
+    }
+  }, [handlePaymentRequestLink]);
+
+  useEffect(() => {
+    const urlSubscription = Linking.addEventListener('url', ({ url }) => {
+      handleIncomingUrl(url);
+    });
+
+    Linking.getInitialURL()
+      .then(handleIncomingUrl)
+      .catch((error) => {
+        console.error('Failed to fetch initial URL:', error);
+      });
+
+    return () => {
+      urlSubscription.remove();
+    };
+  }, [handleIncomingUrl]);
 
   const handleQRCodeScanned = async (data: string) => {
     const currentTime = Date.now();
@@ -2294,6 +2165,15 @@ function App() {
         }
       } else if (data.includes('/pay/')) {
         setShowP2PSend(true);
+      } else if (data.includes('/request/')) {
+        const requestSegment = data.replace('ilepay://', '').split('/request/')[1];
+        const requestId = requestSegment ? requestSegment.split(/[?#]/)[0] : null;
+
+        if (requestId) {
+          handlePaymentRequestLink(requestId);
+        } else {
+          Alert.alert('Payment Request', 'Invalid payment request link.');
+        }
       }
     } else {
       // Default action - could be a wallet address
@@ -2301,169 +2181,6 @@ function App() {
     }
   };
 
-  const renderMoments = () => {
-
-    const renderMoment = (moment: any) => {
-      const isOwn = moment.authorId === currentUser?.id;
-      const userName = moment.authorName || moment.userName || 'Unknown User';
-      const userAvatar = moment.avatar || moment.userAvatar;
-      const postTime = moment.time || moment.postTime || 'Unknown time';
-      
-      console.log('🔍 Rendering moment:', {
-        momentId: moment.id,
-        momentIdType: typeof moment.id,
-        authorName: moment.authorName,
-        authorId: moment.authorId,
-        hasId: !!moment.id,
-        hasAuthor: !!moment.author,
-        userName
-      });
-      
-      return (
-        <View key={moment.id || moment._id} style={styles.momentItem}>
-          {/* User header */}
-          <View style={styles.momentUserHeader}>
-            <View style={styles.momentUserInfo}>
-              <Avatar
-                name={userName}
-                userId={moment.authorId}
-                size="medium"
-              />
-              <View style={styles.momentUserDetails}>
-                <Typography variant="h6" style={styles.momentUserName}>{userName}</Typography>
-                <Typography variant="body2" color="textSecondary">{postTime}</Typography>
-              </View>
-            </View>
-            {isOwn && (
-              <View style={styles.momentDeleteContainer}>
-                <TouchableOpacity onPress={() => handleDeleteMenuToggle(moment.id || moment._id)} style={styles.momentDeleteButton}>
-                  <MaterialIcons name="more-vert" size={20} color={Colors.gray600} />
-                </TouchableOpacity>
-                {showDeleteMenu === (moment.id || moment._id) && (
-                  <View style={styles.deleteDropdown}>
-                    <TouchableOpacity onPress={() => handleDeleteMoment(moment.id || moment._id)} style={styles.deleteOption}>
-                      <MaterialIcons name="delete" size={16} color={Colors.error} />
-                      <Typography variant="body2" style={[styles.deleteOptionText, { color: Colors.error }]}>
-                        Delete
-                      </Typography>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-
-          {/* Post content */}
-          <Typography variant="body1" style={styles.momentPostContent}>
-            {moment.content}
-          </Typography>
-
-          {/* Post image */}
-          {moment.image && (
-            <Image source={{ uri: moment.image }} style={styles.momentPostImage} />
-          )}
-
-          {/* Actions */}
-          <View style={styles.momentActions}>
-            <TouchableOpacity 
-              onPress={() => handleLike(moment.id || moment._id)}
-              style={styles.momentActionButton}
-            >
-              <MaterialIcons 
-                name={moment.isLikedByUser || moment.isLiked ? 'favorite' : 'favorite-border'} 
-                size={20} 
-                color={moment.isLikedByUser || moment.isLiked ? Colors.error : Colors.gray600} 
-              />
-              <Typography variant="body2" style={styles.momentActionText}>
-                {moment.likes || 0}
-              </Typography>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              onPress={() => handleShare(moment.id || moment._id)}
-              style={styles.momentActionButton}
-            >
-              <MaterialIcons name="share" size={20} color={Colors.gray600} />
-              <Typography variant="body2" style={styles.momentActionText}>
-                {moment.shares ? `${moment.shares}` : 'Share'}
-              </Typography>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    };
-
-    return (
-      <View style={styles.momentsContainer}>
-        <ScrollView 
-          style={styles.momentsScrollView} 
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshingMoments}
-              onRefresh={() => loadPosts(true)}
-              colors={[Colors.primary]}
-              tintColor={Colors.primary}
-              progressViewOffset={10}
-              progressBackgroundColor={Colors.surface}
-              title="Pull to refresh"
-              titleColor={Colors.secondary}
-            />
-          }
-        >
-          <View style={styles.header}>
-            <Typography variant="h2">Moments</Typography>
-            {!isLoadingMoments && !refreshingMoments && (
-              <Typography variant="caption" color="textSecondary" style={styles.refreshHint}>
-                Pull down to refresh
-              </Typography>
-            )}
-          </View>
-          
-          {momentsError ? (
-            <View style={styles.errorContainer}>
-              <ErrorMessage
-                title="Failed to load moments"
-                message={momentsError}
-                actionLabel="Retry"
-                onAction={() => {
-                  setMomentsError(null);
-                  loadPosts();
-                }}
-                onDismiss={() => setMomentsError(null)}
-              />
-              <Typography variant="caption" color="textSecondary" style={styles.pullToRefreshText}>
-                Pull down to refresh instead
-              </Typography>
-            </View>
-          ) : isLoadingMoments && !refreshingMoments ? (
-            <View>
-              {[1, 2, 3].map((i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </View>
-          ) : moments.length > 0 ? (
-            moments.map((moment) => renderMoment(moment))
-          ) : (
-            <EmptyMoments
-              onCreateMoment={() => setShowCreateMoment(true)}
-            />
-          )}
-          
-          {/* Bottom padding to ensure last moment is visible above FAB */}
-          <View style={{ height: 80 }} />
-        </ScrollView>
-        
-        {/* Floating Action Button */}
-        <TouchableOpacity 
-          onPress={() => setShowCreateMoment(true)}
-          style={styles.fabButton}
-        >
-          <MaterialIcons name="add" size={24} color={Colors.white} />
-        </TouchableOpacity>
-      </View>
-    );
-  };
 
   const renderMe = () => {
     switch (currentMeScreen) {
@@ -2888,7 +2605,19 @@ function App() {
       case 'chat': return renderChat();
       case 'contact': return renderContact();
       case 'wallet': return renderWallet();
-      case 'moments': return renderMoments();
+      case 'moments': return (
+        <MomentsContainer
+          isActive={activeTab === 'moments'}
+          isAuthenticated={isAuthenticated}
+          isCheckingAuth={isCheckingAuth}
+          currentUser={currentUser}
+          onSetGeneralLoading={(message) => {
+            setIsLoadingGeneral(true);
+            setGeneralLoadingMessage(message);
+          }}
+          onClearGeneralLoading={() => setIsLoadingGeneral(false)}
+        />
+      );
       case 'me': return renderMe();
       default: return renderWallet();
     }
@@ -2983,11 +2712,12 @@ function App() {
           autoRefresh={isAuthenticated}
           refreshInterval={60000}
         >
-          {(balanceData, refreshBalance) => {
-            // Expose refresh function via ref
+          {(balanceData, refreshBalance, forceRefresh) => {
+            // Expose refresh functions via ref
             React.useImperativeHandle(walletBalanceManagerRef, () => ({
-              refreshBalance
-            }), [refreshBalance]);
+              refreshBalance,
+              forceRefresh
+            }), [refreshBalance, forceRefresh]);
             
             return null; // This component runs in background
           }}
@@ -2996,16 +2726,22 @@ function App() {
         {/* P2P Send Flow Modal */}
         <P2PSendFlow
           visible={showP2PSend}
-          onClose={() => setShowP2PSend(false)}
+          onClose={() => {
+            setShowP2PSend(false);
+            setPendingPaymentRequest(null);
+          }}
           initialRecipient={selectedContact ? {
             id: selectedContact.id,
             name: selectedContact.name,
             avatar: selectedContact.avatar,
           } : undefined}
           currentUser={currentUser}
+          requestContext={pendingPaymentRequest}
+          onPaymentRequestCompleted={(updatedRequest) => {
+            setPendingPaymentRequest(updatedRequest);
+          }}
           onSendComplete={(amount, token, recipient) => {
             console.log('P2P Send completed:', { amount, token, recipient });
-            setShowP2PSend(false);
           }}
         />
 
@@ -3193,13 +2929,6 @@ function App() {
           />
         )}
 
-        {/* Create Moment Modal */}
-        <CreateMomentModal
-          isVisible={showCreateMoment}
-          onClose={() => setShowCreateMoment(false)}
-          onCreateMoment={handleCreateMoment}
-          currentUser={currentUser}
-        />
 
         {/* QR Scanner Modal */}
         <QRScannerModal
@@ -3272,4 +3001,3 @@ export default function AppWrapper() {
     </QueryClientProvider>
   );
 }
-

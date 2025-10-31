@@ -22,6 +22,7 @@ interface AvatarProps {
 // Global state for avatar cache
 let globalAvatarCache = new Map<string, { name: string; avatar?: string; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const APP_START_TIME = Date.now();
 
 // Function to clear avatar cache (call this when profile is updated)
 export const clearAvatarCache = (userId?: string) => {
@@ -66,25 +67,32 @@ export const Avatar: React.FC<AvatarProps> = ({
       
       console.log('🔍 Avatar loadProfileData called:', { userId, cacheKey, providedName, providedImageUrl });
       
-      // Check cache first
+      // Check cache first (but ignore cache if it's from before app restart)
       const cached = globalAvatarCache.get(cacheKey);
-      if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      if (cached && (now - cached.timestamp) < CACHE_DURATION && cached.timestamp > APP_START_TIME) {
         console.log('📦 Avatar using cached data:', { cacheKey, cached });
         setProfileData({ name: cached.name, avatar: cached.avatar });
         setLoading(false);
         return;
+      } else if (cached && cached.timestamp <= APP_START_TIME) {
+        console.log('🗑️ Avatar cache is stale (from before app restart), refreshing:', { cacheKey });
       }
       
       if (userId) {
         // Load specific user's profile
-        const result = await profileService.getUserProfile(userId);
+        console.log('🔍 Avatar loading profile for userId:', userId);
+        const result = await profileService.getUserProfile(userId, true); // Force refresh
+        console.log('🔍 Avatar profile result:', { success: result.success, profile: result.profile, error: result.error });
         if (result.success && result.profile) {
           const profileData = {
             name: result.profile.name,
             avatar: result.profile.avatar
           };
+          console.log('✅ Avatar setting profile data:', profileData);
           setProfileData(profileData);
           globalAvatarCache.set(cacheKey, { ...profileData, timestamp: now });
+        } else {
+          console.log('❌ Avatar failed to load profile for userId:', userId, 'Error:', result.error);
         }
       } else {
         // Load current user's profile
@@ -116,9 +124,9 @@ export const Avatar: React.FC<AvatarProps> = ({
     }
   };
 
-  // Determine final name and imageUrl to use
-  const finalName = providedName || profileData?.name || 'User';
-  const finalImageUrl = providedImageUrl || profileData?.avatar;
+  // Determine final name and imageUrl to use (prefer freshly loaded profile data)
+  const finalName = profileData?.name || providedName || 'User';
+  const finalImageUrl = profileData?.avatar || providedImageUrl;
   // Handle both preset sizes and custom numeric sizes
   const getAvatarSize = (size: 'small' | 'medium' | 'large' | 'xlarge' | number): number => {
     if (typeof size === 'number') return size;

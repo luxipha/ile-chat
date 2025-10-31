@@ -16,6 +16,8 @@ import { Colors, Spacing, BorderRadius } from '../../theme';
 import { FXTheme } from '../../theme/fxTheme';
 import { FXOffer, FXTrade } from '../../types/fx';
 import authService from '../../services/authService';
+import profileService from '../../services/profileService';
+import { Avatar } from '../ui/Avatar';
 
 interface FXOfferDetailProps {
   offer: FXOffer;
@@ -38,6 +40,8 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
   const [isCurrentUserMerchant, setIsCurrentUserMerchant] = useState(false);
   const [isOwnOffer, setIsOwnOffer] = useState(false);
   const [debugMode, setDebugMode] = useState(__DEV__); // Enable debug mode in development
+  const [makerProfile, setMakerProfile] = useState<{ name?: string; avatar?: string; email?: string } | null>(null);
+  const makerProfileId = offer.maker.profileUserId || offer.maker.firebaseUid || offer.maker.id;
 
   // Debug: Handle message icon click with rich logging (inside component scope)
   const handleContactTraderPress = () => {
@@ -86,6 +90,40 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
 
     detectUserRole();
   }, [offer.maker.id]);
+
+  useEffect(() => {
+    const loadMakerProfile = async () => {
+      if (!makerProfileId) {
+        setMakerProfile({
+          name: offer.maker.name,
+          avatar: offer.maker.avatar,
+          email: (offer.maker as any)?.email,
+        });
+        return;
+      }
+      try {
+        const result = await profileService.getUserProfile(makerProfileId, true);
+        if (result.success && result.profile) {
+          setMakerProfile({
+            name: result.profile.name,
+            avatar: result.profile.avatar,
+            email: result.profile.email,
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('⚠️ [FXOfferDetail] Failed to load maker profile info:', error);
+      }
+
+      setMakerProfile({
+        name: offer.maker.name,
+        avatar: offer.maker.avatar,
+        email: (offer.maker as any)?.email,
+      });
+    };
+
+    loadMakerProfile();
+  }, [makerProfileId, offer.maker.name, offer.maker.avatar]);
 
   const calculateReceiveAmount = (sellAmount: number) => {
     return Math.round(sellAmount * offer.exchangeRate);
@@ -503,50 +541,55 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
     </View>
   );
 
-  const renderProfileTab = () => (
-    <View>
-      <Card style={FXTheme.cards.section}>
-        <Typography variant="h6" style={FXTheme.text.bold}>Trader Profile</Typography>
-        <View style={FXTheme.layouts.column}>
-          <View style={FXTheme.layouts.row}>
-            <View style={[
-              {
-                position: 'relative',
-                width: 80,
-                height: 80,
-                borderRadius: BorderRadius.full,
-                backgroundColor: Colors.primary + '20',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: Spacing.lg,
-              }
-            ]}>
-              <Typography variant="h4" style={FXTheme.text.bold}>
-                {offer.maker.name.substring(0, 2).toUpperCase()}
-              </Typography>
-              <View style={[
-                {
-                  position: 'absolute',
-                  bottom: 4,
-                  right: 4,
-                  width: 16,
-                  height: 16,
-                  borderRadius: BorderRadius.full,
-                  borderWidth: 3,
-                  borderColor: Colors.background,
-                  backgroundColor: offer.maker.onlineStatus === 'online' ? Colors.success : 
-                                 offer.maker.onlineStatus === 'away' ? Colors.warning : Colors.gray400
-                }
-              ]} />
-            </View>
-            <View style={FXTheme.layouts.column}>
+  const renderProfileTab = () => {
+    const makerName = makerProfile?.name || offer.maker.name;
+    const makerAvatar = makerProfile?.avatar || offer.maker.avatar;
+    const makerEmail = makerProfile?.email || (offer.maker as any)?.email;
+
+    return (
+      <View>
+        <Card style={FXTheme.cards.section}>
+          <Typography variant="h6" style={FXTheme.text.bold}>Trader Profile</Typography>
+          <View style={FXTheme.layouts.column}>
+            <View style={FXTheme.layouts.row}>
+              <View style={{ marginRight: Spacing.lg }}>
+                <Avatar
+                  userId={makerProfileId}
+                  name={makerName}
+                  imageUrl={makerAvatar}
+                  size={80}
+                  disableAutoLoad={!!makerProfile?.avatar}
+                />
+                <View
+                  style={{
+                    position: 'absolute',
+                    bottom: 4,
+                    right: 4,
+                    width: 16,
+                    height: 16,
+                    borderRadius: BorderRadius.full,
+                    borderWidth: 3,
+                    borderColor: Colors.background,
+                    backgroundColor:
+                      offer.maker.onlineStatus === 'online'
+                        ? Colors.success
+                        : offer.maker.onlineStatus === 'away'
+                          ? Colors.warning
+                          : Colors.gray400,
+                  }}
+                />
+              </View>
               <View style={FXTheme.layouts.column}>
                 <Typography variant="h5" style={FXTheme.text.bold}>
-                  {offer.maker.name}
+                  {makerName}
                 </Typography>
+                {makerEmail && (
+                  <Typography variant="body2" color="textSecondary" style={{ marginTop: Spacing.xs }}>
+                    {makerEmail}
+                  </Typography>
+                )}
                 <View style={FXTheme.layouts.rowGap}>
                   {renderTrustBadge(offer.maker.trustBadge)}
-                  {/* Show merchant badge if user is a merchant */}
                   <View style={FXTheme.badges.method}>
                     <MaterialIcons name="store" size={16} color={Colors.primary} />
                     <Typography variant="caption" style={FXTheme.payment.methodText}>
@@ -557,65 +600,75 @@ export const FXOfferDetail: React.FC<FXOfferDetailProps> = ({
               </View>
             </View>
           </View>
-        </View>
 
-        <View style={FXTheme.stats.grid}>
-          <View style={FXTheme.stats.item}>
-            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Trust Score
-            </Typography>
-            <Typography variant="body1" style={FXTheme.stats.value}>
-              {offer.maker.trustScore}%
-            </Typography>
+          <View style={FXTheme.stats.grid}>
+            <View style={FXTheme.stats.item}>
+              <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
+                Trust Score
+              </Typography>
+              <Typography variant="body1" style={FXTheme.stats.value}>
+                {offer.maker.trustScore}%
+              </Typography>
+            </View>
+            <View style={FXTheme.stats.item}>
+              <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
+                Completed Trades
+              </Typography>
+              <Typography variant="body1" style={FXTheme.stats.value}>
+                {offer.maker.completedTrades}
+              </Typography>
+            </View>
+            <View style={FXTheme.stats.item}>
+              <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
+                Response Time
+              </Typography>
+              <Typography variant="body1" style={FXTheme.stats.value}>
+                {offer.maker.responseTime}
+              </Typography>
+            </View>
+            <View style={FXTheme.stats.item}>
+              <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
+                Online Status
+              </Typography>
+              <Typography variant="body1" style={FXTheme.stats.value}>
+                {offer.maker.onlineStatus}
+              </Typography>
+            </View>
           </View>
-          <View style={FXTheme.stats.item}>
-            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Completed Trades
-            </Typography>
-            <Typography variant="body1" style={FXTheme.stats.value}>
-              {offer.maker.completedTrades}
-            </Typography>
-          </View>
-          <View style={FXTheme.stats.item}>
-            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Response Time
-            </Typography>
-            <Typography variant="body1" style={FXTheme.stats.value}>
-              {offer.maker.responseTime}
-            </Typography>
-          </View>
-          <View style={FXTheme.stats.item}>
-            <Typography variant="caption" color="textSecondary" style={FXTheme.stats.label}>
-              Online Status
-            </Typography>
-            <Typography variant="body1" style={FXTheme.stats.value}>
-              {offer.maker.onlineStatus}
-            </Typography>
-          </View>
-        </View>
 
-        {/* Show new merchant banner if they have less than 10 trades */}
-        {offer.maker.completedTrades < 10 && (
-          <View style={[FXTheme.layouts.row, { 
-            backgroundColor: Colors.info + '10', 
-            paddingHorizontal: Spacing.md, 
-            paddingVertical: Spacing.sm, 
-            borderRadius: BorderRadius.md, 
-            marginTop: Spacing.md 
-          }]}>
-            <MaterialIcons name="info" size={16} color={Colors.info} />
-            <Typography variant="caption" style={[FXTheme.spacing.marginHorizontal('sm'), { 
-              flex: 1, 
-              color: Colors.info, 
-              fontWeight: '500' 
-            }]}>
-              New merchant - Trade with caution and start with smaller amounts
-            </Typography>
-          </View>
-        )}
-      </Card>
-    </View>
-  );
+          {offer.maker.completedTrades < 10 && (
+            <View
+              style={[
+                FXTheme.layouts.row,
+                {
+                  backgroundColor: Colors.info + '10',
+                  paddingHorizontal: Spacing.md,
+                  paddingVertical: Spacing.sm,
+                  borderRadius: BorderRadius.md,
+                  marginTop: Spacing.md,
+                },
+              ]}
+            >
+              <MaterialIcons name="info" size={16} color={Colors.info} />
+              <Typography
+                variant="caption"
+                style={[
+                  FXTheme.spacing.marginHorizontal('sm'),
+                  {
+                    flex: 1,
+                    color: Colors.info,
+                    fontWeight: '500',
+                  },
+                ]}
+              >
+                New merchant - Trade with caution and start with smaller amounts
+              </Typography>
+            </View>
+          )}
+        </Card>
+      </View>
+    );
+  };
 
   return (
     <View style={FXTheme.containers.screen}>

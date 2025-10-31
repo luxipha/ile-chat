@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, DimensionValue } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, DimensionValue, Alert, Linking } from 'react-native';
 import { ChatTheme, ChatSpacing, ChatSizes } from '../../theme/chatTheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from '../ui/Avatar';
 import { PaymentMessageBubble, PaymentMessageData } from './PaymentMessageBubble';
+import { PaymentRequestBubble } from './PaymentRequestBubble';
 import StickerMessage from './StickerMessage';
 import { StickerData } from '../../types/sticker';
 import { ImageMessage } from './ImageMessage';
@@ -21,7 +22,7 @@ export interface Message {
   senderName?: string; // Firebase UID for API calls
   senderDisplayName?: string; // Display name for UI
   senderAvatar?: string;
-  type?: 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location'; // No change needed here, just for context
+  type?: 'text' | 'payment' | 'payment_request' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location'; // No change needed here, just for context
   imageUrl?: string; // For image messages
   isDoodle?: boolean; // Flag for doodle images
   audioUrl?: string; // For audio messages
@@ -30,8 +31,20 @@ export interface Message {
   paymentData?: {
     amount: number;
     currency: string;
-    status: 'pending' | 'completed' | 'failed';
+    status: 'pending' | 'completed' | 'failed' | 'received';
     note?: string;
+  };
+  paymentRequest?: {
+    requestId: string;
+    amount: number;
+    currency: string;
+    note?: string;
+    status: 'pending' | 'paid' | 'expired' | 'cancelled';
+    deepLink: string;
+    creatorId?: string;
+    expiresAt?: string;
+    paidAt?: string;
+    network?: 'base' | 'hedera' | 'ethereum';
   };
   attachmentData?: {
     type: 'camera' | 'gallery' | 'document';
@@ -101,13 +114,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       case 'payment':
         if (!message.paymentData) return null;
         
+        let paymentStatus: PaymentMessageData['status'] = 'sending';
+        switch (message.paymentData.status) {
+          case 'pending':
+            paymentStatus = 'sending';
+            break;
+          case 'completed':
+            paymentStatus = 'completed';
+            break;
+          case 'failed':
+            paymentStatus = 'failed';
+            break;
+          case 'received':
+            paymentStatus = 'received';
+            break;
+          default:
+            paymentStatus = 'sending';
+        }
+
         const paymentData: PaymentMessageData = {
           amount: message.paymentData.amount,
           currency: message.paymentData.currency,
-          status: message.paymentData.status === 'pending' ? 'sending' : 
-                 message.paymentData.status === 'completed' ? 'completed' : 'failed',
-          senderName: message.isOwn ? undefined : message.senderName,
-          recipientName: message.isOwn ? 'Recipient' : undefined,
+          status: paymentStatus,
+          senderName: message.isOwn ? undefined : (message.paymentData.senderName || message.senderDisplayName),
+          recipientName: message.isOwn ? (message.paymentData.recipientName || 'Recipient') : undefined,
           note: message.paymentData.note,
           transactionId: message.id,
         };
@@ -121,6 +151,59 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               // Handle payment message press - could show transaction details
               console.log('Payment message pressed:', message.id);
             }}
+          />
+        );
+      
+      case 'payment_request':
+        if (!message.paymentRequest) return null;
+
+        return (
+          <PaymentRequestBubble
+            requestId={message.paymentRequest.requestId}
+            amount={message.paymentRequest.amount}
+            currency={message.paymentRequest.currency}
+            status={message.paymentRequest.status}
+            isOwn={message.isOwn}
+            timestamp={message.timestamp}
+            onPay={async (requestId) => {
+              const deepLink = message.paymentRequest?.deepLink || `ilepay://request/${requestId}`;
+              try {
+                const canOpen = await Linking.canOpenURL(deepLink);
+                if (canOpen) {
+                  await Linking.openURL(deepLink);
+                } else {
+                  Alert.alert(
+                    'Unable to open',
+                    'Install the ilePay app or use a supported device to process this request.'
+                  );
+                }
+              } catch (error) {
+                if (__DEV__) {
+                  console.warn('Failed to open payment request deep link:', error);
+                }
+                Alert.alert('Unable to open link', 'Please try again later.');
+              }
+            }}
+            onViewDetails={async (requestId) => {
+              const deepLink = message.paymentRequest?.deepLink || `ilepay://request/${requestId}`;
+              try {
+                const canOpen = await Linking.canOpenURL(deepLink);
+                if (canOpen) {
+                  await Linking.openURL(deepLink);
+                } else {
+                  Alert.alert(
+                    'Unable to open',
+                    'Install the ilePay app or use a supported device to view this request.'
+                  );
+                }
+              } catch (error) {
+                if (__DEV__) {
+                  console.warn('Failed to open payment request deep link:', error);
+                }
+                Alert.alert('Unable to open link', 'Please try again later.');
+              }
+            }}
+            network={message.paymentRequest.network}
           />
         );
       
@@ -351,6 +434,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     );
   }
 
+  // Payment request messages are rendered as standalone components
+  if (message.type === 'payment_request') {
+    return (
+      <View style={[
+        styles.container,
+        message.isOwn ? styles.ownContainer : styles.otherContainer
+      ]}>
+        {renderMessageContent()}
+      </View>
+    );
+  }
+
   // Sticker messages are rendered as standalone components
   if (message.type === 'sticker') {
     return (
@@ -414,8 +509,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <Avatar
               userId={message.senderName}
               name={message.senderDisplayName || message.senderName || 'User'}
+              imageUrl={message.senderAvatar}
               size="small"
-              
+              disableAutoLoad={!!(message.senderDisplayName && message.senderAvatar)}
             />
           </TouchableOpacity>
         )}

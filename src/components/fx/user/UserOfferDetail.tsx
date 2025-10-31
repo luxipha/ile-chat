@@ -16,6 +16,8 @@ import { Colors, Spacing, BorderRadius } from '../../../theme';
 import { FXTheme } from '../../../theme/fxTheme';
 import { FXOffer, FXTrade } from '../../../types/fx';
 import authService from '../../../services/authService';
+import profileService from '../../../services/profileService';
+import { Avatar } from '../../ui/Avatar';
 
 interface UserOfferDetailProps {
   offer: FXOffer;
@@ -25,6 +27,7 @@ interface UserOfferDetailProps {
   onTradeRoomNavigate?: () => void;
   currentTrade?: FXTrade | null;
   userActiveTrades?: FXTrade[];
+  onViewMerchantProfile?: (merchant: FXOffer['maker']) => void;
 }
 
 export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
@@ -35,14 +38,22 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
   onTradeRoomNavigate,
   currentTrade,
   userActiveTrades = [],
+  onViewMerchantProfile,
 }) => {
   const [tradeAmount, setTradeAmount] = useState('');
   const [activeTab, setActiveTab] = useState<'details' | 'terms' | 'profile' | 'reviews'>('details');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showCalculator, setShowCalculator] = useState(true);
+  const [makerProfile, setMakerProfile] = useState<{ name?: string; avatar?: string; email?: string } | null>(null);
+  const makerProfileLookupId = offer.maker.profileUserId || offer.maker.firebaseUid || offer.maker.id;
   useEffect(() => {
     loadCurrentUser();
+    loadMakerProfile();
   }, []);
+
+  useEffect(() => {
+    loadMakerProfile();
+  }, [makerProfileLookupId]);
 
   const loadCurrentUser = async () => {
     try {
@@ -51,6 +62,35 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
     } catch (error) {
       console.error('Failed to load current user:', error);
     }
+  };
+
+  const loadMakerProfile = async () => {
+    if (!makerProfileLookupId) {
+      setMakerProfile({
+        name: offer.maker.name,
+        avatar: offer.maker.avatar,
+      });
+      return;
+    }
+
+    try {
+      const result = await profileService.getUserProfile(makerProfileLookupId, true);
+      if (result.success && result.profile) {
+        setMakerProfile({
+          name: result.profile.name,
+          avatar: result.profile.avatar,
+          email: result.profile.email,
+        });
+        return;
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to load maker profile info:', error);
+    }
+
+    setMakerProfile({
+      name: offer.maker.name,
+      avatar: offer.maker.avatar,
+    });
   };
 
   const calculateReceiveAmount = (sellAmount: number) => {
@@ -119,6 +159,20 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
           </Typography>
         </View>
         <View style={FXTheme.layouts.rowGap}>
+          {onViewMerchantProfile && (
+            <TouchableOpacity
+              onPress={() => onViewMerchantProfile(offer.maker)}
+              style={{
+                padding: Spacing.sm,
+                borderRadius: BorderRadius.md,
+                backgroundColor: Colors.primary + '15',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialIcons name="account-circle" size={24} color={Colors.primary} />
+            </TouchableOpacity>
+          )}
           {hasActiveTrades && onTradeRoomNavigate && (
             <TouchableOpacity 
               onPress={onTradeRoomNavigate} 
@@ -483,43 +537,51 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
     </View>
   );
 
+  const makerDisplayName = makerProfile?.name || offer.maker.name;
+  const makerAvatar = makerProfile?.avatar;
+  const makerEmail = makerProfile?.email;
+
   const renderProfileTab = () => (
     <View>
       <Card style={FXTheme.cards.section}>
         <Typography variant="h6" style={FXTheme.text.bold}>Trader Profile</Typography>
         <View style={FXTheme.layouts.column}>
           <View style={FXTheme.layouts.row}>
-            <View style={{
-                position: 'relative',
-                width: 80,
-                height: 80,
-                borderRadius: BorderRadius.full,
-                backgroundColor: Colors.primary + '20',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: Spacing.lg,
-              }}>
-              <Typography variant="h4" style={FXTheme.text.bold}>
-                {offer.maker.name.substring(0, 2).toUpperCase()}
-              </Typography>
-              <View style={{
-                  position: 'absolute',
-                  bottom: 4,
-                  right: 4,
-                  width: 16,
-                  height: 16,
-                  borderRadius: BorderRadius.full,
-                  borderWidth: 3,
-                  borderColor: Colors.background,
-                  backgroundColor: offer.maker.onlineStatus === 'online' ? Colors.success : 
-                                 offer.maker.onlineStatus === 'away' ? Colors.warning : Colors.gray400
-                }} />
-            </View>
+            {onViewMerchantProfile ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => onViewMerchantProfile(offer.maker)}
+                style={{ marginRight: Spacing.lg }}
+              >
+                <Avatar
+                  userId={makerProfileLookupId}
+                  name={makerDisplayName}
+                  imageUrl={makerAvatar}
+                  size="large"
+                  disableAutoLoad={!!makerAvatar}
+                  style={{ marginRight: Spacing.lg }}
+                />
+              </TouchableOpacity>
+            ) : (
+                <Avatar
+                  userId={makerProfileLookupId}
+                  name={makerDisplayName}
+                  imageUrl={makerAvatar}
+                  size="large"
+                  disableAutoLoad={!!makerAvatar}
+                  style={{ marginRight: Spacing.lg }}
+              />
+            )}
             <View style={FXTheme.layouts.column}>
               <View style={FXTheme.layouts.column}>
                 <Typography variant="h5" style={FXTheme.text.bold}>
-                  {offer.maker.name}
+                  {makerDisplayName}
                 </Typography>
+                {makerEmail && (
+                  <Typography variant="body2" color="textSecondary" style={{ marginTop: Spacing.xs }}>
+                    {makerEmail}
+                  </Typography>
+                )}
                 <View style={FXTheme.layouts.rowGap}>
                   {renderTrustBadge(offer.maker.trustBadge)}
                   <View style={FXTheme.badges.method}>
@@ -588,6 +650,13 @@ export const UserOfferDetail: React.FC<UserOfferDetailProps> = ({
           </View>
         )}
       </Card>
+      {onViewMerchantProfile && (
+        <Button
+          title="View Full Profile"
+          onPress={() => onViewMerchantProfile(offer.maker)}
+          style={{ marginTop: Spacing.lg }}
+        />
+      )}
     </View>
   );
 

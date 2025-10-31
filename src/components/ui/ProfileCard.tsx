@@ -96,8 +96,9 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             <Avatar
               userId={userId}
               name={name}
+              imageUrl={profilePicture}
               size="large"
-              
+              disableAutoLoad={!!profilePicture && !!userId}
             />
             <View style={styles.trustBadgeOverlay}>
               <Typography variant="caption" style={styles.trustBadgeText}>

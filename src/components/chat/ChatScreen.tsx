@@ -10,6 +10,7 @@ import {
   Alert,
   Dimensions
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MessageBubble, Message } from './MessageBubble';
@@ -30,6 +31,7 @@ import authService from '../../services/authService';
 // aptosService removed - using Circle/Hedera instead
 import baseService from '../../services/baseService';
 import profileService from '../../services/profileService';
+import { apiService } from '../../services/api';
 import { audioService } from '../../services/audioService';
 import { locationService, LocationData } from '../../services/locationService';
 import { LocationShareModal } from './LocationShareModal';
@@ -77,7 +79,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNote, setTransferNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string; baseAddress?: string } | null>(null);
+  const [selectedUser, setSelectedUser] = useState<{ name: string; avatar?: string; id: string; aptosAddress?: string; baseAddress?: string; hederaAccountId?: string } | null>(null);
   const [showChatActions, setShowChatActions] = useState(false);
   const [showComposerActions, setShowComposerActions] = useState(false);
   const [actionPanelMode, setActionPanelMode] = useState<'actions' | 'stickers'>('actions');
@@ -158,7 +160,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       senderName: chatMessage.user._id, // Use Firebase UID for API calls
       senderDisplayName: displayName, // Resolved display name for UI
       senderAvatar: chatMessage.user.avatar,
-      type: (chatMessage.type || 'text') as 'text' | 'payment' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location',
+      type: (chatMessage.type || 'text') as 'text' | 'payment' | 'payment_request' | 'attachment' | 'loan_request' | 'loan_funded' | 'loan_offer' | 'loan_repayment' | 'sticker' | 'image' | 'audio' | 'location',
       imageUrl: chatMessage.imageUrl, // Add imageUrl for image messages
       audioUrl: chatMessage.audioUrl, // Add audioUrl for audio messages
       audioDuration: chatMessage.audioDuration, // Add audioDuration for audio messages
@@ -166,8 +168,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       paymentData: chatMessage.paymentData ? {
         amount: chatMessage.paymentData.amount,
         currency: chatMessage.paymentData.currency,
-        status: chatMessage.paymentData.status as 'pending' | 'completed' | 'failed',
+        status: chatMessage.paymentData.status as 'pending' | 'completed' | 'failed' | 'received',
         note: chatMessage.paymentData.note,
+      } : undefined,
+      paymentRequest: chatMessage.paymentRequest ? {
+        requestId: chatMessage.paymentRequest.requestId,
+        amount: chatMessage.paymentRequest.amount,
+        currency: chatMessage.paymentRequest.currency,
+        note: chatMessage.paymentRequest.note,
+        status: chatMessage.paymentRequest.status as 'pending' | 'paid' | 'expired' | 'cancelled',
+        deepLink: chatMessage.paymentRequest.deepLink,
+        creatorId: chatMessage.paymentRequest.creatorId,
+        expiresAt: chatMessage.paymentRequest.expiresAt,
+        paidAt: chatMessage.paymentRequest.paidAt,
+        network: chatMessage.paymentRequest.network as 'base' | 'hedera' | 'ethereum' | undefined,
       } : undefined,
       stickerData: chatMessage.stickerData,
     };
@@ -743,6 +757,41 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         if (!recipientAddress || recipientAddress === 'placeholder_address') {
           throw new Error('Recipient Base address not available. Please ensure the recipient has a Base wallet set up.');
         }
+      } else if (walletId === 'usdc_hedera') {
+        // For Hedera transfers, use Hedera account ID
+        recipientAddress = selectedUser.hederaAccountId;
+        
+        console.log('🔗 Hedera transfer attempt:', {
+          selectedUserId: selectedUser.id,
+          selectedUserName: selectedUser.name,
+          hederaAccountId: selectedUser.hederaAccountId,
+          walletId: walletId
+        });
+        
+        // If hederaAccountId is not available, try to fetch fresh profile data
+        if (!recipientAddress || recipientAddress === 'placeholder_address') {
+          console.log('🔄 Hedera account ID not available, fetching fresh profile data...');
+          
+          try {
+            const freshProfile = await profileService.getUserProfile(selectedUser.id, true);
+            if (freshProfile.success && freshProfile.profile?.hederaAccountId) {
+              recipientAddress = freshProfile.profile.hederaAccountId;
+              console.log('✅ Found Hedera account ID in fresh profile:', recipientAddress);
+              
+              // Update selectedUser with fresh data
+              setSelectedUser(prev => prev ? {
+                ...prev,
+                hederaAccountId: freshProfile.profile?.hederaAccountId
+              } : null);
+            }
+          } catch (profileError) {
+            console.error('❌ Failed to fetch fresh profile:', profileError);
+          }
+        }
+        
+        if (!recipientAddress || recipientAddress === 'placeholder_address') {
+          throw new Error('Recipient Hedera account not available. Please ensure the recipient has a Hedera wallet set up.');
+        }
       } else {
         // For Aptos transfers, use Aptos address
         recipientAddress = selectedUser.aptosAddress || selectedUser.id;
@@ -766,8 +815,45 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           transactionHash: transactionResult.transactionHash,
           allKeys: Object.keys(transactionResult)
         });
+      } else if (walletId === 'usdc_hedera') {
+        // Hedera USDC transfer support
+        console.log('🔗 ChatScreen: Processing Hedera USDC transfer:', {
+          recipientAddress,
+          cryptoAmount,
+          walletId
+        });
+        
+        // Call the Hedera transfer API
+        const token = await AsyncStorage.getItem('authToken');
+        if (!token) {
+          throw new Error('No auth token available for Hedera transfer');
+        }
+        
+        const transferResult = await apiService.post('/api/hedera/transfer-usdc', {
+          toAddress: recipientAddress,
+          amount: cryptoAmount,
+          memo: `Payment via chat to ${selectedUser.name}`
+        }, token);
+        
+        if (transferResult.success) {
+          transactionResult = {
+            success: true,
+            hash: (transferResult.data as any)?.transactionId || 'unknown',
+            transactionId: (transferResult.data as any)?.transactionId || 'unknown'
+          };
+        } else {
+          throw new Error(transferResult.error || 'Hedera USDC transfer failed');
+        }
+        
+        currency = 'USDC (Hedera)';
+        
+        console.log('🔗 Hedera transaction result:', {
+          success: transactionResult.success,
+          hash: transactionResult.hash,
+          transactionId: transactionResult.transactionId
+        });
       } else {
-        throw new Error('Unsupported wallet type');
+        throw new Error(`Unsupported wallet type: ${walletId}`);
       }
 
       if (!transactionResult.success) {

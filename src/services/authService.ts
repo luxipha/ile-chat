@@ -67,6 +67,8 @@ export interface User {
   avatar?: string; // Adding avatar property
   role?: 'user' | 'merchant' | 'admin';
   trustScore?: number; // Added trustScore property
+  firebaseUid?: string;
+  profileUserId?: string;
   merchantProfile?: MerchantProfile;
   createdAt?: string; // User registration/creation date
 }

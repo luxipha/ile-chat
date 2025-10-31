@@ -10,11 +10,16 @@ import {
   Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { Typography } from '../ui/Typography';
 import { Button } from '../ui/Button';
 import { ErrorMessage, ValidationError } from '../ui/ErrorMessage';
 import { LoadingOverlay } from '../ui/LoadingOverlay';
 import { Colors, Spacing, BorderRadius } from '../../theme';
+import { apiClient } from '../../services/api';
+import { SimpleCameraScreen } from '../chat/SimpleCameraScreen';
+import { styles } from '../../styles/appStyles';
+import authService from '../../services/authService';
 
 interface ProfileEditScreenProps {
   onBack: () => void;
@@ -65,8 +70,10 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
 
   // Validation functions
   const validateEmail = (email: string): boolean => {
@@ -187,21 +194,193 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
     }
   };
 
+  // Request permissions for camera and media library
+  const requestPermissions = async () => {
+    try {
+      const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+      const { status: mediaStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (cameraStatus !== 'granted' || mediaStatus !== 'granted') {
+        Alert.alert(
+          'Permissions Required',
+          'Camera and photo library access are required to upload profile pictures.',
+          [{ text: 'OK' }]
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Permission request failed:', error);
+      return false;
+    }
+  };
+
+  // Upload profile picture to backend
+  const uploadProfilePicture = async (imageAsset: ImagePicker.ImagePickerAsset) => {
+    try {
+      setIsUploadingAvatar(true);
+      console.log('📸 [ProfileEdit] Starting profile picture upload...', {
+        uri: imageAsset.uri,
+        type: imageAsset.type,
+        fileName: imageAsset.fileName
+      });
+
+      // Create FormData for file upload
+      const formData = new FormData();
+      
+      // Create file object for upload
+      const file = {
+        uri: imageAsset.uri,
+        type: imageAsset.mimeType || 'image/jpeg',
+        name: imageAsset.fileName || `profile_${Date.now()}.jpg`,
+      } as any;
+
+      formData.append('image', file);
+
+      console.log('📤 [ProfileEdit] Uploading to /api/firebase-auth/upload-image...');
+      
+      // Upload to backend using existing endpoint
+      const response = await apiClient.post('/api/firebase-auth/upload-image', formData);
+
+      if (response.success && (response.data as any)?.imageUrl) {
+        console.log('✅ [ProfileEdit] Upload successful:', (response.data as any).imageUrl);
+        
+        const imageUrl = (response.data as any).imageUrl;
+        
+        // Update profile state with new avatar URL
+        handleInputChange('avatar', imageUrl);
+        
+        // Also immediately save the avatar to the user's profile
+        try {
+          const currentUser = await authService.getCachedUser();
+          if (currentUser?.id) {
+            const profileUpdateResponse = await apiClient.put(`/api/users/profile/${currentUser.id}`, {
+              avatar: imageUrl
+            });
+            
+            if (profileUpdateResponse.success) {
+              console.log('✅ [ProfileEdit] Profile avatar updated in database');
+              Alert.alert('Success', 'Profile picture updated successfully!');
+            } else {
+              console.error('❌ [ProfileEdit] Failed to update profile:', profileUpdateResponse.error);
+              Alert.alert('Warning', 'Image uploaded but failed to save to profile. Please save your profile manually.');
+            }
+          } else {
+            console.error('❌ [ProfileEdit] Failed to get current user');
+            Alert.alert('Warning', 'Image uploaded but failed to save to profile. Please save your profile manually.');
+          }
+        } catch (error) {
+          console.error('❌ [ProfileEdit] Error updating profile:', error);
+          Alert.alert('Warning', 'Image uploaded but failed to save to profile. Please save your profile manually.');
+        }
+      } else {
+        throw new Error(response.error || 'Upload failed');
+      }
+
+    } catch (error) {
+      console.error('❌ [ProfileEdit] Upload failed:', error);
+      
+      setErrors(prev => ({ 
+        ...prev, 
+        avatar: error instanceof Error ? error.message : 'Failed to upload profile picture' 
+      }));
+      
+      Alert.alert(
+        'Upload Failed', 
+        'Failed to upload profile picture. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // Launch camera to take photo using SimpleCameraScreen
+  const takePhotoWithCamera = async () => {
+    try {
+      console.log('📷 [ProfileEdit] Opening camera screen...');
+      setShowCamera(true);
+    } catch (error) {
+      console.error('❌ [ProfileEdit] Camera error:', error);
+      Alert.alert('Camera Error', 'Failed to access camera. Please try again.');
+    }
+  };
+
+  // Handle photo taken from camera
+  const handlePhotoTaken = async (uri: string) => {
+    try {
+      console.log('📸 [ProfileEdit] Photo taken from camera:', uri);
+      setShowCamera(false);
+      
+      // Convert URI to ImagePickerAsset format for uploadProfilePicture
+      const imageAsset = {
+        uri,
+        type: 'image',
+        fileName: `profile_${Date.now()}.jpg`,
+        mimeType: 'image/jpeg'
+      } as any;
+      
+      await uploadProfilePicture(imageAsset);
+    } catch (error) {
+      console.error('❌ [ProfileEdit] Error handling photo:', error);
+      Alert.alert('Error', 'Failed to process photo. Please try again.');
+    }
+  };
+
+  // Pick image from gallery
+  const pickImageFromGallery = async () => {
+    try {
+      const hasPermissions = await requestPermissions();
+      if (!hasPermissions) return;
+
+      console.log('🖼️ [ProfileEdit] Opening gallery...');
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        exif: false,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        console.log('🖼️ [ProfileEdit] Image selected:', result.assets[0].uri);
+        await uploadProfilePicture(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('❌ [ProfileEdit] Gallery error:', error);
+      Alert.alert('Gallery Error', 'Failed to access photo library. Please try again.');
+    }
+  };
+
   const handleAvatarPress = () => {
+    if (isUploadingAvatar) {
+      Alert.alert('Upload in Progress', 'Please wait for the current upload to complete.');
+      return;
+    }
+
     Alert.alert(
       'Change Profile Picture',
       'Choose an option',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Camera', onPress: () => {
-          // TODO: Implement camera functionality
-          Alert.alert('Camera', 'Camera functionality not yet implemented');
-        }},
-        { text: 'Gallery', onPress: () => {
-          // TODO: Implement gallery functionality  
-          Alert.alert('Gallery', 'Gallery functionality not yet implemented');
-        }},
-        { text: 'Remove', style: 'destructive', onPress: () => handleInputChange('avatar', '') },
+        { 
+          text: 'Camera', 
+          onPress: takePhotoWithCamera
+        },
+        { 
+          text: 'Gallery', 
+          onPress: pickImageFromGallery
+        },
+        { 
+          text: 'Remove', 
+          style: 'destructive', 
+          onPress: () => {
+            handleInputChange('avatar', '');
+            // Clear any avatar-related errors
+            setErrors(prev => ({ ...prev, avatar: undefined }));
+          }
+        },
       ]
     );
   };
@@ -209,13 +388,13 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
   const genderOptions = ['Male', 'Female', 'Other'];
 
   return (
-    <View style={styles.container}>
+    <View style={styles.profileEditContainer}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+      <View style={styles.profileEditHeader}>
+        <TouchableOpacity onPress={handleBack} style={styles.profileEditBackButton}>
           <MaterialIcons name="arrow-back" size={24} color={Colors.gray900} />
         </TouchableOpacity>
-        <Typography variant="h6" style={styles.headerTitle}>
+        <Typography variant="h6" style={styles.profileEditHeaderTitle}>
           Edit Profile
         </Typography>
         <Button
@@ -223,11 +402,11 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           onPress={handleSave}
           disabled={!hasUnsavedChanges || isSaving}
           size="sm"
-          style={styles.saveButton}
+          style={styles.profileEditSaveButton}
         />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.profileEditContent} showsVerticalScrollIndicator={false}>
         {/* General Error */}
         {errors.general && (
           <ErrorMessage
@@ -238,33 +417,61 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
         )}
 
         {/* Avatar Section */}
-        <View style={styles.avatarSection}>
-          <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarContainer}>
+        <View style={styles.profileEditAvatarSection}>
+          <TouchableOpacity 
+            onPress={handleAvatarPress} 
+            style={styles.profileEditAvatarContainer}
+            disabled={isUploadingAvatar}
+          >
             {profile.avatar ? (
-              <Image source={{ uri: profile.avatar }} style={styles.avatar} />
+              <Image source={{ uri: profile.avatar }} style={styles.profileEditAvatar} />
             ) : (
-              <View style={styles.avatarPlaceholder}>
+              <View style={styles.profileEditAvatarPlaceholder}>
                 <MaterialIcons name="person" size={40} color={Colors.gray400} />
               </View>
             )}
-            <View style={styles.avatarEditIcon}>
-              <MaterialIcons name="edit" size={16} color={Colors.white} />
+            
+            {/* Upload overlay */}
+            {isUploadingAvatar && (
+              <View style={styles.profileEditUploadOverlay}>
+                <View style={styles.profileEditUploadSpinner}>
+                  <Typography variant="caption" style={styles.profileEditUploadText}>
+                    Uploading...
+                  </Typography>
+                </View>
+              </View>
+            )}
+            
+            <View style={[styles.profileEditAvatarEditIcon, isUploadingAvatar && styles.profileEditAvatarEditIconDisabled]}>
+              <MaterialIcons 
+                name={isUploadingAvatar ? "hourglass-empty" : "edit"} 
+                size={16} 
+                color={Colors.white} 
+              />
             </View>
           </TouchableOpacity>
-          <Typography variant="body2" color="textSecondary" style={styles.avatarHint}>
-            Tap to change profile picture
+          
+          <Typography variant="body2" color="textSecondary" style={styles.profileEditAvatarHint}>
+            {isUploadingAvatar ? 'Uploading profile picture...' : 'Tap to change profile picture'}
           </Typography>
+          
+          {/* Avatar Error Message */}
+          {errors.avatar && (
+            <View style={styles.profileEditAvatarError}>
+              <ValidationError message={errors.avatar} />
+            </View>
+          )}
         </View>
 
         {/* Form Fields */}
-        <View style={styles.form}>
+        <View style={styles.profileEditForm}>
           {/* Name Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Full Name *
             </Typography>
             <TextInput
-              style={[styles.input, errors.name && styles.inputError]}
+              style={[styles.profileEditInput, errors.name && styles.profileEditInputError]}
               value={profile.name}
               onChangeText={(value) => handleInputChange('name', value)}
               placeholder="Enter your full name"
@@ -275,12 +482,12 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Email Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Email Address *
             </Typography>
             <TextInput
-              style={[styles.input, errors.email && styles.inputError]}
+              style={[styles.profileEditInput, errors.email && styles.profileEditInputError]}
               value={profile.email}
               onChangeText={(value) => handleInputChange('email', value)}
               placeholder="Enter your email address"
@@ -293,12 +500,12 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Phone Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Phone Number
             </Typography>
             <TextInput
-              style={[styles.input, errors.phone && styles.inputError]}
+              style={[styles.profileEditInput, errors.phone && styles.profileEditInputError]}
               value={profile.phone}
               onChangeText={(value) => handleInputChange('phone', value)}
               placeholder="Enter your phone number"
@@ -309,15 +516,15 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Gender Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Gender
             </Typography>
             <TouchableOpacity
-              style={styles.pickerInput}
+              style={styles.profileEditPickerInput}
               onPress={() => setShowGenderPicker(true)}
             >
-              <Typography variant="body1" style={profile.gender ? styles.inputText : styles.placeholderText}>
+              <Typography variant="body1" style={profile.gender ? styles.profileEditInputText : styles.profileEditPlaceholderText}>
                 {profile.gender || 'Select gender'}
               </Typography>
               <MaterialIcons name="expand-more" size={24} color={Colors.gray400} />
@@ -325,12 +532,12 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Date of Birth Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Date of Birth
             </Typography>
             <TextInput
-              style={[styles.input, errors.dateOfBirth && styles.inputError]}
+              style={[styles.profileEditInput, errors.dateOfBirth && styles.profileEditInputError]}
               value={profile.dateOfBirth}
               onChangeText={(value) => handleInputChange('dateOfBirth', value)}
               placeholder="YYYY-MM-DD"
@@ -341,12 +548,12 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Location Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Location
             </Typography>
             <TextInput
-              style={[styles.input, errors.location && styles.inputError]}
+              style={[styles.profileEditInput, errors.location && styles.profileEditInputError]}
               value={profile.location}
               onChangeText={(value) => handleInputChange('location', value)}
               placeholder="Enter your location"
@@ -357,12 +564,12 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
           </View>
 
           {/* Bio Field */}
-          <View style={styles.field}>
-            <Typography variant="h6" style={styles.label}>
+          <View style={styles.profileEditField}>
+            <Typography variant="h6" style={styles.profileEditLabel}>
               Bio
             </Typography>
             <TextInput
-              style={[styles.textArea, errors.bio && styles.inputError]}
+              style={[styles.profileEditTextArea, errors.bio && styles.profileEditInputError]}
               value={profile.bio}
               onChangeText={(value) => handleInputChange('bio', value)}
               placeholder="Tell us about yourself..."
@@ -372,7 +579,7 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
               textAlignVertical="top"
               maxLength={200}
             />
-            <View style={styles.charCount}>
+            <View style={styles.profileEditCharCount}>
               <Typography variant="caption" color="textSecondary">
                 {profile.bio.length}/200
               </Typography>
@@ -388,9 +595,9 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
         transparent={true}
         animationType="slide"
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
+        <View style={styles.profileEditModalOverlay}>
+          <View style={styles.profileEditModalContent}>
+            <View style={styles.profileEditModalHeader}>
               <Typography variant="h6">Select Gender</Typography>
               <TouchableOpacity onPress={() => setShowGenderPicker(false)}>
                 <MaterialIcons name="close" size={24} color={Colors.gray600} />
@@ -399,13 +606,13 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
             {genderOptions.map((option) => (
               <TouchableOpacity
                 key={option}
-                style={styles.modalOption}
+                style={styles.profileEditModalOption}
                 onPress={() => {
                   handleInputChange('gender', option);
                   setShowGenderPicker(false);
                 }}
               >
-                <Typography variant="body1" style={styles.modalOptionText}>
+                <Typography variant="body1" style={styles.profileEditModalOptionText}>
                   {option}
                 </Typography>
                 {profile.gender === option && (
@@ -419,163 +626,17 @@ export const ProfileEditScreen: React.FC<ProfileEditScreenProps> = ({
 
       {/* Loading Overlay */}
       <LoadingOverlay
-        visible={isSaving}
-        message="Saving profile..."
+        visible={isSaving || isUploadingAvatar}
+        message={isUploadingAvatar ? "Uploading profile picture..." : "Saving profile..."}
+      />
+
+      {/* Camera Screen */}
+      <SimpleCameraScreen
+        visible={showCamera}
+        onClose={() => setShowCamera(false)}
+        onPhotoTaken={handlePhotoTaken}
       />
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray300,
-  },
-  backButton: {
-    padding: Spacing.sm,
-    marginLeft: -Spacing.sm,
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  saveButton: {
-    paddingHorizontal: Spacing.md,
-  },
-  content: {
-    flex: 1,
-  },
-  avatarSection: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
-    backgroundColor: Colors.surface,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: Spacing.sm,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.gray200,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarEditIcon: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.white,
-  },
-  avatarHint: {
-    textAlign: 'center',
-  },
-  form: {
-    padding: Spacing.lg,
-    gap: Spacing.lg,
-  },
-  field: {
-    gap: Spacing.sm,
-  },
-  label: {
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    fontSize: 16,
-    color: Colors.gray900,
-    backgroundColor: Colors.white,
-  },
-  inputError: {
-    borderColor: Colors.error,
-  },
-  inputText: {
-    color: Colors.gray900,
-  },
-  placeholderText: {
-    color: Colors.gray400,
-  },
-  textArea: {
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    fontSize: 16,
-    color: Colors.gray900,
-    backgroundColor: Colors.white,
-    height: 100,
-  },
-  charCount: {
-    alignItems: 'flex-end',
-    marginTop: 4,
-  },
-  pickerInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: Colors.gray300,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.white,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: BorderRadius.lg,
-    borderTopRightRadius: BorderRadius.lg,
-    paddingBottom: Spacing.xl,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: Spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.gray300,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
-  modalOptionText: {
-    flex: 1,
-  },
-});

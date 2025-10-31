@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   FlatList,
-  Image,
   Alert,
   Modal,
   ActivityIndicator,
@@ -22,6 +21,7 @@ import { FXTheme, FXColors } from '../../../theme/fxTheme';
 import { FXOffer, FXFilter, Currency, PaymentMethod, FXTrade } from '../../../types/fx';
 import fxService, { FXDebugUtils } from '../../../services/fxService';
 import authService from '../../../services/authService';
+import { Avatar } from '../../ui/Avatar';
 
 interface UserMarketplaceProps {
   onOfferSelect: (offer: FXOffer) => void;
@@ -29,6 +29,7 @@ interface UserMarketplaceProps {
   onTradeRoomNavigate?: (offerId: string) => void;
   userActiveTrades?: FXTrade[];
   onViewMyTrades?: () => void;
+  onViewMerchantProfile?: (merchant: FXOffer['maker']) => void;
 }
 
 // Enhanced filter interface for users
@@ -92,6 +93,7 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   onTradeRoomNavigate,
   userActiveTrades = [],
   onViewMyTrades,
+  onViewMerchantProfile,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -287,26 +289,43 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
 
   const renderOfferCard = ({ item: offer }: { item: FXOffer }) => {
     const activeTrade = getActiveTradeForOffer(offer.id);
+    const rawTrustScore =
+      typeof offer.maker.trustScore === 'number' ? offer.maker.trustScore : 0;
+    const trustScoreDisplay =
+      rawTrustScore > 1 ? Math.round(rawTrustScore) : Math.round(rawTrustScore * 100);
+    const handleMerchantPress = () => {
+      onViewMerchantProfile?.(offer.maker);
+    };
     
     return (
       <Card style={[FXTheme.cards.base, { padding: Spacing.lg }]}>
         {/* Header with user info and timestamp */}
         <View style={[FXTheme.layouts.rowBetween, { marginBottom: Spacing.md }]}>
-          <View style={FXTheme.layouts.row}>
-            <View style={[
-              {
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: Colors.gray200,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: Spacing.sm,
-              }
-            ]}>
-              <Typography variant="body1" style={{ color: Colors.gray600, fontWeight: 'bold' }}>
-                {offer.maker.name.substring(0, 2).toUpperCase()}
-              </Typography>
+          <TouchableOpacity style={FXTheme.layouts.row} activeOpacity={0.8} onPress={handleMerchantPress}>
+            <View style={{ marginRight: Spacing.sm }}>
+              <View style={{ position: 'relative' }}>
+                <Avatar
+                  userId={offer.maker.profileUserId || offer.maker.firebaseUid || offer.maker.id}
+                  name={offer.maker.name}
+                  imageUrl={offer.maker.avatar}
+                  size={40}
+                />
+                {offer.maker.onlineStatus === 'online' && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      bottom: -2,
+                      right: -2,
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: Colors.success,
+                      borderWidth: 2,
+                      borderColor: Colors.white,
+                    }}
+                  />
+                )}
+              </View>
             </View>
             <View style={FXTheme.layouts.column}>
               <View style={FXTheme.layouts.row}>
@@ -316,22 +335,10 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
                 <MaterialIcons name="star" size={16} color={Colors.warning} />
               </View>
               <Typography variant="caption" color="textSecondary">
-                {offer.maker.completedTrades} trades • {Math.round(offer.maker.trustScore * 100)}% trust
+                {offer.maker.completedTrades} trades • {trustScoreDisplay}% trust
               </Typography>
             </View>
-            {offer.maker.onlineStatus === 'online' && (
-              <View style={[
-                {
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: Colors.success,
-                  marginLeft: Spacing.xs,
-                  marginTop: 4,
-                }
-              ]} />
-            )}
-          </View>
+          </TouchableOpacity>
           <Typography variant="caption" color="textSecondary">
             5m ago
           </Typography>

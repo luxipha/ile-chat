@@ -79,3 +79,44 @@ export interface ApiResponse<T> {
 }
 
 export * from './news';
+
+export interface PaymentRequestUserProfile {
+  id: string;
+  name?: string;
+  email?: string;
+  baseWalletAddress?: string;
+  baseNetwork?: string;
+  hederaAccountId?: string;
+  hederaNetwork?: string;
+  wallets?: Array<{
+    chain: string;
+    address: string;
+    walletType?: string;
+  }>;
+}
+
+export interface PaymentRequest {
+  id: string;
+  amount: number;
+  currency: string;
+  network?: 'base' | 'hedera' | 'ethereum';
+  note?: string;
+  status: 'pending' | 'paid' | 'expired' | 'cancelled';
+  creatorId?: string;
+  recipientId?: string | null;
+  createdAt?: string;
+  expiresAt?: string;
+  paidAt?: string;
+  transactionId?: string | null;
+  deepLink: string;
+  qrData: string;
+  isCreator?: boolean;
+  isRecipient?: boolean;
+  creatorProfile?: PaymentRequestUserProfile | null;
+  recipientProfile?: PaymentRequestUserProfile | null;
+  messages?: Array<{
+    conversationId: string;
+    messageId: string;
+    linkedAt?: string;
+  }>;
+}

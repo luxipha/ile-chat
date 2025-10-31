@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   FlatList,
-  Image,
   Alert,
   Modal,
   ActivityIndicator,
@@ -20,7 +19,8 @@ import { Colors, Spacing, BorderRadius } from '../../../theme';
 import { FXTheme, FXColors } from '../../../theme/fxTheme';
 import { FXOffer, FXFilter, Currency, PaymentMethod, FXTrade } from '../../../types/fx';
 import fxService, { FXDebugUtils } from '../../../services/fxService';
-import authService from '../../../services/authService';
+import authService, { User } from '../../../services/authService';
+import { Avatar } from '../../ui/Avatar';
 
 interface MerchantDashboardProps {
   onOfferSelect: (offer: FXOffer) => void;
@@ -31,6 +31,7 @@ interface MerchantDashboardProps {
   onDeleteOffer?: (offerId: string) => void;
   onToggleOfferStatus?: (offerId: string, status: 'active' | 'paused') => void;
   currentUser?: any; // Add currentUser prop
+  onViewProfile?: (merchant: User) => void;
 }
 
 // Mock data - same as FXMarketplace for now
@@ -87,6 +88,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
   onDeleteOffer,
   onToggleOfferStatus,
   currentUser: propCurrentUser,
+  onViewProfile,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FXFilter>({
@@ -103,6 +105,7 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
   const [loadingPendingTrades, setLoadingPendingTrades] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const displayUser = currentUser || propCurrentUser;
 
   // Load current user
   useEffect(() => {
@@ -117,7 +120,15 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
           hasMerchantProfile: !!user?.merchantProfile,
           source: propCurrentUser ? 'props' : 'authService'
         });
-        setCurrentUser(user);
+        if (user) {
+          setCurrentUser({
+            ...user,
+            profileUserId: user.profileUserId || user.firebaseUid || user.id,
+            firebaseUid: user.firebaseUid,
+          });
+        } else {
+          setCurrentUser(null);
+        }
       } catch (error) {
         console.error('Failed to load user:', error);
       }
@@ -654,6 +665,25 @@ export const MerchantDashboard: React.FC<MerchantDashboardProps> = ({
           </Typography>
         </View>
         <View style={FXTheme.layouts.rowGap}>
+          {displayUser && (
+            <TouchableOpacity
+              style={styles.profileButton}
+              onPress={() => {
+                if (onViewProfile) {
+                  onViewProfile(displayUser as User);
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Avatar
+                userId={displayUser.profileUserId || displayUser.firebaseUid || displayUser.id}
+                name={displayUser.name}
+                imageUrl={displayUser.avatar}
+                size={40}
+                style={styles.profileAvatar}
+              />
+            </TouchableOpacity>
+          )}
           {/* Pending Trades Icon with Counter */}
           <TouchableOpacity 
             style={styles.pendingTradesButton}
@@ -769,5 +799,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     lineHeight: 12,
+  },
+  profileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  profileAvatar: {
+    width: 40,
+    height: 40,
   },
 });

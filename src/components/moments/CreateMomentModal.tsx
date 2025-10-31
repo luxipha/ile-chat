@@ -215,7 +215,7 @@ export const CreateMomentModal: React.FC<CreateMomentModalProps> = ({
             <TextInput
               style={[
                 styles.textInput,
-                { minHeight: 120, textAlignVertical: 'top' },
+                { minHeight: Spacing.xl * 5, textAlignVertical: 'top' },
                 contentError && styles.inputError
               ]}
               onChangeText={handleContentChange}
@@ -334,14 +334,14 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontWeight: '600',
-    marginBottom: 2,
+    marginBottom: Spacing.xs / 2,
   },
   inputContainer: {
     marginBottom: Spacing.lg,
   },
   textInput: {
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: Spacing.lg,
+    lineHeight: Spacing.lg * 1.5,
     color: Colors.textPrimary,
     paddingVertical: Spacing.md,
   },
@@ -370,10 +370,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Spacing.sm,
     right: Spacing.sm,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    width: Spacing.xl,
+    height: Spacing.xl,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.overlay,
     alignItems: 'center',
     justifyContent: 'center',
   },

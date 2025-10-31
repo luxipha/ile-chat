@@ -100,6 +100,18 @@ export interface ChatMessage {
     receipt?: string;
     method?: string;
   };
+  paymentRequest?: {
+    requestId: string;
+    amount: number;
+    currency: string;
+    note?: string;
+    status: string;
+    deepLink: string;
+    creatorId?: string;
+    expiresAt?: string;
+    paidAt?: string;
+    network?: string;
+  };
   stickerData?: StickerData;
   disputeData?: {
     reason: string;
@@ -204,6 +216,7 @@ const chatService = {
           
           // Generate a display name using user lookup
           let displayName = 'Chat';
+          let avatarUrl = data.avatar;
           if (data.type === 'direct' && otherParticipantId) {
             // Validate user ID format before making API call
             const isValidUserId = otherParticipantId.length >= 12 && /^[a-zA-Z0-9]+$/.test(otherParticipantId);
@@ -216,6 +229,7 @@ const chatService = {
                   success: profileResult.success,
                   hasProfile: !!profileResult.profile,
                   profileName: profileResult.profile?.name,
+                  profileAvatar: profileResult.profile?.avatar,
                   conversationId: doc.id
                 });
                 
@@ -224,6 +238,10 @@ const chatService = {
                 } else {
                   // Enhanced fallback logic
                   displayName = `User ${otherParticipantId.slice(-6)}`;
+                }
+
+                if (profileResult.success && profileResult.profile?.avatar) {
+                  avatarUrl = profileResult.profile.avatar;
                 }
               } catch (error) {
                 console.error('Failed to get user profile for chat:', {
@@ -252,8 +270,9 @@ const chatService = {
             timestamp: data.lastMessage?.createdAt?.toDate() || new Date(),
             unreadCount: 0, // This needs to be calculated
             isGroup: data.type === 'group' || false,
-            avatar: data.avatar,
+            avatar: avatarUrl,
             isOnline: false,
+            profileUserId: data.type === 'direct' ? otherParticipantId : undefined,
           } as Conversation;
         })
       );
@@ -320,7 +339,7 @@ const chatService = {
     recipientId?: string,
     messageType: string = 'text',
     metadata?: any
-  ) => {
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> => {
     console.log('💬 ChatService: Sending message...', {
       conversationId,
       messageType,
@@ -346,6 +365,8 @@ const chatService = {
       ...metadata, // Include payment data, etc.
     };
 
+    let messageId: string | undefined;
+
     try {
       // Add the message to the messages subcollection
       const messagesRef = messagesCollection(conversationId);
@@ -356,9 +377,10 @@ const chatService = {
       });
       
       const messageDoc = await messagesRef.add(messageData);
+      messageId = messageDoc.id;
       
       console.log('✅ ChatService: Message sent successfully:', {
-        messageId: messageDoc.id,
+        messageId,
         conversationId,
         messageType
       });
@@ -435,6 +457,11 @@ const chatService = {
         throw error; // Re-throw other errors
       }
     }
+
+    return {
+      success: true,
+      messageId,
+    };
   },
 
   /**
@@ -559,6 +586,18 @@ const chatService = {
             width: data.stickerData.width,
             height: data.stickerData.height,
             title: data.stickerData.title,
+          } : undefined,
+          paymentRequest: data.paymentRequest ? {
+            requestId: data.paymentRequest.requestId,
+            amount: data.paymentRequest.amount,
+            currency: data.paymentRequest.currency || 'USDC',
+            note: data.paymentRequest.note,
+            status: data.paymentRequest.status || 'pending',
+            deepLink: data.paymentRequest.deepLink,
+            creatorId: data.paymentRequest.creatorId,
+            expiresAt: data.paymentRequest.expiresAt,
+            paidAt: data.paymentRequest.paidAt,
+            network: data.paymentRequest.network,
           } : undefined,
           disputeData: data.disputeData ? {
             reason: data.disputeData.reason,
