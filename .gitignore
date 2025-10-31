@@ -49,3 +49,9 @@ openjdk.jdk
 .yaml
 *.md
 ile-africa-c799f20428c7.json
+*.md
+firestore.rules
+metro.config.js
+package-lock.json
+package.json
+!README.md
